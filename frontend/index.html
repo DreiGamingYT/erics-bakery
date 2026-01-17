@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Eric's Bakery — Inventory Prototype</title>
+
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="./favicon.ico" sizes="any">
+  <link rel="icon" href="./favicon.png" type="image/png">
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+  <div id="splash" class="splash" aria-hidden="false">
+    <div class="splash-inner">
+      <img id="splashImg" src="./logo.jpg" alt="splash logo" />
+      <div class="splash-text">ERIC'S BAKERY</div>
+    </div>
+  </div>
+
+  <div id="landingOverlay" class="landing-overlay hidden" aria-hidden="true">
+    <div class="landing-split">
+      <aside class="landing-visual" role="complementary">
+        <div class="visual-inner">
+          <img class="visual-logo" src="./hero.png" alt="brand logo" />
+          <img class="visual-hero" src="./logo.jpg" alt="hero art" />
+          <div class="visual-caption">
+            <h1>ERIC'S BAKERY</h1>
+            <p class="muted">Friendly inventory tracking for small Filipino bakeries.</p>
+          </div>
+        </div>
+      </aside>
+
+      <main class="landing-forms" role="main">
+        <div class="forms-inner">
+          <div class="auth-card" id="authCard">
+            <div id="overlayLogin" class="auth-panel">
+              <div class="auth-head">
+                <div class="auth-title">
+                  <h2>Sign in</h2>
+                  <div class="small muted">Welcome back — enter your credentials</div>
+                </div>
+              </div>
+
+              <form class="auth-form" id="loginForm" onsubmit="return false;">
+                <label class="field"><span class="field-label">Username</span><input id="overlay-username" name="username" type="text" placeholder="your username" autocomplete="username" /></label>
+                <label class="field"><span class="field-label">Password</span><input id="overlay-password" name="password" type="password" placeholder="••••••••" autocomplete="current-password" /></label>
+
+                <label class="field row" style="gap:8px;align-items:center;flex-direction:row">
+                  <input id="rememberMe" name="remember" type="checkbox" />
+                  <span class="field-label" style="font-weight:600;color:rgba(255,255,255,0.92);padding: 10px 0px 8px">Remember me</span>
+                </label>
+
+                <div class="form-actions">
+                  <button id="overlaySignInBtn" type="button" class="btn primary large">SIGN IN</button>
+                </div>
+
+                <div class="auth-foot">
+                  <div class="muted small">Don't have an account yet?</div>
+                  <button id="overlayToSignup" type="button" class="btn ghost small">Create an account</button>
+                </div>
+              </form>
+            </div>
+
+            <div id="overlaySignup" class="auth-panel hidden">
+              <div class="auth-head">
+                <div class="auth-title">
+                  <h2>Create account</h2>
+                  <div class="small muted">Choose your role and register</div>
+                </div>
+              </div>
+
+              <form class="auth-form" id="signupForm" onsubmit="return false;">
+                <label class="field"><span class="field-label">Username</span><input id="overlay-su-username" name="su-username" type="text" placeholder="pick a username" autocomplete="username" /></label>
+                <label class="field"><span class="field-label">Password</span><input id="overlay-su-password" name="su-password" type="password" placeholder="create password" autocomplete="new-password" /></label>
+                <label class="field"><span class="field-label">Position</span><select id="overlay-su-role" name="su-role" class="select"><option>Owner</option><option>Baker</option><option>Cashier</option><option>Assistant</option></select></label>
+
+                <div class="form-actions">
+                  <button id="overlaySignUpBtn" type="button" class="btn primary large">CREATE ACCOUNT</button>
+                </div>
+
+                <div class="auth-foot">
+                  <div class="muted small">Already have an account?</div>
+                  <button id="overlayBackToLogin" type="button" class="btn ghost small">Back to Sign In</button>
+                </div>
+              </form>
+            </div>
+
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div id="app" class="hidden" aria-hidden="true">
+    <header class="topbar">
+      <div class="left-topbar">
+        <button id="hamburger" class="hamburger" aria-label="Toggle menu" type="button"><i class="fa fa-bars"></i></button>
+        <div class="brand">
+          <img src="./logo.jpg" alt="Eric's Bakery logo" class="logo-mini-img" loading="lazy" />
+          <div class="brand-text"><div class="brand-name">Eric's Bakery</div><div id="sidebarUser" class="muted small"></div></div>
+        </div>
+      </div>
+
+      <div class="top-center">
+        <div class="top-search">
+          <input id="topSearch" placeholder="Search products, ingredients, activity..." />
+        </div>
+      </div>
+
+      <div class="top-right">
+        <div class="top-meta">
+          <button id="dateBtn" class="meta-btn" type="button"><i class="fa fa-calendar-days"></i> <span id="dateText">—</span></button>
+          <button id="timeBtn" class="meta-btn" type="button"><i class="fa fa-clock"></i> <span id="timeText">—</span></button>
+          <div id="userMenuWrap" style="position:relative;">
+          <div id="userBadge" class="user-badge" tabindex="0" aria-haspopup="true" aria-expanded="false">
+            <span id="userBadgeText"></span>
+            <i class="fa fa-caret-down" style="margin-left:8px;font-size:12px"></i>
+          </div>
+
+          <div id="userMenu" class="user-menu hidden" role="menu" aria-hidden="true">
+            <div class="user-menu-inner">
+              <div class="user-menu-top">
+                <div class="user-menu-name" id="userMenuName"></div>
+                <div class="user-menu-role muted small" id="userMenuRole"></div>
+              </div>
+              <div class="user-menu-actions">
+                <button id="userMenuProfile" type="button" class="menu-item">Profile</button>
+                <button id="userMenuLogout" type="button" class="menu-item">Logout</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        </div>
+
+        <div id="pageActions" class="page-actions" aria-live="polite"></div>
+
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside id="sidebar" class="sidebar" role="navigation" aria-label="Main navigation">
+        <div class="sidebar-header">
+          <div class="sidebar-logo">
+            <img src="./logo.jpg" class="sidebar-logo-img" loading="lazy" />
+            <strong>Eric's Bakery</strong>
+          </div>
+        </div>
+
+        <nav class="nav" id="sideNav">
+          <button class="nav-item" data-view="dashboard" type="button"><i class="fa fa-chart-pie"></i><span>Dashboard</span></button>
+          <button class="nav-item" data-view="inventory" type="button"><i class="fa fa-boxes-stacked"></i><span>Inventory</span></button>
+          <button class="nav-item" data-view="reports" type="button"><i class="fa fa-chart-bar"></i><span>Reports</span></button>
+          <button class="nav-item" data-view="activity" type="button"><i class="fa fa-clock-rotate-left"></i><span>Activity</span></button>
+          <button class="nav-item" data-view="calendar" type="button"><i class="fa fa-calendar"></i><span>Calendar</span></button>
+          <button class="nav-item" data-view="profile" type="button"><i class="fa fa-user"></i><span>Profile</span></button>
+          <button class="nav-item" data-view="settings" type="button"><i class="fa fa-gear"></i><span>Settings</span></button>
+        </nav>
+
+        <div class="sidebar-bottom">
+
+          <button id="logoutBtn" class="nav-item logout" type="button">
+            <i class="fa fa-right-from-bracket" aria-hidden="true"></i>
+            <span></span>
+          </button>
+        </div>
+      </aside>
+
+      <main class="main">
+
+        <section id="view-dashboard" class="view">
+          <div class="page-header">
+            <h2>Dashboard</h2>
+            <div class="page-actions">
+              <button id="quickAddIng" class="btn small primary" type="button"><i class="fa fa-plus"></i> Add Ingredient</button>
+              <button id="quickBake" class="btn small" type="button"><i class="fa fa-fire"></i> Bake</button>
+            </div>
+          </div>
+
+          <div class="kpi-row">
+            <div class="kpi-card"><div class="kpi-title">Total Income</div><div class="kpi-value" id="kpi-income">₱0.00</div></div>
+            <div class="kpi-card"><div class="kpi-title">Today's total sales</div><div class="kpi-value" id="kpi-sales">0.00%</div></div>
+            <div class="kpi-card"><div class="kpi-title">Total products available</div><div class="kpi-value" id="kpi-products">36</div></div>
+            <div class="kpi-card"><div class="kpi-title">Total ingredients in stock</div><div class="kpi-value" id="kpi-total-ing">29</div></div>
+          </div>
+
+          <div class="grid-2">
+            <div class="card">
+              <h3>Stock Movement</h3>
+              <div class="chart-container"><canvas id="stockChart" width="400" height="220"></canvas></div>
+            </div>
+            <div class="card">
+              <h3>Best sellers</h3>
+              <div class="chart-container"><canvas id="bestSellerChart" width="400" height="220"></canvas></div>
+            </div>
+          </div>
+
+          <div class="card"><h3>Recent Activity</h3><ul id="recentActivity" class="timeline"></ul></div>
+        </section>
+
+        <section id="view-inventory" class="view hidden">
+          <div class="page-header">
+            <h2>Ingredients</h2>
+            <div class="page-actions">
+              <input id="searchIng" placeholder="Search ingredient..." />
+              <div class="filter-chips">
+                <button class="chip" data-filter="all" type="button">All</button>
+                <button class="chip" data-filter="low" type="button">Low stock</button>
+                <button class="chip" data-filter="expiring" type="button">Expiring</button>
+              </div>
+              <button id="addIngredientBtn" class="btn small primary" type="button"><i class="fa fa-plus"></i> Add</button>
+            </div>
+          </div>
+          <div id="ingredientList" class="cards-grid"></div>
+        </section>
+
+        <section id="view-reports" class="view hidden">
+          <div class="page-header">
+  <h2>Reports</h2>
+  <div class="page-actions report-controls">
+    <label style="display:flex;align-items:center;gap:6px">
+      <span class="small muted">From</span>
+      <input id="reportStart" type="date" />
+    </label>
+    <label style="display:flex;align-items:center;gap:6px">
+      <span class="small muted">To</span>
+      <input id="reportEnd" type="date" />
+    </label>
+    <select id="reportPreset">
+      <option value="7">Last 7 days</option>
+      <option value="14">Last 14 days</option>
+      <option value="30" selected>Last 30 days</option>
+      <option value="90">Last 90 days</option>
+    </select>
+    <button id="applyReportRange" class="btn small" type="button">Apply</button>
+    <button id="exportReportsBtn" class="btn small" type="button">Export CSV</button>
+  </div>
+</div>
+
+          <div class="grid-2">
+            <div class="card">
+              <h3>Sales over time</h3>
+              <div class="chart-container"><canvas id="salesTimelineChart" width="600" height="260"></canvas></div>
+            </div>
+
+            <div class="card">
+              <h3>Ingredient usage (top)</h3>
+              <div class="chart-container"><canvas id="ingredientUsageChart" width="400" height="260"></canvas></div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-top:12px">
+            <h3>Summary</h3>
+            <div id="reportSummary" class="muted small" style="margin-top:8px"></div>
+          </div>
+        </section>
+
+        <section id="view-activity" class="view hidden">
+          <div class="page-header"><h2>Activity</h2><div class="page-actions"><select id="activityFilter"><option value="all">All</option><option value="stock">Stock</option><option value="production">Production</option></select></div></div>
+          <div class="card"><ul id="activityList" class="timeline"></ul></div>
+        </section>
+
+        <section id="view-calendar" class="view hidden">
+  <div class="page-header">
+    <h2>Calendar</h2>
+    <div class="page-actions">
+      <button id="calendarPrev" class="btn small" type="button">&lt; Prev</button>
+      <button id="calendarToday" class="btn small" type="button">Today</button>
+      <button id="calendarNext" class="btn small" type="button">Next &gt;</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="calendar-weekdays">
+      <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
+    </div>
+    <div id="calendarGrid" class="calendar-grid"></div>
+  </div>
+</section>
+
+        <section id="view-profile" class="view hidden">
+          <div class="page-header">
+            <h2>User Profile</h2>
+            <div class="page-actions">
+              <button id="profileCancel" class="btn ghost small" type="button">Cancel</button>
+              <button id="saveProfile" class="btn primary small" type="button">Save Profile</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="profile-grid">
+
+              <div class="profile-left">
+                <div class="avatar-wrap">
+                  <div id="profileAvatarPreview" class="avatar-preview">
+                    <i class="fa fa-user fa-2x"></i>
+                  </div>
+                  <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+                    <label class="btn ghost small" for="profileAvatarInput" style="cursor:pointer">Upload Avatar</label>
+                    <input id="profileAvatarInput" type="file" accept="image/*" style="display:none" />
+                    <button id="removeAvatar" class="btn small" type="button">Remove</button>
+                  </div>
+                  <div class="muted small" style="margin-top:8px">Square JPEG/PNG, max 1MB (demo).</div>
+                </div>
+
+                <div class="profile-fields" style="margin-top:12px">
+                  <label class="field"><span class="field-label">Name</span><input id="profileName" /></label>
+                  <label class="field"><span class="field-label">Role</span><input id="profileRole" /></label>
+                  <label class="field"><span class="field-label">Username</span><input id="profileUsername" readonly /></label>
+
+                  <label class="field"><span class="field-label">Email</span><input id="profileEmail" type="email" placeholder="you@bakery.example" /></label>
+                  <label class="field"><span class="field-label">Phone</span><input id="profilePhone" type="tel" placeholder="+63 9..." /></label>
+                </div>
+              </div>
+
+              <div class="profile-right">
+                <div class="card small-card">
+                  <h3 style="margin:0 0 8px 0">Security</h3>
+                  <div class="muted small" style="margin-bottom:8px">Change your password (demo — stored locally).</div>
+                  <label class="field"><span class="field-label">Current password</span><input id="curPassword" type="password" autocomplete="current-password" /></label>
+                  <label class="field"><span class="field-label">New password</span><input id="newPassword" type="password" autocomplete="new-password" /></label>
+                  <label class="field"><span class="field-label">Confirm new password</span><input id="confirmPassword" type="password" /></label>
+                  <div style="display:flex;gap:8px;margin-top:10px">
+                    <button id="changePassBtn" class="btn small" type="button">Change password</button>
+                    <div id="changePassStatus" class="muted small" style="align-self:center"></div>
+                  </div>
+                </div>
+
+                <div class="card small-card" style="margin-top:12px">
+                  <h3 style="margin:0 0 8px 0">Preferences</h3>
+                  <label style="display:flex;align-items:center;gap:10px">
+                    <input id="prefEmailNotif" type="checkbox" />
+                    <span class="field-label" style="font-weight:600;color:var(--text)">Email notifications</span>
+                  </label>
+                  <label style="display:flex;align-items:center;gap:10px;margin-top:8px">
+                    <input id="prefPushNotif" type="checkbox" />
+                    <span class="field-label" style="font-weight:600;color:var(--text)">In-app notifications</span>
+                  </label>
+                  <label class="field" style="margin-top:10px">
+                    <span class="field-label">Timezone</span>
+                    <select id="profileTimezone">
+                      <option value="Asia/Manila">Asia/Manila</option>
+                      <option value="UTC">UTC</option>
+                      <option value="Asia/Tokyo">Asia/Tokyo</option>
+                      <option value="America/New_York">America/New_York</option>
+                    </select>
+                  </label>
+                </div>
+
+                <div class="card small-card" style="margin-top:12px">
+                  <h3 style="margin:0 0 8px 0">Account actions</h3>
+                  <div style="display:flex;flex-direction:column;gap:8px">
+                    <button id="signOutBtn" class="btn ghost small" type="button">Sign out</button>
+                    <button id="deleteAccountBtn" class="btn small danger" type="button">Delete account (demo)</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="view-settings" class="view hidden">
+          <div class="page-header"><h2>Settings</h2></div>
+
+          <div class="card">
+            <h3>Bakery Profile</h3>
+            <form id="bakeryProfileForm" class="form">
+              <label class="field"><span class="field-label">Bakery name</span><input id="bakeryName" /></label>
+              <label class="field"><span class="field-label">Address</span><input id="bakeryAddress"/></label>
+              <label class="field"><span class="field-label">Default unit</span><input id="bakeryUnit" placeholder="kg, pcs, etc."/></label>
+              <div style="margin-top:12px"><button class="btn primary" id="saveBakery" type="button">Save</button></div>
+            </form>
+          </div>
+
+          <div class="card" style="margin-top:14px">
+            <h3>Appearance</h3>
+            <div style="display:flex;align-items:center;gap:12px">
+              <label style="display:flex;align-items:center;gap:8px"><input id="themeToggle" type="checkbox" /> Dark theme</label>
+              <div class="muted small">Toggle between light and dark UI.</div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-top:14px">
+            <h3>Backup & Restore</h3>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+              <button id="exportBtn" class="btn" type="button">Export backup</button>
+              <label class="btn ghost" for="importInput" style="cursor:pointer">Choose backup</label>
+              <input id="importInput" type="file" accept="application/json" style="display:none" />
+              <button id="importBtn" class="btn" type="button">Import backup</button>
+            </div>
+            <div class="muted small" style="margin-top:8px">Export a JSON backup. Import will replace DB after confirmation.</div>
+          </div>
+
+          <div class="card" style="margin-top:14px">
+            <h3>User Management</h3>
+            <div id="usersList" class="users-list"></div>
+          </div>
+        </section>
+
+      </main>
+    </div>
+  </div>
+
+  <div id="modal" class="modal hidden" role="dialog" aria-hidden="true">
+    <div class="modal-card" role="document">
+      <button id="modalClose" class="modal-close" aria-label="Close" type="button"><i class="fa fa-xmark"></i></button>
+      <div id="modalContent"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
