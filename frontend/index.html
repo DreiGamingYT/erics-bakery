@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Eric's Bakery — Inventory Prototype</title>
+  <title>Eric's Bakery — Inventory</title>
 
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
@@ -32,6 +32,7 @@
             <h1>ERIC'S BAKERY</h1>
             <p class="muted">Friendly inventory tracking for small Filipino bakeries.</p>
           </div>
+          <div id="recentProfiles" class="recent-profiles" aria-label="Recent users" role="region" style="margin-bottom:12px"></div>
         </div>
       </aside>
 
@@ -47,9 +48,14 @@
               </div>
 
               <form class="auth-form" id="loginForm" onsubmit="return false;">
-                <label class="field"><span class="field-label">Username</span><input id="overlay-username" name="username" type="text" placeholder="your username" autocomplete="username" /></label>
+                <label class="field"><span class="field-label">Username</span>
+                  <input id="overlay-username" name="username" type="text" placeholder="your username" autocomplete="username" />
+                </label>
+                <label class="field"><span class="field-label">Email (optional)</span>
+                  <input id="overlay-email" name="email" type="email" placeholder="you@bakery.example" autocomplete="email" />
+                </label>
                 <label class="field"><span class="field-label">Password</span><input id="overlay-password" name="password" type="password" placeholder="••••••••" autocomplete="current-password" /></label>
-
+                
                 <label class="field row" style="gap:8px;align-items:center;flex-direction:row">
                   <input id="rememberMe" name="remember" type="checkbox" />
                   <span class="field-label" style="font-weight:600;color:rgba(255,255,255,0.92);padding: 10px 0px 8px">Remember me</span>
@@ -57,11 +63,14 @@
 
                 <div class="form-actions">
                   <button id="overlaySignInBtn" type="button" class="btn primary large">SIGN IN</button>
+                  <div>
+                  <button id="forgotPasswordBtn" type="button" class="btn ghost small" style="padding: 12px 16px;">Forgot password?</button>
+                </div>
                 </div>
 
                 <div class="auth-foot">
                   <div class="muted small">Don't have an account yet?</div>
-                  <button id="overlayToSignup" type="button" class="btn ghost small">Create an account</button>
+                  <button id="overlayToSignup" type="button" class="btn ghost small" style="padding: 12px 16px;">Create an account</button>
                 </div>
               </form>
             </div>
@@ -76,8 +85,12 @@
 
               <form class="auth-form" id="signupForm" onsubmit="return false;">
                 <label class="field"><span class="field-label">Username</span><input id="overlay-su-username" name="su-username" type="text" placeholder="pick a username" autocomplete="username" /></label>
+                <label class="field">
+                  <span class="field-label">Email</span>
+                  <input id="overlay-su-email" name="email" type="email" placeholder="you@example.com" required />
+                </label>
                 <label class="field"><span class="field-label">Password</span><input id="overlay-su-password" name="su-password" type="password" placeholder="create password" autocomplete="new-password" /></label>
-                <label class="field"><span class="field-label">Position</span><select id="overlay-su-role" name="su-role" class="select"><option>Owner</option><option>Baker</option><option>Cashier</option><option>Assistant</option></select></label>
+                <label class="field"><span class="field-label">Position</span><select id="overlay-su-role" name="su-role" class="select"style="border-right: 16px solid transparent;"><option>Owner</option><option>Baker</option><option>Assistant</option></select></label>
 
                 <div class="form-actions">
                   <button id="overlaySignUpBtn" type="button" class="btn primary large">CREATE ACCOUNT</button>
@@ -173,38 +186,38 @@
       <main class="main">
 
         <section id="view-dashboard" class="view">
-          <div class="page-header">
-            <h2>Dashboard</h2>
-            <div class="page-actions">
-              <button id="quickAddIng" class="btn small primary" type="button"><i class="fa fa-plus"></i> Add Ingredient</button>
-              <button id="quickBake" class="btn small" type="button"><i class="fa fa-fire"></i> Bake</button>
-            </div>
-          </div>
+  <div class="page-header">
+    <h2>Dashboard</h2>
+    <div class="page-actions">
+      <button id="quickAddIng" class="btn small primary" type="button"><i class="fa fa-plus"></i> Add Ingredient</button>
+      <button id="quickBake" class="btn small" type="button"><i class="fa fa-fire"></i> Bake</button>
+    </div>
+  </div>
 
-          <div class="kpi-row">
-            <div class="kpi-card"><div class="kpi-title">Total Income</div><div class="kpi-value" id="kpi-income">₱0.00</div></div>
-            <div class="kpi-card"><div class="kpi-title">Today's total sales</div><div class="kpi-value" id="kpi-sales">0.00%</div></div>
-            <div class="kpi-card"><div class="kpi-title">Total products available</div><div class="kpi-value" id="kpi-products">36</div></div>
-            <div class="kpi-card"><div class="kpi-title">Total ingredients in stock</div><div class="kpi-value" id="kpi-total-ing">29</div></div>
-          </div>
+  <div class="kpi-row">
+    <div class="kpi-card"><div class="kpi-title">Total ingredients</div><div class="kpi-value" id="kpi-total-ing">0</div></div>
+    <div class="kpi-card"><div class="kpi-title">Low stock items</div><div class="kpi-value" id="kpi-low">0</div></div>
+    <div class="kpi-card"><div class="kpi-title">Expiring (next 7d)</div><div class="kpi-value" id="kpi-exp">0</div></div>
+    <div class="kpi-card"><div class="kpi-title">Equipment / Tools</div><div class="kpi-value" id="kpi-equipment">0</div></div>
+  </div>
 
-          <div class="grid-2">
-            <div class="card">
-              <h3>Stock Movement</h3>
-              <div class="chart-container"><canvas id="stockChart" width="400" height="220"></canvas></div>
-            </div>
-            <div class="card">
-              <h3>Best sellers</h3>
-              <div class="chart-container"><canvas id="bestSellerChart" width="400" height="220"></canvas></div>
-            </div>
-          </div>
+  <div class="grid-2">
+    <div class="card">
+      <h3>Stock Movement (7 days)</h3>
+      <div class="chart-container"><canvas id="stockChart" width="400" height="220"></canvas></div>
+    </div>
+    <div class="card">
+      <h3>Top used ingredients (30 days)</h3>
+      <div class="chart-container"><canvas id="bestSellerChart" width="400" height="220"></canvas></div>
+    </div>
+  </div>
 
-          <div class="card"><h3>Recent Activity</h3><ul id="recentActivity" class="timeline"></ul></div>
-        </section>
+  <div class="card"><h3>Recent Activity</h3><ul id="recentActivity" class="timeline"></ul></div>
+</section>
 
         <section id="view-inventory" class="view hidden">
           <div class="page-header">
-            <h2>Ingredients</h2>
+            <h2>Inventory</h2>
             <div class="page-actions">
               <input id="searchIng" placeholder="Search ingredient..." />
               <div class="filter-chips">
@@ -215,8 +228,19 @@
               <button id="addIngredientBtn" class="btn small primary" type="button"><i class="fa fa-plus"></i> Add</button>
             </div>
           </div>
-          <div id="ingredientList" class="cards-grid"></div>
-        </section>
+          <div class="inventory-layout">
+
+    <div id="ingredientList" class="inv-left"></div>
+
+    <aside id="inventoryActivity" class="inv-right" aria-label="Recent inventory activity">
+      <div class="card">
+        <h3>Recent Inventory Activity</h3>
+        <ul id="inventoryRecentActivity" class="timeline" aria-live="polite" aria-atomic="true" style="margin-top:8px;max-height:56vh;overflow:auto;padding-right:6px"></ul>
+        <div class="muted small" style="margin-top:8px">Shows latest stock in / stock out and edits. Tap an item to view details in Activity.</div>
+      </div>
+    </aside>
+  </div>
+</section>
 
         <section id="view-reports" class="view hidden">
           <div class="page-header">
@@ -283,123 +307,129 @@
 </section>
 
         <section id="view-profile" class="view hidden">
-          <div class="page-header">
-            <h2>User Profile</h2>
-            <div class="page-actions">
-              <button id="profileCancel" class="btn ghost small" type="button">Cancel</button>
-              <button id="saveProfile" class="btn primary small" type="button">Save Profile</button>
-            </div>
+  <div class="page-header">
+    <h2>User Profile</h2>
+    <div class="page-actions">
+      <button id="profileCancel" class="btn ghost small" type="button">Cancel</button>
+      <button id="saveProfile" class="btn primary small" type="button">Save Profile</button>
+    </div>
+  </div>
+
+  <div class="card profile-big">
+    <div class="profile-grid" style="align-items:start;gap:18px">
+      <div class="profile-left">
+        <div class="avatar-wrap">
+          <div id="profileAvatarPreview" class="avatar-preview">
+            <i class="fa fa-user fa-2x"></i>
           </div>
-
-          <div class="card">
-            <div class="profile-grid">
-
-              <div class="profile-left">
-                <div class="avatar-wrap">
-                  <div id="profileAvatarPreview" class="avatar-preview">
-                    <i class="fa fa-user fa-2x"></i>
-                  </div>
-                  <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
-                    <label class="btn ghost small" for="profileAvatarInput" style="cursor:pointer">Upload Avatar</label>
-                    <input id="profileAvatarInput" type="file" accept="image/*" style="display:none" />
-                    <button id="removeAvatar" class="btn small" type="button">Remove</button>
-                  </div>
-                  <div class="muted small" style="margin-top:8px">Square JPEG/PNG, max 1MB (demo).</div>
-                </div>
-
-                <div class="profile-fields" style="margin-top:12px">
-                  <label class="field"><span class="field-label">Name</span><input id="profileName" /></label>
-                  <label class="field"><span class="field-label">Role</span><input id="profileRole" /></label>
-                  <label class="field"><span class="field-label">Username</span><input id="profileUsername" readonly /></label>
-
-                  <label class="field"><span class="field-label">Email</span><input id="profileEmail" type="email" placeholder="you@bakery.example" /></label>
-                  <label class="field"><span class="field-label">Phone</span><input id="profilePhone" type="tel" placeholder="+63 9..." /></label>
-                </div>
-              </div>
-
-              <div class="profile-right">
-                <div class="card small-card">
-                  <h3 style="margin:0 0 8px 0">Security</h3>
-                  <div class="muted small" style="margin-bottom:8px">Change your password (demo — stored locally).</div>
-                  <label class="field"><span class="field-label">Current password</span><input id="curPassword" type="password" autocomplete="current-password" /></label>
-                  <label class="field"><span class="field-label">New password</span><input id="newPassword" type="password" autocomplete="new-password" /></label>
-                  <label class="field"><span class="field-label">Confirm new password</span><input id="confirmPassword" type="password" /></label>
-                  <div style="display:flex;gap:8px;margin-top:10px">
-                    <button id="changePassBtn" class="btn small" type="button">Change password</button>
-                    <div id="changePassStatus" class="muted small" style="align-self:center"></div>
-                  </div>
-                </div>
-
-                <div class="card small-card" style="margin-top:12px">
-                  <h3 style="margin:0 0 8px 0">Preferences</h3>
-                  <label style="display:flex;align-items:center;gap:10px">
-                    <input id="prefEmailNotif" type="checkbox" />
-                    <span class="field-label" style="font-weight:600;color:var(--text)">Email notifications</span>
-                  </label>
-                  <label style="display:flex;align-items:center;gap:10px;margin-top:8px">
-                    <input id="prefPushNotif" type="checkbox" />
-                    <span class="field-label" style="font-weight:600;color:var(--text)">In-app notifications</span>
-                  </label>
-                  <label class="field" style="margin-top:10px">
-                    <span class="field-label">Timezone</span>
-                    <select id="profileTimezone">
-                      <option value="Asia/Manila">Asia/Manila</option>
-                      <option value="UTC">UTC</option>
-                      <option value="Asia/Tokyo">Asia/Tokyo</option>
-                      <option value="America/New_York">America/New_York</option>
-                    </select>
-                  </label>
-                </div>
-
-                <div class="card small-card" style="margin-top:12px">
-                  <h3 style="margin:0 0 8px 0">Account actions</h3>
-                  <div style="display:flex;flex-direction:column;gap:8px">
-                    <button id="signOutBtn" class="btn ghost small" type="button">Sign out</button>
-                    <button id="deleteAccountBtn" class="btn small danger" type="button">Delete account (demo)</button>
-                  </div>
-                </div>
-              </div>
-            </div>
+          <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <label class="btn ghost small" for="profileAvatarInput" style="cursor:pointer">Upload Avatar</label>
+            <input id="profileAvatarInput" type="file" accept="image/*" style="display:none" />
+            <button id="removeAvatar" class="btn small" type="button">Remove</button>
+            <button id="profileSaveServer" class="btn small" style="margin-left:auto" type="button">Save to server</button>
           </div>
-        </section>
+          <div class="muted small" style="margin-top:8px">Square JPEG/PNG, max ~1.5MB.</div>
+        </div>
+
+        <div class="card small-card" style="margin-top:10px">
+          <h3 style="margin:0 0 8px 0">Recent logins</h3>
+          <ul id="recentLogins" class="timeline" style="margin:0;padding:0;list-style:none"></ul>
+          <div class="muted small" style="margin-top:8px">Tap an entry to quickly prefill username on login.</div>
+        </div>
+      </div>
+
+      <div class="profile-right">
+        <div class="card small-card">
+          <h3 style="margin:0 0 8px 0">Account</h3>
+          <label class="field"><span class="field-label">Name</span><input id="profileName" /></label>
+          <label class="field"><span class="field-label">Role</span><input id="profileRole" /></label>
+          <label class="field"><span class="field-label">Username</span><input id="profileUsername" readonly /></label>
+          <label class="field"><span class="field-label">Email</span><input id="profileEmail" type="email" placeholder="you@bakery.example" /></label>
+          <label class="field"><span class="field-label">Phone</span><input id="profilePhone" type="tel" placeholder="+63 9..." /></label>
+        </div>
+
+        <div class="card small-card" style="margin-top:12px">
+          <h3 style="margin:0 0 8px 0">Security</h3>
+          <div class="muted small" style="margin-bottom:8px">Change your password</div>
+          <label class="field"><span class="field-label">Current password</span><input id="curPassword" type="password" autocomplete="current-password" /></label>
+          <label class="field"><span class="field-label">New password</span><input id="newPassword" type="password" autocomplete="new-password" /></label>
+          <label class="field"><span class="field-label">Confirm new password</span><input id="confirmPassword" type="password" /></label>
+          <div style="display:flex;gap:8px;margin-top:10px">
+            <button id="changePassBtn" class="btn small" type="button">Change password</button>
+            <div id="changePassStatus" class="muted small" style="align-self:center"></div>
+          </div>
+        </div>
+
+        <div class="card small-card" style="margin-top:12px">
+          <h3 style="margin:0 0 8px 0">Account actions</h3>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <button id="signOutBtn" class="btn ghost small" type="button">Sign out</button>
+            <button id="deleteAccountBtn" class="btn small danger" type="button">Delete account</button>
+          </div>
+        </div>
+
+      </div><!-- profile-right -->
+    </div>
+  </div>
+</section>
+
 
         <section id="view-settings" class="view hidden">
-          <div class="page-header"><h2>Settings</h2></div>
+  <div class="page-header">
+    <h2>Settings</h2>
+  </div>
 
-          <div class="card">
-            <h3>Bakery Profile</h3>
-            <form id="bakeryProfileForm" class="form">
-              <label class="field"><span class="field-label">Bakery name</span><input id="bakeryName" /></label>
-              <label class="field"><span class="field-label">Address</span><input id="bakeryAddress"/></label>
-              <label class="field"><span class="field-label">Default unit</span><input id="bakeryUnit" placeholder="kg, pcs, etc."/></label>
-              <div style="margin-top:12px"><button class="btn primary" id="saveBakery" type="button">Save</button></div>
-            </form>
-          </div>
+  <div class="card settings-grid" style="display:grid;grid-template-columns:1fr 360px;gap:16px">
+    <div>
+      <div class="card" style="margin-bottom:12px">
+        <h3>Bakery Profile</h3>
+        <form id="bakeryProfileForm" class="form">
+          <label class="field"><span class="field-label">Bakery name</span><input id="bakeryName" /></label>
+          <label class="field"><span class="field-label">Address</span><input id="bakeryAddress"/></label>
+          <label class="field"><span class="field-label">Default unit</span><input id="bakeryUnit" placeholder="kg, pcs, etc."/></label>
+          <div style="margin-top:12px"><button class="btn primary" id="saveBakery" type="button">Save</button></div>
+        </form>
+      </div>
 
-          <div class="card" style="margin-top:14px">
-            <h3>Appearance</h3>
-            <div style="display:flex;align-items:center;gap:12px">
-              <label style="display:flex;align-items:center;gap:8px"><input id="themeToggle" type="checkbox" /> Dark theme</label>
-              <div class="muted small">Toggle between light and dark UI.</div>
-            </div>
-          </div>
+      <div class="card" style="margin-bottom:12px">
+        <h3>Notifications</h3>
+        <label style="display:flex;align-items:center;gap:10px">
+          <input id="prefEmailNotif" type="checkbox" />
+          <span class="field-label" style="font-weight:600;color:var(--text)">Email notifications</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:10px;margin-top:8px">
+          <input id="prefPushNotif" type="checkbox" />
+          <span class="field-label" style="font-weight:600;color:var(--text)">In-app notifications</span>
+        </label>
+      </div>
 
-          <div class="card" style="margin-top:14px">
-            <h3>Backup & Restore</h3>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-              <button id="exportBtn" class="btn" type="button">Export backup</button>
-              <label class="btn ghost" for="importInput" style="cursor:pointer">Choose backup</label>
-              <input id="importInput" type="file" accept="application/json" style="display:none" />
-              <button id="importBtn" class="btn" type="button">Import backup</button>
-            </div>
-            <div class="muted small" style="margin-top:8px">Export a JSON backup. Import will replace DB after confirmation.</div>
-          </div>
+      <div class="card">
+        <h3>Advanced</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button id="exportBtn" class="btn" type="button">Export backup</button>
+          <label class="btn ghost" for="importInput" style="cursor:pointer">Choose backup</label>
+          <input id="importInput" type="file" accept="application/json" style="display:none" />
+          <button id="importBtn" class="btn" type="button">Import backup</button>
+        </div>
+      </div>
+    </div>
 
-          <div class="card" style="margin-top:14px">
-            <h3>User Management</h3>
-            <div id="usersList" class="users-list"></div>
-          </div>
-        </section>
+    <aside>
+      <div class="card small-card">
+        <h3 style="margin:0 0 8px 0">Appearance</h3>
+        <label style="display:flex;align-items:center;gap:8px"><input id="themeToggle" type="checkbox" /> Dark theme</label>
+        <div class="muted small" style="margin-bottom:8px">Toggle between light and dark UI.</div>
+      </div>
+
+      <div class="card small-card" style="margin-top:12px">
+        <h3 style="margin:0 0 8px 0">User Management</h3>
+        <div id="usersList" class="users-list"></div>
+      </div>
+    </aside>
+
+  </div>
+</section>
+
 
       </main>
     </div>

@@ -1,0 +1,56 @@
+CREATE TABLE users (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  username VARCHAR(100) NOT NULL UNIQUE,
+  password_hash VARCHAR(255) NOT NULL,
+  role VARCHAR(30) NOT NULL DEFAULT 'Baker',
+  display_name VARCHAR(200),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE ingredients (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  unit VARCHAR(32),
+  qty DECIMAL(18,3) DEFAULT 0,
+  min_qty DECIMAL(18,3) DEFAULT 0,
+  max_qty DECIMAL(18,3),
+  expiry DATE NULL,
+  supplier VARCHAR(255),
+  icon VARCHAR(100),
+  type VARCHAR(50) DEFAULT 'ingredient',
+  attrs JSON NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE activity (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  ingredient_id INT NULL,
+  user_id INT NULL,
+  text TEXT NOT NULL,
+  amount DECIMAL(18,3) NULL,
+  time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE SET NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE products (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  category VARCHAR(100),
+  price DECIMAL(12,2) DEFAULT 0,
+  stock INT DEFAULT 0,
+  recipe JSON NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE orders (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  customer VARCHAR(255),
+  items JSON,
+  total DECIMAL(12,2) DEFAULT 0
+);
+
+-- optional: index for expiry checks
+CREATE INDEX idx_ingredients_expiry ON ingredients(expiry);
