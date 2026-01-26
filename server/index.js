@@ -19,6 +19,7 @@ app.use(cors({
     origin: process.env.FRONTEND_ORIGIN || 'http://localhost:3000',
     credentials: true
 }));
+
 const JWT_SECRET = process.env.JWT_SECRET || 'replace_with_strong_secret';
 const TOKEN_NAME = process.env.COOKIE_NAME || 'bakery_token';
 
