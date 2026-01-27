@@ -784,106 +784,96 @@ async function hasColumn(tableName, columnName){
   }
 }
 
-// Replace your current sendResetEmail with this function
 async function sendResetEmail(toEmail, code) {
-  try {
-    const logoHost = (process.env.FRONTEND_ORIGIN || 'http://localhost:3000').replace(/\/$/, '');
-    // file name/path used by your frontend (adjust if needed)
-    const logoUrl = `https://i.ibb.co/9HshkkkB/logo.png`;
+  const expiresMinutes = Number(process.env.RESET_CODE_EXPIRY_MIN || 15);
+  const subject = "Eric's Bakery — Password reset code";
+  const html = `<!doctype html>
+<html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Password reset</title>
+<style>body{font-family:Arial,Helvetica,sans-serif;background:#f3f6fb;margin:0;padding:20px;color:#12202f} .card{max-width:600px;margin:20px auto;background:#fff;padding:22px;border-radius:12px;border:1px solid rgba(0,0,0,0.06);text-align:center} .logo{width:84px;height:84px;border-radius:12px;margin:0 auto 12px;object-fit:cover} .code{font-weight:800;font-size:28px;padding:14px 18px;border-radius:10px;display:inline-block;background:#f6f7fb;border:1px solid rgba(0,0,0,0.04);letter-spacing:4px}</style>
+</head><body>
+<div class="card">
+<img src="https://i.ibb.co/9HshkkkB/logo.png" alt="logo" class="logo" />
+<h2>Password reset code</h2>
+<p style="color:#475569">Use the code below to reset your password. It expires in ${expiresMinutes} minutes.</p>
+<div class="code">${code}</div>
+<p style="color:#666;margin-top:12px;font-size:13px">If you didn't request this, ignore this email.</p>
+<p style="margin-top:18px"><a href="${(process.env.FRONTEND_ORIGIN||'https://erics-bakery.vercel.app')}" style="background:#1b85ec;color:#fff;padding:10px 14px;border-radius:8px;text-decoration:none;font-weight:700">Open Eric's Bakery</a></p>
+</div></body></html>`;
 
-    const expiresMinutes = Number(process.env.RESET_CODE_EXPIRE_MIN || 5);
-    const subject = 'Eric\'s Bakery — Password reset code';
-    const plain = `Your password reset code: ${code}\n\nThis code will expire in ${expiresMinutes} minutes.\n\nIf you did not request this, ignore this email.`;
-
-    const html = `<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Password reset</title>
-  <style>
-    body { background: #f3f6fb; margin:0; padding:24px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial; color:#12202f; }
-    .wrapper { max-width:600px; margin:20px auto; }
-    .card { background: #ffffff; border-radius:12px; box-shadow:0 10px 30px rgba(16,24,40,0.08); padding:26px; text-align:center; border:1px solid rgba(0,0,0,0.06);}
-    .logo { width:84px; height:84px; object-fit:cover; border-radius:12px; margin:0 auto 14px auto; display:block; }
-    h1 { margin:6px 0 8px; font-size:20px; color:#0f2b4b; }
-    p.lead { margin:0 0 18px; color: #475569; font-size:14px; line-height:1.45; }
-    .code-box { margin:16px auto; padding:18px 14px; background:linear-gradient(180deg,#f6f7fb,#ffffff); border-radius:10px; display:inline-block; font-weight:800; font-size:28px; letter-spacing:4px; color:#112233; border:1px solid rgba(0,0,0,0.06); min-width:220px; text-align:center; }
-    .small { font-size:12px; color: #353535; margin-top:12px; }
-    .cta { display:inline-block; margin-top:18px; background:#1b85ec; color: #ffffff; text-decoration:none; padding:10px 16px; border-radius:10px; font-weight:700; }
-    .footer { margin-top:20px; font-size:12px; color: #353535; text-align:center; }
-    .footer span { font-size:11px; text-decoration:none; color: #555555; }
-    @media (max-width:420px){ .code-box { font-size:22px; min-width:180px } .card { padding:18px } }
-  </style>
-</head>
-<body>
-  <div class="wrapper" role="article" aria-label="Password reset email">
-    <div class="card">
-      <img src="${logoUrl}" alt="Eric's Bakery logo" class="logo" />
-      <h1>Password reset code</h1>
-      <p class="lead">Use the code below to reset your account password. The code expires in ${expiresMinutes} minutes.</p>
-
-      <div class="code-box" aria-live="polite" aria-atomic="true">${code}</div>
-
-      <div class="small">If you did not request a password reset, you can safely ignore this message.</div>
-
-      <a href="${logoHost}"
-   target="_blank"
-   rel="noreferrer noopener"
-   style="
-     display:inline-block;
-     margin-top:18px;
-     background:#1b85ec;
-     color:#ffffff !important;
-     text-decoration:none;
-     padding:10px 16px;
-     border-radius:10px;
-     font-weight:700;
-   ">
-  Go to Eric's Bakery
-</a>
-
-      <div class="footer" style="margin-top:20px;font-size:12px;color:#353535;text-align:center;">
-  Eric's Bakery — friendly inventory tracking for small bakeries<br />
-  <span style="opacity:0.9;color:#555555;font-size:11px;">
-    Sent to ${toEmail}
-  </span>
-</div>
-    </div>
-  </div>
-</body>
-</html>`;
-
-  // If SMTP configured, send via SMTP; otherwise log HTML for dev fallback
+  // First try SMTP if configured
   if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-    const nodemailer = require('nodemailer');
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT || 587),
-      secure: Number(process.env.SMTP_PORT || 587) === 465,
-      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
-    });
+    try {
+      const nodemailer = require('nodemailer');
+      const port = Number(process.env.SMTP_PORT || 587);
+      const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port,
+        secure: port === 465,
+        auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+        logger: true,
+        debug: true,
+        // optional: tls: { rejectUnauthorized: false } // debug only
+      });
 
-    await transporter.sendMail({
-      from: process.env.EMAIL_FROM || `"Eric's Bakery" <no-reply@${(process.env.FRONTEND_ORIGIN||'bakery.local').replace(/^https?:\/\//,'')}>`,
-      to: toEmail,
-      subject,
-      text: plain,
-      html
-    });
-    console.info('[sendResetEmail] email queued to', toEmail);
-    return;
+      // verify to surface auth/conn errors immediately
+      await transporter.verify();
+
+      await transporter.sendMail({
+        from: process.env.EMAIL_FROM || process.env.SMTP_USER,
+        to: toEmail,
+        subject,
+        text: `Your password reset code: ${code} (expires in ${expiresMinutes} min)`,
+        html
+      });
+      console.info('[sendResetEmail] sent via SMTP to', toEmail);
+      return;
+    } catch (smtpErr) {
+      console.error('[sendResetEmail] SMTP send failed, will attempt fallback if available:', smtpErr && (smtpErr.stack || smtpErr));
+      // continue to fallback below
+    }
   }
 
-  // Dev fallback (no SMTP): print HTML to console so you can copy/paste
-  console.info('[sendResetEmail] SMTP not configured — printing fallback HTML to console\n', { to: toEmail, subject, plain });
-  console.info('\n===== HTML PREVIEW =====\n', html);
-  return;
-  } catch (err) {
-    console.error('sendResetEmail: mailer error', err && err.stack ? err.stack : err);
-    // do not throw to avoid blocking the main flow (we log and continue)
+  // Fallback: SendGrid API (recommended). Set SENDGRID_API_KEY on Vercel env.
+  if (process.env.SENDGRID_API_KEY) {
+    try {
+      const sgKey = process.env.SENDGRID_API_KEY;
+      const body = {
+        personalizations: [{ to: [{ email: toEmail }] }],
+        from: { email: process.env.EMAIL_FROM ? process.env.EMAIL_FROM.replace(/^.*<|>.*$/g,'') : process.env.SMTP_USER },
+        subject,
+        content: [
+          { type: 'text/plain', value: `Your password reset code: ${code} (expires in ${expiresMinutes} min)` },
+          { type: 'text/html', value: html }
+        ]
+      };
+      // use global fetch (node 18+ / Vercel). If not available, install node-fetch and require it.
+      const resp = await fetch('https://api.sendgrid.com/v3/mail/send', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${sgKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+      });
+      if (!resp.ok) {
+        const text = await resp.text();
+        console.error('[sendResetEmail] SendGrid failed', resp.status, text);
+        return;
+      }
+      console.info('[sendResetEmail] sent via SendGrid to', toEmail);
+      return;
+    } catch (sgErr) {
+      console.error('[sendResetEmail] SendGrid fallback failed', sgErr && (sgErr.stack || sgErr));
+      return;
+    }
   }
+
+  // Last resort: dev fallback
+  console.info('[sendResetEmail] no SMTP/SENDGRID configured — printing fallback HTML to console', { to: toEmail });
+  console.info('===== HTML PREVIEW =====\n', html);
 }
+
 
 
 function signResetToken(payload) {
