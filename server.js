@@ -4,7 +4,7 @@ const cors = require('cors');
 const path = require('path');
 require('dotenv').config();
 
-const pool = require('./server/db');
+const pool = require('./db');
 
 const app = express();
 app.use(cors()); // during dev; tighten in production
