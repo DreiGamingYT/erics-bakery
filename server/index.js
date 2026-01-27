@@ -83,6 +83,18 @@ function authMiddleware(req, res, next) {
     }
 }
 
+function canEditIngredient(user) {
+  if(!user || !user.role) return false;
+  // Owner/Admin/Baker can edit ingredients
+  return ['Owner','Admin','Baker'].includes(user.role);
+}
+
+function canStockIngredient(user) {
+  if(!user || !user.role) return false;
+  // Owner/Admin/Baker/Assistant can do stock in/out
+  return ['Owner','Admin','Baker','Assistant'].includes(user.role);
+}
+
 let mailer = null;
 if(process.env.MAIL_HOST && process.env.MAIL_USER && process.env.MAIL_PASS){
   mailer = nodemailer.createTransport({
@@ -187,7 +199,6 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
     });
 });
 
-// PUT /api/users/me  -- update current user's profile
 app.put('/api/users/me', authMiddleware, async (req, res) => {
   try {
     const uid = Number(req.user && req.user.id);
@@ -255,6 +266,15 @@ app.put('/api/users/me', authMiddleware, async (req, res) => {
   }
 });
 
+async function onLoginSuccess(resp) {
+  // resp.user is from server { id, username, role, name }
+  window.CURRENT_USER = resp.user;
+  // persist small user info so UI survives reloads:
+  try { localStorage.setItem('CURRENT_USER', JSON.stringify(resp.user)); } catch(e){ /* ignore */ }
+
+  // update any UI
+  updateUIAfterLogin(resp.user);
+}
 
 app.post('/api/auth/logout', (req, res) => {
     res.clearCookie(TOKEN_NAME, {
@@ -302,7 +322,7 @@ app.get('/api/ingredients', authMiddleware, async (req, res) => {
             `SELECT COUNT(*) as cnt FROM ingredients ${whereSql}`, params);
         const total = countRows && countRows[0] ? Number(countRows[0].cnt) : 0;
 
-        const q = `SELECT id,name,type,supplier,qty,unit,min_qty,max_qty,expiry,attrs,created_at,updated_at
+        const q = `SELECT id,name,type,supplier,qty,unit,min_qty,max_qty,expiry,attrs,created_at,updated_at,created_by
                FROM ingredients
                ${whereSql}
                ORDER BY ${pool.escapeId ? pool.escapeId(sort) : sort} ${order}
@@ -362,11 +382,12 @@ app.post('/api/ingredients', authMiddleware, async (req, res) => {
     const max_qty = data.max_qty == null ? null : data.max_qty;
     const expiry = data.expiry || null;
     const attrs = data.attrs ? JSON.stringify(data.attrs) : null;
+    const userId = (req.user && req.user.id) ? req.user.id : null;
 
     const [r] = await pool.query(
-      `INSERT INTO ingredients (name, type, supplier, qty, unit, min_qty, max_qty, expiry, attrs)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [name, type, supplier, qty, unit, min_qty, max_qty, expiry, attrs]
+      `INSERT INTO ingredients (name, type, supplier, qty, unit, min_qty, max_qty, expiry, attrs, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [name, type, supplier, qty, unit, min_qty, max_qty, expiry, attrs, userId]
     );
 
     // fetch the inserted row (so we rely on the DB value for unit etc.)
@@ -404,6 +425,10 @@ app.get('/api/ingredients/:id', authMiddleware, async (req, res) => {
     const id = Number(req.params.id || 0);
     if (!id) return res.status(400).json({ error: 'Invalid id' });
 
+    if (!canEditIngredient(req.user)) {
+      return res.status(403).json({ error: 'Not authorized to edit ingredients' });
+    }
+
     const [rows] = await pool.query('SELECT id,name,type,supplier,qty,unit,min_qty,max_qty,expiry,attrs,created_at,updated_at FROM ingredients WHERE id = ?', [id]);
     if (!rows || rows.length === 0) return res.status(404).json({ error: 'Not found' });
 
@@ -425,6 +450,11 @@ app.post('/api/ingredients/:id/stock', authMiddleware, async (req, res) => {
     const type = req.body.type;
     const qty = Number(req.body.qty || 0);
     const note = req.body.note || '';
+
+    if (!canStockIngredient(req.user)) {
+    return res.status(403).json({ error: 'Not authorized to change stock' });
+    }
+
     if (!id || !['in', 'out'].includes(type) || qty <= 0) {
         return res.status(400).json({
             error: 'Invalid request (id/type/qty)'

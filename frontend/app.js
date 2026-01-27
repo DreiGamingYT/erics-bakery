@@ -199,6 +199,25 @@ function nextOrderId(){
   return (arr.length? Math.max(...arr) : 1000) + 1;
 }
 
+(function restoreCurrentUser(){
+  try {
+    const raw = localStorage.getItem('CURRENT_USER');
+    if (raw) {
+      window.CURRENT_USER = JSON.parse(raw);
+    } else {
+      window.CURRENT_USER = null;
+    }
+  } catch(e){
+    window.CURRENT_USER = null;
+  }
+})();
+
+function getCurrentUserRole() {
+  const me = window.CURRENT_USER || null;
+  if (!me || !me.role) return '';
+  return (String(me.role || '')).toLowerCase();
+}
+
 const PROGRAMMED_CONSUMPTION = {
   'flour (hard & soft)': { dailyAmount: 62.5, unit: 'kg' },
   'sugar (white & brown)': { dailyAmount: 8, unit: 'kg' }, 
@@ -1048,7 +1067,6 @@ function renderPaginationControls(container, meta, onPageClick) {
   }
 }
 
-// ------------------- main: server-backed renderIngredientCards -------------------
 async function renderIngredientCards(page = 1, limit = 5) {
   const container = q('ingredientList');
   if (!container) return;
@@ -1117,6 +1135,18 @@ async function renderIngredientCards(page = 1, limit = 5) {
       const threshold = isMaterial ? computeThresholdForIngredient(i) : '';
       const lowBadge = (isMaterial && (Number(i.qty || 0) <= (Number(i.min_qty || 0) || threshold))) ? '<span class="badge low">Low</span>' : '';
       const expiryNote = (isMaterial && i.expiry ? `<div class="muted small">${daysUntil(i.expiry)}d</div>` : '');
+
+      // current user (ensure you set window.CURRENT_USER on login)
+      const me = window.CURRENT_USER || window.ME || { id: null, role: 'assistant' };
+      const role = (me.role || '').toString().toLowerCase();
+
+      // normalize role checks (lowercase)
+      const canEdit = ['owner','admin','baker'].includes(role);
+      const canStock = ['owner','admin','baker','assistant'].includes(role);
+
+      // Save button allowed if user canStock (for in/out) OR canEdit (for metadata)
+      const saveAllowed = canStock || canEdit;
+
       return `<tr data-id="${i.id}" data-type="${escapeHtml(i.type||'')}" style="background:var(--card);border-bottom:1px solid rgba(0,0,0,0.04)">
         <td style="padding:10px;vertical-align:middle">${i.id}</td>
         <td style="padding:10px;vertical-align:middle"><strong>${escapeHtml(i.name)}</strong><div class="muted small">${escapeHtml(i.type)}</div></td>
@@ -1127,10 +1157,10 @@ async function renderIngredientCards(page = 1, limit = 5) {
         <td style="padding:10px;vertical-align:middle">${isMaterial ? `<input class="min-input" type="number" value="${i.min_qty||0}" step="0.01" style="width:80px" />` : ''}</td>
         <td style="padding:10px;vertical-align:middle"><input class="in-input" type="number" step="0.01" style="width:90px" /></td>
         <td style="padding:10px;vertical-align:middle"><input class="out-input" type="number" step="0.01" style="width:90px" /></td>
-        <td style="padding:10px;vertical-align:middle">
-          <button class="btn small save-row" type="button">Save</button>
-          <button class="btn small soft details-btn" data-id="${i.id}" type="button">Details</button>
-          <button class="btn small soft edit-btn" type="button">Edit</button>
+        <td role="cell" style="padding:10px;vertical-align:middle">
+            <button class="btn small save-row" type="button" ${saveAllowed ? '' : 'disabled title="Not authorized"'} aria-label="Save changes for ${escapeHtml(i.name)}">Save</button>
+            <button class="btn small soft details-btn" data-id="${i.id}" type="button" aria-controls="modal" aria-label="Show details for ${escapeHtml(i.name)}">Details</button>
+            <button class="btn small soft edit-btn" type="button" ${canEdit ? '' : 'disabled title="Not authorized"'} aria-label="Edit ${escapeHtml(i.name)}">Edit</button>
         </td>
       </tr>`;
     }).join('') || `<tr><td colspan="10" class="muted" style="padding:12px">No inventory items</td></tr>`;
@@ -1150,26 +1180,47 @@ async function renderIngredientCards(page = 1, limit = 5) {
     // Save / In/Out wiring — call API and refresh current page
     container.querySelectorAll('button.save-row').forEach(btn => {
       btn.addEventListener('click', async (ev) => {
+        // re-evaluate permissions in case role changed
+        const me = window.CURRENT_USER || window.ME || { id: null, role: 'assistant' };
+        const role = (me.role || '').toString().toLowerCase();
+        const canEdit = ['owner','admin','baker'].includes(role);
+        const canStock = ['owner','admin','baker','assistant'].includes(role);
+        const saveAllowed = canStock || canEdit;
+
+        if (!saveAllowed) { notify('You are not authorized'); return; }
+
         const tr = ev.currentTarget.closest('tr');
         if (!tr) return;
         const id = Number(tr.dataset.id);
         const inVal = Number(tr.querySelector('.in-input')?.value || 0);
         const outVal = Number(tr.querySelector('.out-input')?.value || 0);
         const minInput = tr.querySelector('.min-input');
-        const newMin = minInput ? Number(minInput.value || 0) : null;
+        const newMinRaw = (minInput ? minInput.value : null);
+        const newMin = (newMinRaw !== null && newMinRaw !== '') ? Number(newMinRaw) : null;
 
         try {
+          // metadata update (min_qty) only if user canEdit
           if (newMin !== null && !Number.isNaN(newMin)) {
-            await apiFetch(`/api/ingredients/${id}`, { method: 'PUT', body: { min_qty: Number(newMin) }});
+            if (canEdit) {
+              await apiFetch(`/api/ingredients/${id}`, { method: 'PUT', body: { min_qty: Number(newMin) }});
+            } else {
+              // user tried to change metadata but lacks permission — ignore and notify
+              notify('You are not authorized to modify item metadata (min/max/supplier). Changes to stock were applied only.');
+            }
           }
+
+          // stock in / out require canStock
           if (inVal > 0) {
-            await apiFetch(`/api/ingredients/${id}/stock`, { method: 'POST', body: { type: 'in', qty: Number(inVal), note: 'Stock-in' }});
+            if (!canStock) { notify('Not authorized to perform stock in'); }
+            else await apiFetch(`/api/ingredients/${id}/stock`, { method: 'POST', body: { type: 'in', qty: Number(inVal), note: 'Stock-in' }});
           }
           if (outVal > 0) {
-            await apiFetch(`/api/ingredients/${id}/stock`, { method: 'POST', body: { type: 'out', qty: Number(outVal), note: 'Stock-out' }});
+            if (!canStock) { notify('Not authorized to perform stock out'); }
+            else await apiFetch(`/api/ingredients/${id}/stock`, { method: 'POST', body: { type: 'out', qty: Number(outVal), note: 'Stock-out' }});
           }
+
           notify('Inventory updated');
-          // refresh current page
+          // refresh current page and activity
           await renderIngredientCards(meta.page || page, limit);
           await renderInventoryActivity();
         } catch (err) {
@@ -1184,10 +1235,8 @@ async function renderIngredientCards(page = 1, limit = 5) {
       btn.addEventListener('click', async (e) => {
         const id = Number(btn.dataset.id);
         try {
-          // fetch single ingredient if you want detail (server doesn't have single GET endpoint in provided code)
-          // fallback: use current items array
           const ing = items.find(x => Number(x.id) === id) || {};
-          const historyResp = await apiFetch(`/api/activity?limit=50`); // server returns activity
+          const historyResp = await apiFetch(`/api/activity?limit=50`);
           const history = (historyResp && historyResp.items) ? historyResp.items.filter(a => Number(a.ingredient_id) === id) : [];
           const histHtml = history.length ? history.slice().map(h => `<li>${escapeHtml(h.text)} <div class="muted small">${escapeHtml(new Date(h.time).toLocaleString())}</div></li>`).join('') : '<li class="muted">No history</li>';
           const attrs = ing.attrs ? (typeof ing.attrs === 'string' ? (() => { try { return JSON.parse(ing.attrs) } catch(e){ return {}; } })() : ing.attrs) : {};
@@ -1226,21 +1275,18 @@ async function renderIngredientCards(page = 1, limit = 5) {
       if (invType && invType !== 'all') qs.set('type', invType);
       if (chip && chip !== 'all') qs.set('filter', chip);
       if (qv) qs.set('search', qv);
-      // direct link to server endpoint
       window.open(`/api/ingredients/export/csv?${qs.toString()}`, '_self');
     });
 
-    // Print: fetch all matching rows (limit big) and render print HTML in iframe
+    // Print: fetch all matching rows and render print HTML in iframe
     q('printInventoryBtn')?.addEventListener('click', async () => {
       try {
         const qs = new URLSearchParams();
         if (invType && invType !== 'all') qs.set('type', invType);
         if (chip && chip !== 'all') qs.set('filter', chip);
         if (qv) qs.set('search', qv);
-        // request a large limit will return all matches (server max is 100 controlled server-side)
         const allResp = await apiFetch(`/api/ingredients?${qs.toString()}&limit=1000&page=1`);
         const allItems = allResp && allResp.items ? allResp.items : [];
-        // build print html (similar to previous printInventoryTable but using allItems)
         let rows = allItems.map(i => `<tr>
           <td>${i.id}</td>
           <td>${escapeHtml(i.name)}</td>
@@ -1263,13 +1309,11 @@ async function renderIngredientCards(page = 1, limit = 5) {
         <table><thead><tr><th>ID</th><th>Name</th><th>Type</th><th>Supplier</th><th style="text-align:right">Qty</th><th>Unit</th><th style="text-align:right">Min</th><th>Expiry</th></tr></thead><tbody>${rows}</tbody></table>
         <div style="margin-top:18px" class="no-print"><button onclick="window.print()" style="padding:10px 14px;border-radius:8px;cursor:pointer">Print</button></div>
         </body></html>`;
-        // print in hidden iframe (no new tab)
         const iframe = document.createElement('iframe');
         iframe.style.position = 'fixed'; iframe.style.right = '0'; iframe.style.bottom = '0'; iframe.style.width = '0'; iframe.style.height = '0'; iframe.style.border = '0'; iframe.setAttribute('aria-hidden','true');
         document.body.appendChild(iframe);
         const idoc = iframe.contentWindow.document;
         idoc.open(); idoc.write(html); idoc.close();
-        // give time to render then print
         setTimeout(() => {
           try { iframe.contentWindow.focus(); iframe.contentWindow.print(); } catch (e) { try { window.print(); } catch(e2){} }
           setTimeout(()=> iframe.remove(), 800);
@@ -1284,7 +1328,6 @@ async function renderIngredientCards(page = 1, limit = 5) {
     const pagWrap = q('invPagination');
     renderPaginationControls(pagWrap, meta, (p) => {
       renderIngredientCards(p, limit);
-      // auto-scroll to top of table for better UX
       const top = container.getBoundingClientRect().top + window.scrollY - 80;
       window.scrollTo({ top, behavior: 'smooth' });
     });
@@ -1300,7 +1343,6 @@ async function renderIngredientCards(page = 1, limit = 5) {
     container.innerHTML = `<div class="card muted">Failed to load inventory</div>`;
   }
 }
-
 
 function initSearchFeature(){
   const wrap = ensureSuggestionContainer();
@@ -2733,7 +2775,11 @@ if (applyBtn) {
 }
 
 async function performLogout(){
-  try { await fetch('/api/auth/logout', { method:'POST', credentials:'include' }); } catch(e){}
+  try { await fetch('/api/auth/logout', { method:'POST', credentials:'include' }); 
+
+  try { localStorage.removeItem('CURRENT_USER'); } catch(e){}
+location.reload();
+} catch(e){}
   clearSession();
   destroyAllCharts();
   showApp(false);
@@ -2845,6 +2891,14 @@ document.addEventListener('DOMContentLoaded', ()=> {
     });
     const data = await res.json();
       if (!res.ok) {
+
+        if (data && data.user) {
+  window.CURRENT_USER = data.user;
+  try { localStorage.setItem('CURRENT_USER', JSON.stringify(data.user)); } catch(e){}
+  // update UI elements that show username / role
+  document.getElementById('sidebarUser') && (document.getElementById('sidebarUser').innerText = data.user.name || data.user.username);
+  document.getElementById('userBadgeText') && (document.getElementById('userBadgeText').innerText = data.user.username || '');
+}
         notify(data?.message || data?.error || 'Login failed');
         setButtonLoadingWithMin(btn, false, 600);
         showGlobalLoader(false);
