@@ -241,6 +241,7 @@ app.put('/api/users/me', authMiddleware, async (req, res) => {
 
     // re-issue token so client session reflects the changes (name/role)
     try {
+        const isProd = process.env.NODE_ENV === 'production';
       const token = signToken({ id: user.id, username: user.username, role: user.role, name: user.name });
       res.cookie(TOKEN_NAME, token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' });
     } catch (e) {
