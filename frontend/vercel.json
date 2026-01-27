@@ -4,6 +4,7 @@
     { "src": "frontend/**", "use": "@vercel/static" }
   ],
   "routes": [
+    { "src": "/api/(.*)", "dest": "mysql://root:LwjEAwiPOgZZKSWvwnxLcgJHbMjbhCuj@interchange.proxy.rlwy.net:22366/railway" },
     { "src": "/(.*)", "dest": "/frontend/$1" }
   ]
 }
