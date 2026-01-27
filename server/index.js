@@ -903,5 +903,48 @@ app.get('/api/events', authMiddleware, async (req,res)=>{
   } catch(e){ console.error(e); res.status(500).json({ error: 'Server error' }); }
 });
 
+// Add this near the end of your server file (before app.listen)
+app.post('/api/mailer/test', async (req, res) => {
+  const to = (req.body && req.body.to) || process.env.SMTP_USER;
+  try {
+    if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
+      return res.status(400).json({ error: 'SMTP env not set (SMTP_HOST/SMTP_USER/SMTP_PASS)' });
+    }
+
+    const nodemailer = require('nodemailer');
+    const port = Number(process.env.SMTP_PORT || 587);
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port,
+      secure: port === 465, // true for 465, false for 587
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS
+      },
+      // helpful debug options (won't leak credentials in logs, but may output connection info)
+      logger: true,
+      debug: true
+    });
+
+    // verify connection (helps produce a clear failure reason)
+    await transporter.verify();
+
+    const info = await transporter.sendMail({
+      from: process.env.EMAIL_FROM || process.env.SMTP_USER,
+      to,
+      subject: 'Eric\'s Bakery — SMTP test',
+      text: 'This is a test email from Eric\'s Bakery (SMTP test).',
+      html: '<p>This is a <strong>test email</strong> from Eric\'s Bakery (SMTP test).</p>'
+    });
+
+    console.info('[mailer.test] sent ok', { messageId: info.messageId, response: info.response });
+    return res.json({ ok: true, info: { messageId: info.messageId, response: info.response } });
+  } catch (err) {
+    console.error('[mailer.test] error', err && (err.stack || err));
+    // Return safe error details so you can debug from the client
+    return res.status(500).json({ error: String(err && err.message ? err.message : err) });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, '0.0.0.0', () => console.log('API + static server listening on', PORT));
+app.listen(PORT, () => console.log('API + static server listening on', PORT));
