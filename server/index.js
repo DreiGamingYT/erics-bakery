@@ -787,87 +787,103 @@ async function hasColumn(tableName, columnName){
 async function sendResetEmail(toEmail, code) {
   try {
     const logoHost = (process.env.FRONTEND_ORIGIN || 'http://localhost:3000').replace(/\/$/, '');
-    const logoUrl = process.env.EMAIL_LOGO_URL || 'https://i.ibb.co/9HshkkkB/logo.png';
+    // file name/path used by your frontend (adjust if needed)
+    const logoUrl = `https://i.ibb.co/9HshkkkB/logo.png`;
+
     const expiresMinutes = Number(process.env.RESET_CODE_EXPIRE_MIN || 5);
-    const subject = `Eric's Bakery — Password reset code`;
+    const subject = 'Eric\'s Bakery — Password reset code';
     const plain = `Your password reset code: ${code}\n\nThis code will expire in ${expiresMinutes} minutes.\n\nIf you did not request this, ignore this email.`;
 
-    const html = `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Password reset</title>
-    <style>body{background:#f3f6fb;margin:0;padding:24px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial;color:#12202f}
-    .wrapper{max-width:600px;margin:20px auto}.card{background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(16,24,40,0.08);padding:26px;text-align:center;border:1px solid rgba(0,0,0,0.06)}
-    .logo{width:84px;height:84px;object-fit:cover;border-radius:12px;margin:0 auto 14px auto;display:block}
-    h1{margin:6px 0 8px;font-size:20px;color:#0f2b4b}p.lead{margin:0 0 18px;color:#475569;font-size:14px;line-height:1.45}
-    .code-box{margin:16px auto;padding:18px 14px;background:linear-gradient(180deg,#f6f7fb,#fff);border-radius:10px;display:inline-block;font-weight:800;font-size:28px;letter-spacing:4px;color:#112233;border:1px solid rgba(0,0,0,0.06);min-width:220px;text-align:center}
-    .small{font-size:12px;color:#353535;margin-top:12px}.cta{display:inline-block;margin-top:18px;background:#1b85ec;color:#fff;text-decoration:none;padding:10px 16px;border-radius:10px;font-weight:700}
-    .footer{margin-top:20px;font-size:12px;color:#353535;text-align:center}.footer span{font-size:11px;color:#555}
-    @media (max-width:420px){.code-box{font-size:22px;min-width:180px}.card{padding:18px}}</style>
-    </head><body>
-    <div class="wrapper" role="article" aria-label="Password reset email">
-      <div class="card">
-        <img src="${logoUrl}" alt="Eric's Bakery logo" class="logo" />
-        <h1>Password reset code</h1>
-        <p class="lead">Use the code below to reset your account password. The code expires in ${expiresMinutes} minutes.</p>
-        <div class="code-box" aria-live="polite" aria-atomic="true">${code}</div>
-        <div class="small">If you did not request a password reset, you can safely ignore this message.</div>
-        <a href="${logoHost}" target="_blank" rel="noreferrer noopener" class="cta">Go to Eric's Bakery</a>
-        <div class="footer" style="margin-top:20px"><span>Sent to ${toEmail}</span></div>
-      </div>
+    const html = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Password reset</title>
+  <style>
+    body { background: #f3f6fb; margin:0; padding:24px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial; color:#12202f; }
+    .wrapper { max-width:600px; margin:20px auto; }
+    .card { background: #ffffff; border-radius:12px; box-shadow:0 10px 30px rgba(16,24,40,0.08); padding:26px; text-align:center; border:1px solid rgba(0,0,0,0.06);}
+    .logo { width:84px; height:84px; object-fit:cover; border-radius:12px; margin:0 auto 14px auto; display:block; }
+    h1 { margin:6px 0 8px; font-size:20px; color:#0f2b4b; }
+    p.lead { margin:0 0 18px; color: #475569; font-size:14px; line-height:1.45; }
+    .code-box { margin:16px auto; padding:18px 14px; background:linear-gradient(180deg,#f6f7fb,#ffffff); border-radius:10px; display:inline-block; font-weight:800; font-size:28px; letter-spacing:4px; color:#112233; border:1px solid rgba(0,0,0,0.06); min-width:220px; text-align:center; }
+    .small { font-size:12px; color: #353535; margin-top:12px; }
+    .cta { display:inline-block; margin-top:18px; background:#1b85ec; color: #ffffff; text-decoration:none; padding:10px 16px; border-radius:10px; font-weight:700; }
+    .footer { margin-top:20px; font-size:12px; color: #353535; text-align:center; }
+    .footer span { font-size:11px; text-decoration:none; color: #555555; }
+    @media (max-width:420px){ .code-box { font-size:22px; min-width:180px } .card { padding:18px } }
+  </style>
+</head>
+<body>
+  <div class="wrapper" role="article" aria-label="Password reset email">
+    <div class="card">
+      <img src="${logoUrl}" alt="Eric's Bakery logo" class="logo" />
+      <h1>Password reset code</h1>
+      <p class="lead">Use the code below to reset your account password. The code expires in ${expiresMinutes} minutes.</p>
+
+      <div class="code-box" aria-live="polite" aria-atomic="true">${code}</div>
+
+      <div class="small">If you did not request a password reset, you can safely ignore this message.</div>
+
+      <a href="${logoHost}"
+   target="_blank"
+   rel="noreferrer noopener"
+   style="
+     display:inline-block;
+     margin-top:18px;
+     background:#1b85ec;
+     color:#ffffff !important;
+     text-decoration:none;
+     padding:10px 16px;
+     border-radius:10px;
+     font-weight:700;
+   ">
+  Go to Eric's Bakery
+</a>
+
+      <div class="footer" style="margin-top:20px;font-size:12px;color:#353535;text-align:center;">
+  Eric's Bakery — friendly inventory tracking for small bakeries<br />
+  <span style="opacity:0.9;color:#555555;font-size:11px;">
+    Sent to ${toEmail}
+  </span>
+</div>
     </div>
-    </body></html>`;
+  </div>
+</body>
+</html>`;
 
-    // If no SMTP configured, fallback to console preview (dev)
-    if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
-      console.warn('[sendResetEmail] SMTP not configured — printing HTML preview to console');
-      console.info('[sendResetEmail] preview:', { to: toEmail, subject, plain });
-      console.info('\n===== HTML PREVIEW =====\n', html);
-      return;
-    }
-
-    // Build transporter with common TLS options
+  // If SMTP configured, send via SMTP; otherwise log HTML for dev fallback
+  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
     const nodemailer = require('nodemailer');
-    const port = Number(process.env.SMTP_PORT || 587);
-    const secure = port === 465; // true for 465
     const transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST,
-      port,
-      secure,
-      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-      // sometimes useful on container hosts (optional)
-      tls: { rejectUnauthorized: process.env.SMTP_TLS_REJECT !== 'false' } 
+      port: Number(process.env.SMTP_PORT || 587),
+      secure: Number(process.env.SMTP_PORT || 587) === 465,
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
     });
 
-    // verify connection configuration before sending
-    try {
-      await transporter.verify();
-      console.info('[sendResetEmail] SMTP transporter verified (host=%s port=%s secure=%s)', process.env.SMTP_HOST, port, secure);
-    } catch (vErr) {
-      console.error('[sendResetEmail] SMTP transporter.verify() failed:', vErr && vErr.message ? vErr.message : vErr);
-      // still try to send and rely on sendMail error handling below
-    }
+    await transporter.sendMail({
+      from: process.env.EMAIL_FROM || `"Eric's Bakery" <no-reply@${(process.env.FRONTEND_ORIGIN||'bakery.local').replace(/^https?:\/\//,'')}>`,
+      to: toEmail,
+      subject,
+      text: plain,
+      html
+    });
+    console.info('[sendResetEmail] email queued to', toEmail);
+    return;
+  }
 
-    // send mail and log result (and possible error)
-    try {
-      const info = await transporter.sendMail({
-        from: process.env.EMAIL_FROM || `"Eric's Bakery" <${process.env.SMTP_USER}>`,
-        to: toEmail,
-        replyTo: process.env.EMAIL_REPLY_TO || process.env.SMTP_USER,
-        subject,
-        text: plain,
-        html
-      });
-      console.info('[sendResetEmail] sendMail OK, messageId=%s, accepted=%o, rejected=%o', info.messageId, info.accepted, info.rejected);
-      // for SMTP services like Gmail, info.response often contains server ack
-      if(info && info.response) console.info('[sendResetEmail] smtp response:', info.response);
-      return info;
-    } catch (sendErr) {
-      console.error('[sendResetEmail] transporter.sendMail failed:', sendErr && sendErr.stack ? sendErr.stack : sendErr);
-      // If Gmail rejects, the detailed error will be in sendErr and logged above.
-      return;
-    }
+  // Dev fallback (no SMTP): print HTML to console so you can copy/paste
+  console.info('[sendResetEmail] SMTP not configured — printing fallback HTML to console\n', { to: toEmail, subject, plain });
+  console.info('\n===== HTML PREVIEW =====\n', html);
+  return;
   } catch (err) {
-    console.error('sendResetEmail: unexpected error', err && err.stack ? err.stack : err);
+    console.error('sendResetEmail: mailer error', err && err.stack ? err.stack : err);
+    // do not throw to avoid blocking the main flow (we log and continue)
   }
 }
+
 
 function signResetToken(payload) {
   // short lived token used to perform the reset after code verification
