@@ -784,56 +784,44 @@ async function hasColumn(tableName, columnName){
   }
 }
 
-// Put this function in server/index.js (replace existing sendResetEmail)
+// robust sendResetEmail - replace existing function
 async function sendResetEmail(toEmail, code) {
-  try {
-    const expiresMinutes = Number(process.env.RESET_CODE_EXPIRE_MIN || 5);
-    const subject = `Eric's Bakery — Password reset code`;
-    const plain = `Your password reset code: ${code}\n\nThis code will expire in ${expiresMinutes} minutes.\n\nIf you did not request this, ignore this message.`;
-    const logoUrl = process.env.EMAIL_LOGO_URL || 'https://i.ibb.co/9HshkkkB/logo.png';
-    const siteUrl = (process.env.FRONTEND_ORIGIN || 'https://erics-bakery.vercel.app').replace(/\/$/, '');
+  const expiresMinutes = Number(process.env.RESET_CODE_EXPIRE_MIN || 5);
+  const subject = `Eric's Bakery — Password reset code`;
+  const plain = `Your password reset code: ${code}\n\nThis code will expire in ${expiresMinutes} minutes.\n\nIf you did not request this, ignore this message.`;
+  const logoUrl = process.env.EMAIL_LOGO_URL || 'https://i.ibb.co/9HshkkkB/logo.png';
+  const siteUrl = (process.env.FRONTEND_ORIGIN || 'https://erics-bakery.vercel.app').replace(/\/$/, '');
 
-    const html = `<!doctype html>
-<html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-<style>
-  body{font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial; background:#f3f6fb; color:#12202f; margin:0; padding:20px}
-  .wrap{max-width:600px;margin:20px auto}
-  .card{background:#fff;border-radius:12px;padding:24px;text-align:center;border:1px solid rgba(0,0,0,0.06)}
-  .logo{width:80px;height:80px;border-radius:10px;object-fit:cover;margin:0 auto 8px}
-  h1{margin:6px 0 12px;font-size:20px;color:#0f2b4b}
-  .lead{color:#475569;font-size:14px;margin:0 0 18px}
-  .code{display:inline-block;padding:16px 20px;font-size:28px;font-weight:800;letter-spacing:4px;border-radius:10px;background:linear-gradient(180deg,#f6f7fb,#fff);border:1px solid rgba(0,0,0,0.06);min-width:200px}
-  .small{font-size:12px;color:#555;margin-top:14px}
-  .btn{display:inline-block;margin-top:18px;padding:10px 16px;background:#1b85ec;color:#fff;text-decoration:none;border-radius:10px;font-weight:700}
-</style></head><body>
-  <div class="wrap" role="article" aria-label="Password reset">
-    <div class="card">
-      <img src="${logoUrl}" alt="Eric's Bakery logo" class="logo"/>
-      <h1>Password reset code</h1>
-      <p class="lead">Use the code below to reset your account password. The code expires in ${expiresMinutes} minutes.</p>
-      <div class="code" aria-live="polite" aria-atomic="true">${code}</div>
-      <div class="small">If you did not request this, you can safely ignore this email.</div>
-      <div><a class="btn" href="${siteUrl}" target="_blank" rel="noreferrer noopener">Go to Eric's Bakery</a></div>
-      <div style="margin-top:18px;font-size:12px;color:#666">Sent to ${toEmail}</div>
+  const html = `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/></head><body>
+    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial;background:#f3f6fb;padding:20px">
+      <div style="max-width:600px;margin:0 auto;background:#fff;border-radius:12px;padding:22px;text-align:center;border:1px solid rgba(0,0,0,0.06)">
+        <img src="${logoUrl}" alt="logo" style="width:80px;height:80px;border-radius:10px;object-fit:cover;margin-bottom:12px"/>
+        <h2 style="margin:6px 0;color:#0f2b4b">Password reset code</h2>
+        <p style="color:#475569">Use the code below to reset your account password. It expires in ${expiresMinutes} minutes.</p>
+        <div style="display:inline-block;padding:16px 20px;font-size:28px;font-weight:800;letter-spacing:4px;border-radius:10px;background:linear-gradient(180deg,#f6f7fb,#fff);border:1px solid rgba(0,0,0,0.06);min-width:200px">
+          ${code}
+        </div>
+        <p style="color:#666;margin-top:14px;font-size:13px">Sent to ${toEmail}</p>
+        <div style="margin-top:14px"><a href="${siteUrl}" style="display:inline-block;padding:10px 16px;background:#1b85ec;color:#fff;border-radius:8px;text-decoration:none">Go to Eric's Bakery</a></div>
+      </div>
     </div>
-  </div>
-</body></html>`;
+  </body></html>`;
 
-    // Prefer SendGrid API if key present (no extra npm required)
+  try {
+    // 1) Prefer SendGrid API if you provided API key in Vercel env
     if (process.env.SENDGRID_API_KEY) {
-      // use global fetch (Node 18+ / Vercel supports fetch). If you run locally on older Node, install node-fetch.
       const payload = {
         personalizations: [{ to: [{ email: toEmail }] }],
-        from: { email: process.env.EMAIL_FROM && process.env.EMAIL_FROM.match(/<(.+)>/) ? process.env.EMAIL_FROM.match(/<(.+)>/)[1] : (process.env.SMTP_USER || 'no-reply@erics-bakery.app'), name: "Eric's Bakery" },
+        from: { email: (process.env.EMAIL_FROM && process.env.EMAIL_FROM.match(/<(.+)>/)) ? process.env.EMAIL_FROM.match(/<(.+)>/)[1] : (process.env.SMTP_USER || 'no-reply@erics-bakery.app'), name: "Eric's Bakery" },
         subject,
         content: [
           { type: 'text/plain', value: plain },
           { type: 'text/html', value: html }
         ],
-        reply_to: { email: process.env.EMAIL_FROM && process.env.EMAIL_FROM.match(/<(.+)>/) ? process.env.EMAIL_FROM.match(/<(.+)>/)[1] : (process.env.SMTP_USER || 'no-reply@erics-bakery.app') }
+        reply_to: { email: (process.env.EMAIL_FROM && process.env.EMAIL_FROM.match(/<(.+)>/)) ? process.env.EMAIL_FROM.match(/<(.+)>/)[1] : (process.env.SMTP_USER || 'no-reply@erics-bakery.app') }
       };
 
-      const sgRes = await fetch('https://api.sendgrid.com/v3/mail/send', {
+      const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${process.env.SENDGRID_API_KEY}`,
@@ -842,22 +830,22 @@ async function sendResetEmail(toEmail, code) {
         body: JSON.stringify(payload)
       });
 
-      if (!sgRes.ok) {
-        const text = await sgRes.text().catch(()=>null);
-        console.error('[sendResetEmail][SendGrid] failed', sgRes.status, sgRes.statusText, text);
-        throw new Error(`SendGrid error ${sgRes.status} ${String(text).slice(0,200)}`);
+      const text = await res.text().catch(()=>null);
+      if (!res.ok) {
+        console.error('[sendResetEmail][SendGrid] failed', res.status, res.statusText, text);
+        return { ok: false, provider: 'sendgrid', status: res.status, text: String(text).slice(0,200) };
       }
 
       console.info('[sendResetEmail] Sent via SendGrid to', toEmail);
-      return;
+      return { ok: true, provider: 'sendgrid' };
     }
 
-    // Fallback: nodemailer via SMTP (verify then send)
+    // 2) Fallback to SMTP via nodemailer (requires SMTP env vars set on Vercel)
     if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
-      console.warn('[sendResetEmail] No SMTP configured and no SENDGRID_API_KEY — printing HTML to logs');
+      console.warn('[sendResetEmail] No SENDGRID_API_KEY and SMTP not configured. Printing HTML to logs.');
       console.info('[reset-email-preview]', { to: toEmail, subject, plain });
       console.info('\n===== HTML PREVIEW =====\n', html);
-      return;
+      return { ok: false, provider: 'none', reason: 'no-mail-config' };
     }
 
     const nodemailer = require('nodemailer');
@@ -866,20 +854,19 @@ async function sendResetEmail(toEmail, code) {
       port: Number(process.env.SMTP_PORT || 587),
       secure: Number(process.env.SMTP_PORT || 0) === 465,
       auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-      tls: { rejectUnauthorized: false } // avoid some cert issues on hosted environments
+      tls: { rejectUnauthorized: false }
     });
 
-    // verify transporter (helpful to surfacing auth/network issues in logs)
+    // verify transporter and log failures (very helpful on Vercel)
     try {
       await transporter.verify();
       console.info('[sendResetEmail] SMTP transporter verified');
     } catch (vErr) {
       console.error('[sendResetEmail] transporter.verify failed', vErr && (vErr.stack || vErr));
-      // don't throw yet — continue to try send (we already logged verify failure)
+      // continue and attempt send anyway (we log details)
     }
 
-    const fromAddress = process.env.EMAIL_FROM || (process.env.SMTP_USER || 'no-reply@erics-bakery.app');
-
+    const fromAddress = process.env.EMAIL_FROM || process.env.SMTP_USER || 'no-reply@erics-bakery.app';
     const info = await transporter.sendMail({
       from: fromAddress,
       to: toEmail,
@@ -887,22 +874,26 @@ async function sendResetEmail(toEmail, code) {
       subject,
       text: plain,
       html,
-      headers: {
-        'X-Mailer': 'EricBakery/1.0',
-        'MIME-Version': '1.0'
-      }
+      headers: { 'X-Mailer': 'EricBakery/1.0' }
     });
 
-    console.info('[sendResetEmail] SMTP message sent id=', info && (info.messageId || info.accepted) || info);
-    return;
+    // log full info object (it contains accepted/rejected arrays)
+    try { console.info('[sendResetEmail] SMTP send info:', JSON.stringify(info)); } catch(e){ console.info('[sendResetEmail] SMTP send info (raw):', info); }
+
+    // info.accepted is array of accepted recipients
+    const accepted = Array.isArray(info.accepted) ? info.accepted : (info.accepted || []);
+    const rejected = Array.isArray(info.rejected) ? info.rejected : (info.rejected || []);
+    if (rejected.length) {
+      console.warn('[sendResetEmail] some recipients rejected', rejected);
+      return { ok: false, provider: 'smtp', info, accepted, rejected };
+    }
+
+    return { ok: true, provider: 'smtp', info };
   } catch (err) {
-    // Do not throw (keeps flow non-blocking); log details for debugging
     console.error('sendResetEmail: error', err && (err.stack || err));
-    // expose minimal message for caller (caller already ignores send failures)
-    return;
+    return { ok: false, provider: 'exception', error: String(err).slice(0,400) };
   }
 }
-
 
 function signResetToken(payload) {
   // short lived token used to perform the reset after code verification
@@ -961,6 +952,22 @@ app.post('/api/mailer/test', async (req, res) => {
     console.error('[mailer.test] error', err && (err.stack || err));
     // Return safe error details so you can debug from the client
     return res.status(500).json({ error: String(err && err.message ? err.message : err) });
+  }
+});
+
+// debug test route — add to server/index.js
+app.post('/api/debug/send-test-email', async (req, res) => {
+  try {
+    const email = (req.body && req.body.email) ? String(req.body.email).trim() : null;
+    if (!email) return res.status(400).json({ error: 'email required' });
+    const code = (req.body && req.body.code) ? String(req.body.code) : String(Math.floor(100000 + Math.random()*900000));
+
+    const result = await sendResetEmail(email, code);
+    // return result so you can see details immediately
+    return res.json({ ok: true, result });
+  } catch (err) {
+    console.error('/api/debug/send-test-email err', err && err.stack ? err.stack : err);
+    return res.status(500).json({ error: 'Server error' });
   }
 });
 
