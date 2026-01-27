@@ -784,104 +784,122 @@ async function hasColumn(tableName, columnName){
   }
 }
 
-// Replace your current sendResetEmail with this function
+// Put this function in server/index.js (replace existing sendResetEmail)
 async function sendResetEmail(toEmail, code) {
   try {
-    const logoHost = (process.env.FRONTEND_ORIGIN || 'https://erics-bakery.vercel.app').replace(/\/$/, '');
-    // file name/path used by your frontend (adjust if needed)
-    const logoUrl = `https://i.ibb.co/9HshkkkB/logo.png`;
-
     const expiresMinutes = Number(process.env.RESET_CODE_EXPIRE_MIN || 5);
-    const subject = 'Eric\'s Bakery — Password reset code';
-    const plain = `Your password reset code: ${code}\n\nThis code will expire in ${expiresMinutes} minutes.\n\nIf you did not request this, ignore this email.`;
+    const subject = `Eric's Bakery — Password reset code`;
+    const plain = `Your password reset code: ${code}\n\nThis code will expire in ${expiresMinutes} minutes.\n\nIf you did not request this, ignore this message.`;
+    const logoUrl = process.env.EMAIL_LOGO_URL || 'https://i.ibb.co/9HshkkkB/logo.png';
+    const siteUrl = (process.env.FRONTEND_ORIGIN || 'https://erics-bakery.vercel.app').replace(/\/$/, '');
 
     const html = `<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Password reset</title>
-  <style>
-    body { background: #f3f6fb; margin:0; padding:24px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial; color:#12202f; }
-    .wrapper { max-width:600px; margin:20px auto; }
-    .card { background: #ffffff; border-radius:12px; box-shadow:0 10px 30px rgba(16,24,40,0.08); padding:26px; text-align:center; border:1px solid rgba(0,0,0,0.06);}
-    .logo { width:84px; height:84px; object-fit:cover; border-radius:12px; margin:0 auto 14px auto; display:block; }
-    h1 { margin:6px 0 8px; font-size:20px; color:#0f2b4b; }
-    p.lead { margin:0 0 18px; color: #475569; font-size:14px; line-height:1.45; }
-    .code-box { margin:16px auto; padding:18px 14px; background:linear-gradient(180deg,#f6f7fb,#ffffff); border-radius:10px; display:inline-block; font-weight:800; font-size:28px; letter-spacing:4px; color:#112233; border:1px solid rgba(0,0,0,0.06); min-width:220px; text-align:center; }
-    .small { font-size:12px; color: #353535; margin-top:12px; }
-    .cta { display:inline-block; margin-top:18px; background:#1b85ec; color: #ffffff; text-decoration:none; padding:10px 16px; border-radius:10px; font-weight:700; }
-    .footer { margin-top:20px; font-size:12px; color: #353535; text-align:center; }
-    .footer span { font-size:11px; text-decoration:none; color: #555555; }
-    @media (max-width:420px){ .code-box { font-size:22px; min-width:180px } .card { padding:18px } }
-  </style>
-</head>
-<body>
-  <div class="wrapper" role="article" aria-label="Password reset email">
+<html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<style>
+  body{font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial; background:#f3f6fb; color:#12202f; margin:0; padding:20px}
+  .wrap{max-width:600px;margin:20px auto}
+  .card{background:#fff;border-radius:12px;padding:24px;text-align:center;border:1px solid rgba(0,0,0,0.06)}
+  .logo{width:80px;height:80px;border-radius:10px;object-fit:cover;margin:0 auto 8px}
+  h1{margin:6px 0 12px;font-size:20px;color:#0f2b4b}
+  .lead{color:#475569;font-size:14px;margin:0 0 18px}
+  .code{display:inline-block;padding:16px 20px;font-size:28px;font-weight:800;letter-spacing:4px;border-radius:10px;background:linear-gradient(180deg,#f6f7fb,#fff);border:1px solid rgba(0,0,0,0.06);min-width:200px}
+  .small{font-size:12px;color:#555;margin-top:14px}
+  .btn{display:inline-block;margin-top:18px;padding:10px 16px;background:#1b85ec;color:#fff;text-decoration:none;border-radius:10px;font-weight:700}
+</style></head><body>
+  <div class="wrap" role="article" aria-label="Password reset">
     <div class="card">
-      <img src="${logoUrl}" alt="Eric's Bakery logo" class="logo" />
+      <img src="${logoUrl}" alt="Eric's Bakery logo" class="logo"/>
       <h1>Password reset code</h1>
       <p class="lead">Use the code below to reset your account password. The code expires in ${expiresMinutes} minutes.</p>
-
-      <div class="code-box" aria-live="polite" aria-atomic="true">${code}</div>
-
-      <div class="small">If you did not request a password reset, you can safely ignore this message.</div>
-
-      <a href="${logoHost}"
-   target="_blank"
-   rel="noreferrer noopener"
-   style="
-     display:inline-block;
-     margin-top:18px;
-     background:#1b85ec;
-     color:#ffffff !important;
-     text-decoration:none;
-     padding:10px 16px;
-     border-radius:10px;
-     font-weight:700;
-   ">
-  Go to Eric's Bakery
-</a>
-
-      <div class="footer" style="margin-top:20px;font-size:12px;color:#353535;text-align:center;">
-  Eric's Bakery — friendly inventory tracking for small bakeries<br />
-  <span style="opacity:0.9;color:#555555;font-size:11px;">
-    Sent to ${toEmail}
-  </span>
-</div>
+      <div class="code" aria-live="polite" aria-atomic="true">${code}</div>
+      <div class="small">If you did not request this, you can safely ignore this email.</div>
+      <div><a class="btn" href="${siteUrl}" target="_blank" rel="noreferrer noopener">Go to Eric's Bakery</a></div>
+      <div style="margin-top:18px;font-size:12px;color:#666">Sent to ${toEmail}</div>
     </div>
   </div>
-</body>
-</html>`;
+</body></html>`;
 
-  // If SMTP configured, send via SMTP; otherwise log HTML for dev fallback
-  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+    // Prefer SendGrid API if key present (no extra npm required)
+    if (process.env.SENDGRID_API_KEY) {
+      // use global fetch (Node 18+ / Vercel supports fetch). If you run locally on older Node, install node-fetch.
+      const payload = {
+        personalizations: [{ to: [{ email: toEmail }] }],
+        from: { email: process.env.EMAIL_FROM && process.env.EMAIL_FROM.match(/<(.+)>/) ? process.env.EMAIL_FROM.match(/<(.+)>/)[1] : (process.env.SMTP_USER || 'no-reply@erics-bakery.app'), name: "Eric's Bakery" },
+        subject,
+        content: [
+          { type: 'text/plain', value: plain },
+          { type: 'text/html', value: html }
+        ],
+        reply_to: { email: process.env.EMAIL_FROM && process.env.EMAIL_FROM.match(/<(.+)>/) ? process.env.EMAIL_FROM.match(/<(.+)>/)[1] : (process.env.SMTP_USER || 'no-reply@erics-bakery.app') }
+      };
+
+      const sgRes = await fetch('https://api.sendgrid.com/v3/mail/send', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.SENDGRID_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!sgRes.ok) {
+        const text = await sgRes.text().catch(()=>null);
+        console.error('[sendResetEmail][SendGrid] failed', sgRes.status, sgRes.statusText, text);
+        throw new Error(`SendGrid error ${sgRes.status} ${String(text).slice(0,200)}`);
+      }
+
+      console.info('[sendResetEmail] Sent via SendGrid to', toEmail);
+      return;
+    }
+
+    // Fallback: nodemailer via SMTP (verify then send)
+    if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
+      console.warn('[sendResetEmail] No SMTP configured and no SENDGRID_API_KEY — printing HTML to logs');
+      console.info('[reset-email-preview]', { to: toEmail, subject, plain });
+      console.info('\n===== HTML PREVIEW =====\n', html);
+      return;
+    }
+
     const nodemailer = require('nodemailer');
     const transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST,
       port: Number(process.env.SMTP_PORT || 587),
-      secure: Number(process.env.SMTP_PORT || 587) === 465,
-      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+      secure: Number(process.env.SMTP_PORT || 0) === 465,
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+      tls: { rejectUnauthorized: false } // avoid some cert issues on hosted environments
     });
 
-    await transporter.sendMail({
-      from: process.env.EMAIL_FROM || `"Eric's Bakery" <no-reply@${(process.env.FRONTEND_ORIGIN||'bakery.local').replace(/^https?:\/\//,'')}>`,
+    // verify transporter (helpful to surfacing auth/network issues in logs)
+    try {
+      await transporter.verify();
+      console.info('[sendResetEmail] SMTP transporter verified');
+    } catch (vErr) {
+      console.error('[sendResetEmail] transporter.verify failed', vErr && (vErr.stack || vErr));
+      // don't throw yet — continue to try send (we already logged verify failure)
+    }
+
+    const fromAddress = process.env.EMAIL_FROM || (process.env.SMTP_USER || 'no-reply@erics-bakery.app');
+
+    const info = await transporter.sendMail({
+      from: fromAddress,
       to: toEmail,
+      replyTo: fromAddress,
       subject,
       text: plain,
-      html
+      html,
+      headers: {
+        'X-Mailer': 'EricBakery/1.0',
+        'MIME-Version': '1.0'
+      }
     });
-    console.info('[sendResetEmail] email queued to', toEmail);
-    return;
-  }
 
-  // Dev fallback (no SMTP): print HTML to console so you can copy/paste
-  console.info('[sendResetEmail] SMTP not configured — printing fallback HTML to console\n', { to: toEmail, subject, plain });
-  console.info('\n===== HTML PREVIEW =====\n', html);
-  return;
+    console.info('[sendResetEmail] SMTP message sent id=', info && (info.messageId || info.accepted) || info);
+    return;
   } catch (err) {
-    console.error('sendResetEmail: mailer error', err && err.stack ? err.stack : err);
-    // do not throw to avoid blocking the main flow (we log and continue)
+    // Do not throw (keeps flow non-blocking); log details for debugging
+    console.error('sendResetEmail: error', err && (err.stack || err));
+    // expose minimal message for caller (caller already ignores send failures)
+    return;
   }
 }
 
