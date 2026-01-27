@@ -606,13 +606,13 @@ app.post('/api/auth/forgot', async (req, res) => {
     console.info('[forgot] inserted reset row for', emailToStore);
 
     // send email async (do not block response). sendResetEmail will output logging.
-    (async () => {
-      try {
-        await sendResetEmail(emailToStore, code);
-      } catch (e) {
-        console.warn('[forgot] sendResetEmail failed (async):', e && e.message ? e.message : e);
-      }
-    })();
+    try {
+  await sendResetEmail(emailToStore, code);
+  console.info('[forgot] sendResetEmail completed for', emailToStore);
+} catch (e) {
+  // log but DO NOT fail the endpoint (we still return OK to avoid leaking existence)
+  console.warn('[forgot] sendResetEmail failed (will still return OK):', e && e.message ? e.message : e);
+}
 
     // always return OK to avoid revealing whether the address exists
     return res.json({ ok: true, message: 'Reset code created (if the address exists).' });
