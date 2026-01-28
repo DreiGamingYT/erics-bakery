@@ -234,7 +234,7 @@ app.put('/api/users/me', authMiddleware, async (req, res) => {
     // Role may only be changed if current user is Owner
     if (requestedRole && req.user && req.user.role === 'Owner') {
       // whitelist roles to avoid injection
-      const allowedRoles = ['Owner','Baker','Cashier','Assistant'];
+      const allowedRoles = ['Owner','Cashier','Assistant'];
       if (!allowedRoles.includes(requestedRole)) return res.status(400).json({ error: 'Invalid role' });
       fields.push('role = ?'); params.push(requestedRole);
     }

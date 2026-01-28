@@ -1205,7 +1205,7 @@ async function renderIngredientCards(page = 1, limit = 5) {
               await apiFetch(`/api/ingredients/${id}`, { method: 'PUT', body: { min_qty: Number(newMin) }});
             } else {
               // user tried to change metadata but lacks permission — ignore and notify
-              notify('You are not authorized to modify item metadata (min/max/supplier). Changes to stock were applied only.');
+              // notify('You are not authorized to modify item metadata (min/max/supplier). Changes to stock were applied only.');
             }
           }
 
