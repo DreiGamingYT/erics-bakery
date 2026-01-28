@@ -1130,58 +1130,42 @@ async function renderIngredientCards(page = 1, limit = 5) {
     `;
 
     const rowsHtml = items.map(i => {
-  const isMaterial = (i.type === 'ingredient');
-  const threshold = isMaterial ? computeThresholdForIngredient(i) : '';
-  const lowBadge = (isMaterial && (Number(i.qty || 0) <= (Number(i.min_qty || 0) || threshold)))
-                     ? '<span class="badge low">Low</span>' : '';
-  const expiryNote = (isMaterial && i.expiry ? `<div class="muted small">${daysUntil(i.expiry)}d</div>` : '');
+      // server returns min_qty, max_qty
+      const isMaterial = (i.type === 'ingredient');
+      const threshold = isMaterial ? computeThresholdForIngredient(i) : '';
+      const lowBadge = (isMaterial && (Number(i.qty || 0) <= (Number(i.min_qty || 0) || threshold))) ? '<span class="badge low">Low</span>' : '';
+      const expiryNote = (isMaterial && i.expiry ? `<div class="muted small">${daysUntil(i.expiry)}d</div>` : '');
 
-  // current user (ensure you set window.CURRENT_USER on login)
-  const me = window.CURRENT_USER || window.ME || null;
-  if (!me) {
-    // small debug aid so you can see why buttons are disabled
-    console.debug('[renderIngredientCards] no CURRENT_USER found. Set window.CURRENT_USER after login.');
-  }
-  const myRole = (me && me.role) ? String(me.role).toLowerCase() : '';
+      // current user (ensure you set window.CURRENT_USER on login)
+      const me = window.CURRENT_USER || { id: null, role: '' };
+      const myRole = (me.role || '').toLowerCase();
 
-  // role-based privileges (lowercase)
-  const privilegedEditRoles = ['owner','admin','baker'];       // can edit metadata
-  const privilegedStockRoles = ['owner','admin','baker','assistant']; // can stock in/out
+      // decide allowed edit roles (lowercased)
+      const privilegedEdit = ['owner', 'admin', 'baker']; // server-enforced roles
+      const privilegedStock = ['owner', 'admin', 'baker','assistant'];
 
-  // owner id fields: try common names in order
-  const ownerId = (i.created_by || i.user_id || i.owner_id || null);
+      // Save button allowed if user canStock (for in/out) OR canEdit (for metadata)
+      const saveAllowed = privilegedStock.includes(myRole) || privilegedEdit.includes(myRole);
 
-  // determine permissions
-  const roleCanEdit = privilegedEditRoles.includes(myRole);
-  const roleCanStock = privilegedStockRoles.includes(myRole);
-  const ownerIsMe = me && ownerId && Number(me.id) === Number(ownerId);
+      return `<tr data-id="${i.id}" data-type="${escapeHtml(i.type||'')}" style="background:var(--card);border-bottom:1px solid rgba(0,0,0,0.04)">
+        <td style="padding:10px;vertical-align:middle">${i.id}</td>
+        <td style="padding:10px;vertical-align:middle"><strong>${escapeHtml(i.name)}</strong><div class="muted small">${escapeHtml(i.type)}</div></td>
+        <td style="padding:10px;vertical-align:middle">${isMaterial ? escapeHtml(i.supplier||'') : ''}</td>
+        <td style="padding:10px;vertical-align:middle"><span class="qty-value">${i.qty}</span> ${expiryNote} ${lowBadge}</td>
+        <td style="padding:10px;vertical-align:middle">${isMaterial ? escapeHtml(i.unit||'') : ''}</td>
+        <td style="padding:10px;vertical-align:middle">${isMaterial ? threshold : ''}</td>
+        <td style="padding:10px;vertical-align:middle">${isMaterial ? `<input class="min-input" type="number" value="${i.min_qty||0}" step="0.01" style="width:80px" />` : ''}</td>
+        <td style="padding:10px;vertical-align:middle"><input class="in-input" type="number" step="0.01" style="width:90px" /></td>
+        <td style="padding:10px;vertical-align:middle"><input class="out-input" type="number" step="0.01" style="width:90px" /></td>
+        <td role="cell" style="padding:10px;vertical-align:middle">
+            <button class="btn small save-row" type="button" ${saveAllowed ? '' : 'disabled title="Not authorized"'} aria-label="Save changes for ${escapeHtml(i.name)}">Save</button>
+            <button class="btn small soft details-btn" data-id="${i.id}" type="button" aria-controls="modal" aria-label="Show details for ${escapeHtml(i.name)}">Details</button>
+            <button class="btn small soft edit-btn" type="button" ${canEdit ? '' : 'disabled title="Not authorized"'} aria-label="Edit ${escapeHtml(i.name)}">Edit</button>
+        </td>
+      </tr>`;
+    }).join('') || `<tr><td colspan="10" class="muted" style="padding:12px">No inventory items</td></tr>`;
 
-  // final permissions: owner OR role
-  const canEdit = roleCanEdit || ownerIsMe;
-  const canStock = roleCanStock || ownerIsMe;
-
-  // Save allowed when either stock ops or edit metadata permitted
-  const saveAllowed = canStock || canEdit;
-
-  return `<tr data-id="${i.id}" data-type="${escapeHtml(i.type||'')}" style="background:var(--card);border-bottom:1px solid rgba(0,0,0,0.04)">
-    <td style="padding:10px;vertical-align:middle">${i.id}</td>
-    <td style="padding:10px;vertical-align:middle"><strong>${escapeHtml(i.name)}</strong><div class="muted small">${escapeHtml(i.type)}</div></td>
-    <td style="padding:10px;vertical-align:middle">${isMaterial ? escapeHtml(i.supplier||'') : ''}</td>
-    <td style="padding:10px;vertical-align:middle"><span class="qty-value">${i.qty}</span> ${expiryNote} ${lowBadge}</td>
-    <td style="padding:10px;vertical-align:middle">${isMaterial ? escapeHtml(i.unit||'') : ''}</td>
-    <td style="padding:10px;vertical-align:middle">${isMaterial ? threshold : ''}</td>
-    <td style="padding:10px;vertical-align:middle">${isMaterial ? `<input class="min-input" type="number" value="${i.min_qty||0}" step="0.01" style="width:80px" />` : ''}</td>
-    <td style="padding:10px;vertical-align:middle"><input class="in-input" type="number" step="0.01" style="width:90px" /></td>
-    <td style="padding:10px;vertical-align:middle"><input class="out-input" type="number" step="0.01" style="width:90px" /></td>
-    <td role="cell" style="padding:10px;vertical-align:middle">
-        <button class="btn small save-row" type="button" ${saveAllowed ? '' : 'disabled title="Not authorized"'} aria-label="Save changes for ${escapeHtml(i.name)}">Save</button>
-        <button class="btn small soft details-btn" data-id="${i.id}" type="button" aria-controls="modal" aria-label="Show details for ${escapeHtml(i.name)}">Details</button>
-        <button class="btn small soft edit-btn" type="button" ${canEdit ? '' : 'disabled title="Not authorized"'} aria-label="Edit ${escapeHtml(i.name)}">Edit</button>
-    </td>
-  </tr>`;
-}).join('') || `<tr><td colspan="10" class="muted" style="padding:12px">No inventory items</td></tr>`;
-    
-const tableFooter = `</tbody></table>`;
+    const tableFooter = `</tbody></table>`;
 
     // pagination wrapper
     const paginationWrap = `<div id="invPagination" style="margin-top:12px;display:flex;justify-content:center"></div>`;
