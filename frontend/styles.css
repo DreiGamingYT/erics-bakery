@@ -1466,7 +1466,7 @@ button,
 a,
 [role="button"],
 .clickable {
-  cursor: url('./defualt.png') 32 32 auto;
+  cursor: url('./defualt.png') 32 32, auto;
 }
 
 /* Disabled buttons */
@@ -1483,7 +1483,7 @@ button:disabled,
 #editMin,
 #ingQty,
 #ingMin {
-  cursor: url('./add_default.png') 32 32 auto;
+  cursor: url('./add_default.png') 32 32, auto;
 }
 
 .btn:hover:not(:disabled) {
@@ -1499,5 +1499,5 @@ button:disabled,
 .edit-btn,
 .details-btn,
 #addIngredientBtn {
-  cursor: url('./add_default.png') 32 32 auto;
+  cursor: url('./add_default.png') 32 32, auto;
 }
