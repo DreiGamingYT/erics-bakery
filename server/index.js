@@ -86,13 +86,13 @@ function authMiddleware(req, res, next) {
 function canEditIngredient(user) {
   if(!user || !user.role) return false;
   // Owner/Admin can edit ingredients
-  return ['Owner','Admin'].includes(user.role);
+  return ['Owner', 'Baker', 'Admin'].includes(user.role);
 }
 
 function canStockIngredient(user) {
   if(!user || !user.role) return false;
   // Owner/Admin/Assistant can do stock in/out
-  return ['Owner','Admin','Assistant'].includes(user.role);
+  return ['Owner', 'Baker', 'Admin', 'Assistant'].includes(user.role);
 }
 
 let mailer = null;
@@ -234,7 +234,7 @@ app.put('/api/users/me', authMiddleware, async (req, res) => {
     // Role may only be changed if current user is Owner
     if (requestedRole && req.user && req.user.role === 'Owner') {
       // whitelist roles to avoid injection
-      const allowedRoles = ['Owner','Cashier','Assistant'];
+      const allowedRoles = ['Owner','Cashier','Assistant','Baker'];
       if (!allowedRoles.includes(requestedRole)) return res.status(400).json({ error: 'Invalid role' });
       fields.push('role = ?'); params.push(requestedRole);
     }
