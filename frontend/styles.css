@@ -52,6 +52,7 @@ body{
   background: linear-gradient(180deg, var(--bg) 0%);
   -webkit-font-smoothing:antialiased;
   line-height:1.45;
+  cursor: url('defualt.png') 32 32, auto;
 }
 
 .hidden{display:none!important}
@@ -1458,4 +1459,45 @@ body{
   .settings-grid { grid-template-columns: 1fr; }
   .profile-big .profile-left { width:100%; order:2; }
   .profile-big .profile-right { order:1; }
+}
+
+button,
+.btn,
+a,
+[role="button"],
+.clickable {
+  cursor: url('defualt.png') 32 32 auto;
+}
+
+/* Disabled buttons */
+button:disabled,
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.in-input,
+.out-input,
+.min-input,
+#editQty,
+#editMin,
+#ingQty,
+#ingMin {
+  cursor: url('add_default.png') 32 32 auto;
+}
+
+.btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.05);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.save-row,
+.edit-btn,
+.details-btn,
+#addIngredientBtn {
+  cursor: url('add_default.png') 32 32 auto;
 }
