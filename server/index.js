@@ -86,14 +86,17 @@ function authMiddleware(req, res, next) {
 function canEditIngredient(user) {
   if (!user || !user.role) return false;
   const role = String(user.role).toLowerCase();
-  return ['owner','baker','admin'].includes(role);
+  // adjust allowed roles if your DB uses different names (e.g., 'admin' vs 'Owner')
+  return ['owner', 'admin', 'baker'].includes(role);
 }
 
 function canStockIngredient(user) {
   if (!user || !user.role) return false;
   const role = String(user.role).toLowerCase();
-  return ['owner','baker','admin','assistant'].includes(role);
+  return ['owner', 'admin', 'baker', 'assistant'].includes(role);
 }
+
+if (!canEditIngredient(req.user)) return res.status(403).json({ error: 'Forbidden' });
 
 let mailer = null;
 if(process.env.MAIL_HOST && process.env.MAIL_USER && process.env.MAIL_PASS){

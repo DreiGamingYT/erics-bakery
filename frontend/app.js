@@ -1140,12 +1140,14 @@ async function renderIngredientCards(page = 1, limit = 5) {
       const me = window.CURRENT_USER || window.ME || { id: null, role: '' };
       const myRole = (me.role || '').toString().toLowerCase();
 
-      const privilegedEdit = ['owner', 'admin', 'baker'];              // roles allowed to edit metadata
-      const privilegedStock = ['owner', 'admin', 'baker', 'assistant']; // roles allowed to stock in/out
+      // Roles allowed to edit metadata (min/max/supplier/etc)
+      const privilegedEdit = ['owner', 'admin', 'baker', 'assistant'];
+      // Roles allowed to perform stock in/out
+      const privilegedStock = ['owner', 'admin', 'baker', 'assistant'];
 
       const canEdit = privilegedEdit.includes(myRole);
       const canStock = privilegedStock.includes(myRole);
-      const saveAllowed = canStock || canEdit;  
+      const saveAllowed = canStock || canEdit;
 
       return `<tr data-id="${i.id}" data-type="${escapeHtml(i.type||'')}" style="background:var(--card);border-bottom:1px solid rgba(0,0,0,0.04)">
         <td style="padding:10px;vertical-align:middle">${i.id}</td>
