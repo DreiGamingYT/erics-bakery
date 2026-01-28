@@ -1129,30 +1129,38 @@ async function renderIngredientCards(page = 1, limit = 5) {
       <tbody>
     `;
 
-    // replace your existing rowsHtml = items.map( ... ) block with this
-const rowsHtml = items.map(i => {
+    const rowsHtml = items.map(i => {
   const isMaterial = (i.type === 'ingredient');
   const threshold = isMaterial ? computeThresholdForIngredient(i) : '';
-  const lowBadge = (isMaterial && (Number(i.qty || 0) <= (Number(i.min_qty || 0) || threshold))) ? '<span class="badge low">Low</span>' : '';
+  const lowBadge = (isMaterial && (Number(i.qty || 0) <= (Number(i.min_qty || 0) || threshold)))
+                     ? '<span class="badge low">Low</span>' : '';
   const expiryNote = (isMaterial && i.expiry ? `<div class="muted small">${daysUntil(i.expiry)}d</div>` : '');
 
   // current user (ensure you set window.CURRENT_USER on login)
-  const me = window.CURRENT_USER || window.ME || { id: null, role: '' };
-  const myRole = (me.role || '').toString().toLowerCase();
+  const me = window.CURRENT_USER || window.ME || null;
+  if (!me) {
+    // small debug aid so you can see why buttons are disabled
+    console.debug('[renderIngredientCards] no CURRENT_USER found. Set window.CURRENT_USER after login.');
+  }
+  const myRole = (me && me.role) ? String(me.role).toLowerCase() : '';
 
   // role-based privileges (lowercase)
-  const privilegedEditRoles = ['owner','admin','baker']; // roles that can edit any item
-  const privilegedStockRoles = ['owner','admin','baker','assistant'];
+  const privilegedEditRoles = ['owner','admin','baker'];       // can edit metadata
+  const privilegedStockRoles = ['owner','admin','baker','assistant']; // can stock in/out
 
-  // owner field could be created_by, user_id, owner_id depending on your server schema
+  // owner id fields: try common names in order
   const ownerId = (i.created_by || i.user_id || i.owner_id || null);
 
-  // allow edit if role is privileged OR current user is the owner of the item
-  const canEdit = privilegedEditRoles.includes(myRole) || (me.id && ownerId && Number(me.id) === Number(ownerId));
+  // determine permissions
+  const roleCanEdit = privilegedEditRoles.includes(myRole);
+  const roleCanStock = privilegedStockRoles.includes(myRole);
+  const ownerIsMe = me && ownerId && Number(me.id) === Number(ownerId);
 
-  // allow stock ops if role in privilegedStockRoles OR owner (optional - currently using roles only)
-  const canStock = privilegedStockRoles.includes(myRole) || (me.id && ownerId && Number(me.id) === Number(ownerId));
+  // final permissions: owner OR role
+  const canEdit = roleCanEdit || ownerIsMe;
+  const canStock = roleCanStock || ownerIsMe;
 
+  // Save allowed when either stock ops or edit metadata permitted
   const saveAllowed = canStock || canEdit;
 
   return `<tr data-id="${i.id}" data-type="${escapeHtml(i.type||'')}" style="background:var(--card);border-bottom:1px solid rgba(0,0,0,0.04)">
@@ -1172,8 +1180,8 @@ const rowsHtml = items.map(i => {
     </td>
   </tr>`;
 }).join('') || `<tr><td colspan="10" class="muted" style="padding:12px">No inventory items</td></tr>`;
-
-    const tableFooter = `</tbody></table>`;
+    
+const tableFooter = `</tbody></table>`;
 
     // pagination wrapper
     const paginationWrap = `<div id="invPagination" style="margin-top:12px;display:flex;justify-content:center"></div>`;
