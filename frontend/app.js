@@ -1137,15 +1137,15 @@ async function renderIngredientCards(page = 1, limit = 5) {
       const expiryNote = (isMaterial && i.expiry ? `<div class="muted small">${daysUntil(i.expiry)}d</div>` : '');
 
       // current user (ensure you set window.CURRENT_USER on login)
-      const me = window.CURRENT_USER || { id: null, role: '' };
-      const myRole = (me.role || '').toLowerCase();
+      const me = window.CURRENT_USER || window.ME || { id: null, role: 'assistant' };
+      const role = (me.role || '').toString().toLowerCase();
 
-      // decide allowed edit roles (lowercased)
-      const privilegedEdit = ['owner', 'admin', 'baker']; // server-enforced roles
-      const privilegedStock = ['owner', 'admin', 'baker','assistant'];
+      // normalize role checks (lowercase)
+      const canEdit = ['owner','admin','baker'].includes(role);
+      const canStock = ['owner','admin','baker','assistant'].includes(role);
 
       // Save button allowed if user canStock (for in/out) OR canEdit (for metadata)
-      const saveAllowed = privilegedStock.includes(myRole) || privilegedEdit.includes(myRole);
+      const saveAllowed = canStock || canEdit;
 
       return `<tr data-id="${i.id}" data-type="${escapeHtml(i.type||'')}" style="background:var(--card);border-bottom:1px solid rgba(0,0,0,0.04)">
         <td style="padding:10px;vertical-align:middle">${i.id}</td>
@@ -2257,90 +2257,58 @@ async function openIngredientDetail(id){
   }
 }
 
-async function openEditIngredient(id) {
+async function openEditIngredient(id){
   try {
-    if (!id) return notify('Invalid ingredient id');
-    const ingResp = await fetchIngredient(id); // must return { ingredient: {...} } or ingredient object
-    const ing = ingResp && ingResp.ingredient ? ingResp.ingredient : (ingResp && ingResp.id ? ingResp : null);
-    if (!ing) return notify('Ingredient not found');
+    const ing = await fetchIngredient(id);
+    if(!ing) return notify('Ingredient not found');
 
-    // ensure values are safe for HTML
-    const nameEsc = escapeHtml(ing.name || '');
-    const qtyVal = Number(ing.qty || 0);
-    const minVal = Number(ing.min_qty || 0);
-    const unitVal = escapeHtml(ing.unit || '');
-
-    openModalHTML(`<h3>Edit — ${nameEsc}</h3>
+    // open modal populated with server data (use min_qty)
+    openModalHTML(`<h3>Edit — ${escapeHtml(ing.name)}</h3>
       <form id="editIngForm" class="form">
-        <label class="field"><span class="field-label">Name</span>
-          <input id="editName" type="text" value="${nameEsc}" required />
-        </label>
-        <label class="field"><span class="field-label">Quantity</span>
-          <input id="editQty" type="number" step="0.01" value="${qtyVal}" required />
-        </label>
-        <label class="field"><span class="field-label">Unit</span>
-          <input id="editUnit" type="text" value="${unitVal}" />
-        </label>
-        <label class="field"><span class="field-label">Minimum</span>
-          <input id="editMin" type="number" step="0.01" value="${minVal}" required />
-        </label>
-        <div style="display:flex;gap:8px;margin-top:8px" class="modal-actions">
-          <button class="btn primary" id="saveEditBtn" type="submit">Save</button>
-          <button class="btn ghost" id="cancelEdit" type="button">Cancel</button>
-        </div>
+        <label class="field"><span class="field-label">Name</span><input id="editName" type="text" value="${escapeHtml(ing.name)}" required/></label>
+        <label class="field"><span class="field-label">Quantity</span><input id="editQty" type="number" step="0.01" value="${ing.qty||0}" required/></label>
+        <label class="field"><span class="field-label">Minimum</span><input id="editMin" type="number" step="0.01" value="${ing.min_qty||0}" required/></label>
+        <div style="display:flex;gap:8px;margin-top:8px" class="modal-actions"><button class="btn primary" type="submit">Save</button><button class="btn ghost" id="cancelEdit" type="button">Cancel</button></div>
       </form>`);
 
-    q('cancelEdit')?.addEventListener('click', closeModal, { once: true });
-
-    q('editIngForm')?.addEventListener('submit', async (e) => {
+    q('cancelEdit')?.addEventListener('click', closeModal);
+    q('editIngForm')?.addEventListener('submit', async (e)=> {
       e.preventDefault();
-      const saveBtn = q('saveEditBtn');
-      if (saveBtn) saveBtn.disabled = true;
-
-      // read and normalize inputs
-      const newName = (q('editName')?.value || '').trim();
-      const newQty = Number(q('editQty')?.value || 0);
-      const newMin = Number(q('editMin')?.value || 0);
-      const newUnit = (q('editUnit')?.value || '').trim();
+      const body = {
+        name: q('editName')?.value || ing.name,
+        // update qty via stock endpoint instead of PUT qty (to keep activity log), but we'll support a direct qty update too:
+        qty: Number(q('editQty')?.value || ing.qty || 0),
+        min_qty: Number(q('editMin')?.value || ing.min_qty || 0)
+      };
 
       try {
-        // 1) update editable fields (name, min_qty, unit, attrs if needed)
-        const putPayload = {
-          name: newName,
-          min_qty: newMin,
-          unit: newUnit,
-          // include attrs if you allow editing them; keep ing.attrs to avoid accidental removal
-          attrs: ing.attrs || null
-        };
-        await apiFetch(`/api/ingredients/${id}`, { method: 'PUT', body: putPayload });
-
-        // 2) adjust qty via stock endpoint (so activity logs are created)
-        if (Number(newQty) !== Number(ing.qty || 0)) {
-          const diff = Number(newQty) - Number(ing.qty || 0);
+        // Update fields: server's PUT supports min_qty etc. If you prefer to use stock endpoint for qty changes, change accordingly.
+        await apiFetch(`/api/ingredients/${id}`, { method: 'PUT', body: { name: body.name, min_qty: body.min_qty, attrs: ing.attrs || null }});
+        // If qty changed, use the stock endpoint so activity is logged:
+        if (Number(body.qty) !== Number(ing.qty || 0)) {
+          const diff = Number(body.qty) - Number(ing.qty || 0);
           if (diff > 0) {
             await apiFetch(`/api/ingredients/${id}/stock`, { method: 'POST', body: { type: 'in', qty: Math.abs(diff), note: 'Quantity adjusted (edit)' }});
           } else if (diff < 0) {
             await apiFetch(`/api/ingredients/${id}/stock`, { method: 'POST', body: { type: 'out', qty: Math.abs(diff), note: 'Quantity adjusted (edit)' }});
           }
         }
-
         closeModal();
-        await renderIngredientCards();      // refresh list
-        await renderInventoryActivity();    // refresh activity
+        // refresh table and activity
+        await renderIngredientCards();
+        await renderInventoryActivity();
         notify('Ingredient updated');
       } catch (err) {
         console.error('edit save err', err);
-        notify(err && err.message ? err.message : 'Could not update ingredient');
-      } finally {
-        if (saveBtn) saveBtn.disabled = false;
+        notify(err.message || 'Could not update ingredient');
       }
     }, { once: true });
-
   } catch (err) {
     console.error('openEditIngredient err', err);
     notify('Could not open edit dialog');
   }
 }
+
 
 function openStockForm(id,type){
   const ing = DB.ingredients.find(x=>x.id===id); if(!ing) return;
