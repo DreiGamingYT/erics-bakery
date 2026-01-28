@@ -85,14 +85,14 @@ function authMiddleware(req, res, next) {
 
 function canEditIngredient(user) {
   if(!user || !user.role) return false;
-  // Owner/Admin/Baker can edit ingredients
-  return ['Owner','Admin','Baker'].includes(user.role);
+  // Owner/Admin can edit ingredients
+  return ['Owner','Admin'].includes(user.role);
 }
 
 function canStockIngredient(user) {
   if(!user || !user.role) return false;
-  // Owner/Admin/Baker/Assistant can do stock in/out
-  return ['Owner','Admin','Baker','Assistant'].includes(user.role);
+  // Owner/Admin/Assistant can do stock in/out
+  return ['Owner','Admin','Assistant'].includes(user.role);
 }
 
 let mailer = null;
