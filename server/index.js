@@ -445,6 +445,50 @@ app.get('/api/ingredients/:id', authMiddleware, async (req, res) => {
   }
 });
 
+// PUT /api/ingredients/:id
+app.put('/api/ingredients/:id', authMiddleware, async (req, res) => {
+  try {
+    const id = Number(req.params.id || 0);
+    if (!id) return res.status(400).json({ error: 'Invalid id' });
+
+    const body = req.body || {};
+    const allowed = ['name','type','supplier','unit','min_qty','max_qty','expiry','attrs'];
+    const fields = [];
+    const params = [];
+
+    for (const k of allowed) {
+      if (typeof body[k] !== 'undefined') {
+        // small normalization
+        if (k === 'min_qty' || k === 'max_qty') {
+          fields.push(`${k} = ?`); params.push(body[k] === null ? null : Number(body[k]));
+        } else if (k === 'attrs') {
+          fields.push('attrs = ?'); params.push(body.attrs ? JSON.stringify(body.attrs) : null);
+        } else {
+          fields.push(`${k} = ?`); params.push(body[k]);
+        }
+      }
+    }
+
+    if (fields.length === 0) return res.status(400).json({ error: 'No fields to update' });
+
+    // Update updated_at as well
+    params.push(id);
+    const q = `UPDATE ingredients SET ${fields.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`;
+    await pool.query(q, params);
+
+    const [rows] = await pool.query('SELECT id,name,type,supplier,qty,unit,min_qty,max_qty,expiry,attrs,created_at,updated_at FROM ingredients WHERE id = ?', [id]);
+    const updated = rows && rows[0] ? rows[0] : null;
+    if (updated && typeof updated.attrs === 'string' && updated.attrs) {
+      try { updated.attrs = JSON.parse(updated.attrs); } catch(e){}
+    }
+
+    return res.json({ ingredient: updated });
+  } catch (e) {
+    console.error('PUT /api/ingredients/:id err', e);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
 app.post('/api/ingredients/:id/stock', authMiddleware, async (req, res) => {
     const id = Number(req.params.id);
     const type = req.body.type;

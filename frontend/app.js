@@ -1129,41 +1129,49 @@ async function renderIngredientCards(page = 1, limit = 5) {
       <tbody>
     `;
 
-    const rowsHtml = items.map(i => {
-      // server returns min_qty, max_qty
-      const isMaterial = (i.type === 'ingredient');
-      const threshold = isMaterial ? computeThresholdForIngredient(i) : '';
-      const lowBadge = (isMaterial && (Number(i.qty || 0) <= (Number(i.min_qty || 0) || threshold))) ? '<span class="badge low">Low</span>' : '';
-      const expiryNote = (isMaterial && i.expiry ? `<div class="muted small">${daysUntil(i.expiry)}d</div>` : '');
+    // replace your existing rowsHtml = items.map( ... ) block with this
+const rowsHtml = items.map(i => {
+  const isMaterial = (i.type === 'ingredient');
+  const threshold = isMaterial ? computeThresholdForIngredient(i) : '';
+  const lowBadge = (isMaterial && (Number(i.qty || 0) <= (Number(i.min_qty || 0) || threshold))) ? '<span class="badge low">Low</span>' : '';
+  const expiryNote = (isMaterial && i.expiry ? `<div class="muted small">${daysUntil(i.expiry)}d</div>` : '');
 
-      // current user (ensure you set window.CURRENT_USER on login)
-      const me = window.CURRENT_USER || window.ME || { id: null, role: 'assistant' };
-      const role = (me.role || '').toString().toLowerCase();
+  // current user (ensure you set window.CURRENT_USER on login)
+  const me = window.CURRENT_USER || window.ME || { id: null, role: '' };
+  const myRole = (me.role || '').toString().toLowerCase();
 
-      // normalize role checks (lowercase)
-      const canEdit = ['owner','admin','baker'].includes(role);
-      const canStock = ['owner','admin','baker','assistant'].includes(role);
+  // role-based privileges (lowercase)
+  const privilegedEditRoles = ['owner','admin','baker']; // roles that can edit any item
+  const privilegedStockRoles = ['owner','admin','baker','assistant'];
 
-      // Save button allowed if user canStock (for in/out) OR canEdit (for metadata)
-      const saveAllowed = canStock || canEdit;
+  // owner field could be created_by, user_id, owner_id depending on your server schema
+  const ownerId = (i.created_by || i.user_id || i.owner_id || null);
 
-      return `<tr data-id="${i.id}" data-type="${escapeHtml(i.type||'')}" style="background:var(--card);border-bottom:1px solid rgba(0,0,0,0.04)">
-        <td style="padding:10px;vertical-align:middle">${i.id}</td>
-        <td style="padding:10px;vertical-align:middle"><strong>${escapeHtml(i.name)}</strong><div class="muted small">${escapeHtml(i.type)}</div></td>
-        <td style="padding:10px;vertical-align:middle">${isMaterial ? escapeHtml(i.supplier||'') : ''}</td>
-        <td style="padding:10px;vertical-align:middle"><span class="qty-value">${i.qty}</span> ${expiryNote} ${lowBadge}</td>
-        <td style="padding:10px;vertical-align:middle">${isMaterial ? escapeHtml(i.unit||'') : ''}</td>
-        <td style="padding:10px;vertical-align:middle">${isMaterial ? threshold : ''}</td>
-        <td style="padding:10px;vertical-align:middle">${isMaterial ? `<input class="min-input" type="number" value="${i.min_qty||0}" step="0.01" style="width:80px" />` : ''}</td>
-        <td style="padding:10px;vertical-align:middle"><input class="in-input" type="number" step="0.01" style="width:90px" /></td>
-        <td style="padding:10px;vertical-align:middle"><input class="out-input" type="number" step="0.01" style="width:90px" /></td>
-        <td role="cell" style="padding:10px;vertical-align:middle">
-            <button class="btn small save-row" type="button" ${saveAllowed ? '' : 'disabled title="Not authorized"'} aria-label="Save changes for ${escapeHtml(i.name)}">Save</button>
-            <button class="btn small soft details-btn" data-id="${i.id}" type="button" aria-controls="modal" aria-label="Show details for ${escapeHtml(i.name)}">Details</button>
-            <button class="btn small soft edit-btn" type="button" ${canEdit ? '' : 'disabled title="Not authorized"'} aria-label="Edit ${escapeHtml(i.name)}">Edit</button>
-        </td>
-      </tr>`;
-    }).join('') || `<tr><td colspan="10" class="muted" style="padding:12px">No inventory items</td></tr>`;
+  // allow edit if role is privileged OR current user is the owner of the item
+  const canEdit = privilegedEditRoles.includes(myRole) || (me.id && ownerId && Number(me.id) === Number(ownerId));
+
+  // allow stock ops if role in privilegedStockRoles OR owner (optional - currently using roles only)
+  const canStock = privilegedStockRoles.includes(myRole) || (me.id && ownerId && Number(me.id) === Number(ownerId));
+
+  const saveAllowed = canStock || canEdit;
+
+  return `<tr data-id="${i.id}" data-type="${escapeHtml(i.type||'')}" style="background:var(--card);border-bottom:1px solid rgba(0,0,0,0.04)">
+    <td style="padding:10px;vertical-align:middle">${i.id}</td>
+    <td style="padding:10px;vertical-align:middle"><strong>${escapeHtml(i.name)}</strong><div class="muted small">${escapeHtml(i.type)}</div></td>
+    <td style="padding:10px;vertical-align:middle">${isMaterial ? escapeHtml(i.supplier||'') : ''}</td>
+    <td style="padding:10px;vertical-align:middle"><span class="qty-value">${i.qty}</span> ${expiryNote} ${lowBadge}</td>
+    <td style="padding:10px;vertical-align:middle">${isMaterial ? escapeHtml(i.unit||'') : ''}</td>
+    <td style="padding:10px;vertical-align:middle">${isMaterial ? threshold : ''}</td>
+    <td style="padding:10px;vertical-align:middle">${isMaterial ? `<input class="min-input" type="number" value="${i.min_qty||0}" step="0.01" style="width:80px" />` : ''}</td>
+    <td style="padding:10px;vertical-align:middle"><input class="in-input" type="number" step="0.01" style="width:90px" /></td>
+    <td style="padding:10px;vertical-align:middle"><input class="out-input" type="number" step="0.01" style="width:90px" /></td>
+    <td role="cell" style="padding:10px;vertical-align:middle">
+        <button class="btn small save-row" type="button" ${saveAllowed ? '' : 'disabled title="Not authorized"'} aria-label="Save changes for ${escapeHtml(i.name)}">Save</button>
+        <button class="btn small soft details-btn" data-id="${i.id}" type="button" aria-controls="modal" aria-label="Show details for ${escapeHtml(i.name)}">Details</button>
+        <button class="btn small soft edit-btn" type="button" ${canEdit ? '' : 'disabled title="Not authorized"'} aria-label="Edit ${escapeHtml(i.name)}">Edit</button>
+    </td>
+  </tr>`;
+}).join('') || `<tr><td colspan="10" class="muted" style="padding:12px">No inventory items</td></tr>`;
 
     const tableFooter = `</tbody></table>`;
 
@@ -2257,58 +2265,90 @@ async function openIngredientDetail(id){
   }
 }
 
-async function openEditIngredient(id){
+async function openEditIngredient(id) {
   try {
-    const ing = await fetchIngredient(id);
-    if(!ing) return notify('Ingredient not found');
+    if (!id) return notify('Invalid ingredient id');
+    const ingResp = await fetchIngredient(id); // must return { ingredient: {...} } or ingredient object
+    const ing = ingResp && ingResp.ingredient ? ingResp.ingredient : (ingResp && ingResp.id ? ingResp : null);
+    if (!ing) return notify('Ingredient not found');
 
-    // open modal populated with server data (use min_qty)
-    openModalHTML(`<h3>Edit — ${escapeHtml(ing.name)}</h3>
+    // ensure values are safe for HTML
+    const nameEsc = escapeHtml(ing.name || '');
+    const qtyVal = Number(ing.qty || 0);
+    const minVal = Number(ing.min_qty || 0);
+    const unitVal = escapeHtml(ing.unit || '');
+
+    openModalHTML(`<h3>Edit — ${nameEsc}</h3>
       <form id="editIngForm" class="form">
-        <label class="field"><span class="field-label">Name</span><input id="editName" type="text" value="${escapeHtml(ing.name)}" required/></label>
-        <label class="field"><span class="field-label">Quantity</span><input id="editQty" type="number" step="0.01" value="${ing.qty||0}" required/></label>
-        <label class="field"><span class="field-label">Minimum</span><input id="editMin" type="number" step="0.01" value="${ing.min_qty||0}" required/></label>
-        <div style="display:flex;gap:8px;margin-top:8px" class="modal-actions"><button class="btn primary" type="submit">Save</button><button class="btn ghost" id="cancelEdit" type="button">Cancel</button></div>
+        <label class="field"><span class="field-label">Name</span>
+          <input id="editName" type="text" value="${nameEsc}" required />
+        </label>
+        <label class="field"><span class="field-label">Quantity</span>
+          <input id="editQty" type="number" step="0.01" value="${qtyVal}" required />
+        </label>
+        <label class="field"><span class="field-label">Unit</span>
+          <input id="editUnit" type="text" value="${unitVal}" />
+        </label>
+        <label class="field"><span class="field-label">Minimum</span>
+          <input id="editMin" type="number" step="0.01" value="${minVal}" required />
+        </label>
+        <div style="display:flex;gap:8px;margin-top:8px" class="modal-actions">
+          <button class="btn primary" id="saveEditBtn" type="submit">Save</button>
+          <button class="btn ghost" id="cancelEdit" type="button">Cancel</button>
+        </div>
       </form>`);
 
-    q('cancelEdit')?.addEventListener('click', closeModal);
-    q('editIngForm')?.addEventListener('submit', async (e)=> {
+    q('cancelEdit')?.addEventListener('click', closeModal, { once: true });
+
+    q('editIngForm')?.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const body = {
-        name: q('editName')?.value || ing.name,
-        // update qty via stock endpoint instead of PUT qty (to keep activity log), but we'll support a direct qty update too:
-        qty: Number(q('editQty')?.value || ing.qty || 0),
-        min_qty: Number(q('editMin')?.value || ing.min_qty || 0)
-      };
+      const saveBtn = q('saveEditBtn');
+      if (saveBtn) saveBtn.disabled = true;
+
+      // read and normalize inputs
+      const newName = (q('editName')?.value || '').trim();
+      const newQty = Number(q('editQty')?.value || 0);
+      const newMin = Number(q('editMin')?.value || 0);
+      const newUnit = (q('editUnit')?.value || '').trim();
 
       try {
-        // Update fields: server's PUT supports min_qty etc. If you prefer to use stock endpoint for qty changes, change accordingly.
-        await apiFetch(`/api/ingredients/${id}`, { method: 'PUT', body: { name: body.name, min_qty: body.min_qty, attrs: ing.attrs || null }});
-        // If qty changed, use the stock endpoint so activity is logged:
-        if (Number(body.qty) !== Number(ing.qty || 0)) {
-          const diff = Number(body.qty) - Number(ing.qty || 0);
+        // 1) update editable fields (name, min_qty, unit, attrs if needed)
+        const putPayload = {
+          name: newName,
+          min_qty: newMin,
+          unit: newUnit,
+          // include attrs if you allow editing them; keep ing.attrs to avoid accidental removal
+          attrs: ing.attrs || null
+        };
+        await apiFetch(`/api/ingredients/${id}`, { method: 'PUT', body: putPayload });
+
+        // 2) adjust qty via stock endpoint (so activity logs are created)
+        if (Number(newQty) !== Number(ing.qty || 0)) {
+          const diff = Number(newQty) - Number(ing.qty || 0);
           if (diff > 0) {
             await apiFetch(`/api/ingredients/${id}/stock`, { method: 'POST', body: { type: 'in', qty: Math.abs(diff), note: 'Quantity adjusted (edit)' }});
           } else if (diff < 0) {
             await apiFetch(`/api/ingredients/${id}/stock`, { method: 'POST', body: { type: 'out', qty: Math.abs(diff), note: 'Quantity adjusted (edit)' }});
           }
         }
+
         closeModal();
-        // refresh table and activity
-        await renderIngredientCards();
-        await renderInventoryActivity();
+        await renderIngredientCards();      // refresh list
+        await renderInventoryActivity();    // refresh activity
         notify('Ingredient updated');
       } catch (err) {
         console.error('edit save err', err);
-        notify(err.message || 'Could not update ingredient');
+        notify(err && err.message ? err.message : 'Could not update ingredient');
+      } finally {
+        if (saveBtn) saveBtn.disabled = false;
       }
     }, { once: true });
+
   } catch (err) {
     console.error('openEditIngredient err', err);
     notify('Could not open edit dialog');
   }
 }
-
 
 function openStockForm(id,type){
   const ing = DB.ingredients.find(x=>x.id===id); if(!ing) return;
