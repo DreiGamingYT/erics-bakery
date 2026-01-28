@@ -1137,15 +1137,15 @@ async function renderIngredientCards(page = 1, limit = 5) {
       const expiryNote = (isMaterial && i.expiry ? `<div class="muted small">${daysUntil(i.expiry)}d</div>` : '');
 
       // current user (ensure you set window.CURRENT_USER on login)
-      const me = window.CURRENT_USER || window.ME || { id: null, role: 'assistant' };
-      const role = (me.role || '').toString().toLowerCase();
+      const me = window.CURRENT_USER || window.ME || { id: null, role: '' };
+      const myRole = (me.role || '').toString().toLowerCase();
 
-      // normalize role checks (lowercase)
-      const canEdit = ['owner','admin','baker'].includes(role);
-      const canStock = ['owner','admin','baker','assistant'].includes(role);
+      const privilegedEdit = ['owner', 'admin', 'baker'];              // roles allowed to edit metadata
+      const privilegedStock = ['owner', 'admin', 'baker', 'assistant']; // roles allowed to stock in/out
 
-      // Save button allowed if user canStock (for in/out) OR canEdit (for metadata)
-      const saveAllowed = canStock || canEdit;
+      const canEdit = privilegedEdit.includes(myRole);
+      const canStock = privilegedStock.includes(myRole);
+      const saveAllowed = canStock || canEdit;  
 
       return `<tr data-id="${i.id}" data-type="${escapeHtml(i.type||'')}" style="background:var(--card);border-bottom:1px solid rgba(0,0,0,0.04)">
         <td style="padding:10px;vertical-align:middle">${i.id}</td>
