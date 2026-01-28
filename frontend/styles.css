@@ -52,7 +52,7 @@ body{
   background: linear-gradient(180deg, var(--bg) 0%);
   -webkit-font-smoothing:antialiased;
   line-height:1.45;
-  cursor: url('defualt.png') 32 32, auto;
+  cursor: url('./defualt.png') 16 16, auto;
 }
 
 .hidden{display:none!important}
@@ -1463,17 +1463,31 @@ body{
 
 button,
 .btn,
-a,
-[role="button"],
-.clickable {
-  cursor: url('defualt.png') 32 32 auto;
+input[type="number"],
+input[type="text"],
+input[type="search"],
+input[type="email"],
+input[type="password"],
+select,
+textarea,
+.add-btn,
+.save-row,
+.edit-btn,
+.details-btn {
+  cursor: url("./default.png") 16 16, pointer;
 }
 
-/* Disabled buttons */
+/* specifically stock in / out fields 
+.in-input,
+.out-input {
+  cursor: url("./add_default.png") 16 16, pointer;
+}
+
+disable cursor for disabled buttons */
+
 button:disabled,
 .btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
+  cursor: not-allowed !important;
 }
 
 .in-input,
@@ -1483,7 +1497,7 @@ button:disabled,
 #editMin,
 #ingQty,
 #ingMin {
-  cursor: url('add_default.png') 32 32 auto;
+  cursor: url('./add_default.png') 32 32 auto;
 }
 
 .btn:hover:not(:disabled) {
@@ -1499,5 +1513,5 @@ button:disabled,
 .edit-btn,
 .details-btn,
 #addIngredientBtn {
-  cursor: url('add_default.png') 32 32 auto;
+  cursor: url('./add_default.png') 32 32 auto;
 }
