@@ -96,8 +96,6 @@ function canStockIngredient(user) {
   return ['owner', 'admin', 'baker', 'assistant'].includes(role);
 }
 
-if (!canEditIngredient(req.user)) return res.status(403).json({ error: 'Forbidden' });
-
 let mailer = null;
 if(process.env.MAIL_HOST && process.env.MAIL_USER && process.env.MAIL_PASS){
   mailer = nodemailer.createTransport({
