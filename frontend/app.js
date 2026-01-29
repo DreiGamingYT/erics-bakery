@@ -1130,7 +1130,6 @@ async function renderIngredientCards(page = 1, limit = 5) {
     `;
 
     const rowsHtml = items.map(i => {
-      // server returns min_qty, max_qty
       const isMaterial = (i.type === 'ingredient');
       const threshold = isMaterial ? computeThresholdForIngredient(i) : '';
       const lowBadge = (isMaterial && (Number(i.qty || 0) <= (Number(i.min_qty || 0) || threshold))) ? '<span class="badge low">Low</span>' : '';
@@ -1153,13 +1152,7 @@ async function renderIngredientCards(page = 1, limit = 5) {
     // helper to decide per-item permissions
     const userCanEdit = (r => canEditRoles.includes(r))(roleLower);
     const userCanStock = (r => canStockRoles.includes(r))(roleLower);
-
-          const rowsHtml = items.map(i => {
-      const isMaterial = (i.type === 'ingredient');
-      const threshold = isMaterial ? computeThresholdForIngredient(i) : '';
-      const lowBadge = (isMaterial && (Number(i.qty || 0) <= (Number(i.min_qty || 0) || threshold))) ? '<span class="badge low">Low</span>' : '';
-      const expiryNote = (isMaterial && i.expiry ? `<div class="muted small">${daysUntil(i.expiry)}d</div>` : '');
-
+    
       // for each row we use precomputed user permissions
       const saveAllowed = userCanStock || userCanEdit;
       const editAllowed = userCanEdit;
@@ -2910,7 +2903,6 @@ document.addEventListener('DOMContentLoaded', ()=> {
       if (!res.ok) {
 
         if (data && data.user) {
-          sessionStorage.setItem('user', JSON.stringify(data.user));
   window.CURRENT_USER = data.user;
   try { localStorage.setItem('CURRENT_USER', JSON.stringify(data.user)); } catch(e){}
   // update UI elements that show username / role
