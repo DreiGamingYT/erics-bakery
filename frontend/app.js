@@ -1130,32 +1130,22 @@ async function renderIngredientCards(page = 1, limit = 5) {
     `;
 
     const rowsHtml = items.map(i => {
+      // server returns min_qty, max_qty
       const isMaterial = (i.type === 'ingredient');
       const threshold = isMaterial ? computeThresholdForIngredient(i) : '';
       const lowBadge = (isMaterial && (Number(i.qty || 0) <= (Number(i.min_qty || 0) || threshold))) ? '<span class="badge low">Low</span>' : '';
       const expiryNote = (isMaterial && i.expiry ? `<div class="muted small">${daysUntil(i.expiry)}d</div>` : '');
 
-      const _me = (() => {
-      try {
-        const raw = sessionStorage.getItem('user');
-        if (raw) return JSON.parse(raw);
-      } catch (e) { /* ignore */ }
-      return (window.CURRENT_USER || window.ME || null);
-    })() || { id: null, role: '' };
+      // current user (ensure you set window.CURRENT_USER on login)
+      const me = window.CURRENT_USER || window.ME || { id: null, role: 'assistant' };
+      const role = (me.role || '').toString().toLowerCase();
 
-    const roleLower = (String(_me.role || '').trim() || '').toLowerCase();
+      // normalize role checks (lowercase)
+      const canEdit = ['owner','admin','baker'].includes(role);
+      const canStock = ['owner','admin','baker','assistant'].includes(role);
 
-    // canonical allowed roles (lowercased)
-    const canEditRoles = ['owner', 'admin', 'baker'];         // can change metadata (min/max/supplier/name)
-    const canStockRoles = ['owner', 'admin', 'baker', 'assistant']; // can perform stock in/out
-
-    // helper to decide per-item permissions
-    const userCanEdit = (r => canEditRoles.includes(r))(roleLower);
-    const userCanStock = (r => canStockRoles.includes(r))(roleLower);
-    
-      // for each row we use precomputed user permissions
-      const saveAllowed = userCanStock || userCanEdit;
-      const editAllowed = userCanEdit;
+      // Save button allowed if user canStock (for in/out) OR canEdit (for metadata)
+      const saveAllowed = canStock || canEdit;
 
       return `<tr data-id="${i.id}" data-type="${escapeHtml(i.type||'')}" style="background:var(--card);border-bottom:1px solid rgba(0,0,0,0.04)">
         <td style="padding:10px;vertical-align:middle">${i.id}</td>
@@ -1170,7 +1160,7 @@ async function renderIngredientCards(page = 1, limit = 5) {
         <td role="cell" style="padding:10px;vertical-align:middle">
             <button class="btn small save-row" type="button" ${saveAllowed ? '' : 'disabled title="Not authorized"'} aria-label="Save changes for ${escapeHtml(i.name)}">Save</button>
             <button class="btn small soft details-btn" data-id="${i.id}" type="button" aria-controls="modal" aria-label="Show details for ${escapeHtml(i.name)}">Details</button>
-            <button class="btn small soft edit-btn" type="button" ${editAllowed ? '' : 'disabled title="Not authorized"'} aria-label="Edit ${escapeHtml(i.name)}">Edit</button>
+            <button class="btn small soft edit-btn" type="button" ${canEdit ? '' : 'disabled title="Not authorized"'} aria-label="Edit ${escapeHtml(i.name)}">Edit</button>
         </td>
       </tr>`;
     }).join('') || `<tr><td colspan="10" class="muted" style="padding:12px">No inventory items</td></tr>`;
