@@ -1466,7 +1466,7 @@ button,
 a,
 [role="button"],
 .clickable {
-  cursor: url('./defualt.png') 32 32, auto;
+  cursor: url('./default.png') 32 32, auto;
 }
 
 /* Disabled buttons */

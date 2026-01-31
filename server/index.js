@@ -235,7 +235,7 @@ app.put('/api/users/me', authMiddleware, async (req, res) => {
     // Role may only be changed if current user is Owner
     if (requestedRole && req.user && req.user.role === 'Owner') {
       // whitelist roles to avoid injection
-      const allowedRoles = ['Owner','Baker','Cashier','Assistant'];
+      const allowedRoles = ['Owner','Baker','Assistant'];
       if (!allowedRoles.includes(requestedRole)) return res.status(400).json({ error: 'Invalid role' });
       fields.push('role = ?'); params.push(requestedRole);
     }
@@ -481,8 +481,8 @@ app.post('/api/ingredients/:id/stock', authMiddleware, async (req, res) => {
   const qty = Number(req.body.qty || 0);
   const note = req.body.note || '';
 
-  // allow Owner/Admin/Baker/Assistant/Cashier to do stock adjustments
-  if(!hasRole(req.user, ['Owner','Baker','Assistant','Cashier','Admin'])) {
+  // allow Owner/Admin/Baker/Assistant to do stock adjustments
+  if(!hasRole(req.user, ['Owner','Baker','Assistant','Admin'])) {
     return res.status(403).json({ error: 'Forbidden: insufficient permissions to update stock' });
   }
 
