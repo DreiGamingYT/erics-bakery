@@ -122,17 +122,6 @@ const ACCOUNTS_KEY = 'bakery_accounts';
 const SESSION_KEY = 'bakery_session';
 const THEME_KEY = 'bakery_theme';
 
-
-async function onLoginSuccess(resp) {
-  // resp.user is from server { id, username, role, name }
-  window.CURRENT_USER = resp.user;
-  // persist small user info so UI survives reloads:
-  try { localStorage.setItem('CURRENT_USER', JSON.stringify(resp.user)); } catch(e){ /* ignore */ }
-
-  // update any UI
-  updateUIAfterLogin(resp.user);
-}
-
 function q(id){ return document.getElementById(id) || null; }
 function on(id, ev, fn){ const el = q(id); if(el) el.addEventListener(ev, fn); else console.debug(`[on] missing #${id}`); }
 function offsetDateISO(days){ const d = new Date(); d.setDate(d.getDate() + days); return d.toISOString(); }
@@ -1103,13 +1092,6 @@ async function renderIngredientCards(page = 1, limit = 5) {
     const items = (res && res.items) ? res.items : [];
     const meta = (res && res.meta) ? res.meta : { total: items.length, page: page, limit, totalPages: Math.ceil(items.length / limit) };
 
-    const me = (typeof getSession === 'function' ? getSession() : null) || window.CURRENT_USER || window.ME || { id: null, role: '' };
-const myRole = (me.role || '').toString().toLowerCase();
-
-// role buckets (lowercase)
-const privilegedEdit = ['owner','admin','baker'];     // who can edit metadata
-const privilegedStock = ['owner','admin','baker','assistant','cashier'];
-
     // Header with radios, export, print, and pagination placeholder
     const header = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;flex-wrap:wrap">
@@ -1154,16 +1136,16 @@ const privilegedStock = ['owner','admin','baker','assistant','cashier'];
       const lowBadge = (isMaterial && (Number(i.qty || 0) <= (Number(i.min_qty || 0) || threshold))) ? '<span class="badge low">Low</span>' : '';
       const expiryNote = (isMaterial && i.expiry ? `<div class="muted small">${daysUntil(i.expiry)}d</div>` : '');
 
-      const me = window.CURRENT_USER || window.ME || { id: null, role: '' };
-const myRole = (me.role || '').toString().toLowerCase();
+      // current user (ensure you set window.CURRENT_USER on login)
+      const me = window.CURRENT_USER || window.ME || { id: null, role: 'assistant' };
+      const role = (me.role || '').toString().toLowerCase();
 
-// whitelists
-const privilegedEdit = ['owner','admin','baker'];   // edit metadata (min,max,supplier etc.)
-const privilegedStock = ['owner','admin','baker','assistant']; // stock in/out allowed
+      // normalize role checks (lowercase)
+      const canEdit = ['owner','admin','baker'].includes(role);
+      const canStock = ['owner','admin','baker','assistant'].includes(role);
 
-      const editAllowed = privilegedEdit.includes(myRole);
-      const canStock = privilegedStock.includes(myRole);
-      const saveAllowed = canStock || editAllowed;
+      // Save button allowed if user canStock (for in/out) OR canEdit (for metadata)
+      const saveAllowed = canStock || canEdit;
 
       return `<tr data-id="${i.id}" data-type="${escapeHtml(i.type||'')}" style="background:var(--card);border-bottom:1px solid rgba(0,0,0,0.04)">
         <td style="padding:10px;vertical-align:middle">${i.id}</td>
@@ -1176,9 +1158,9 @@ const privilegedStock = ['owner','admin','baker','assistant']; // stock in/out a
         <td style="padding:10px;vertical-align:middle"><input class="in-input" type="number" step="0.01" style="width:90px" /></td>
         <td style="padding:10px;vertical-align:middle"><input class="out-input" type="number" step="0.01" style="width:90px" /></td>
         <td role="cell" style="padding:10px;vertical-align:middle">
-            <button class="btn small save-row" type="button" ${saveAllowed ? '' : 'disabled title="Not authorized"'}>Save</button>
+            <button class="btn small save-row" type="button" ${saveAllowed ? '' : 'disabled title="Not authorized"'} aria-label="Save changes for ${escapeHtml(i.name)}">Save</button>
             <button class="btn small soft details-btn" data-id="${i.id}" type="button" aria-controls="modal" aria-label="Show details for ${escapeHtml(i.name)}">Details</button>
-            <button class="btn small soft edit-btn" type="button" ${canEdit ? '' : 'disabled title="Not authorized"'}>Edit</button>
+            <button class="btn small soft edit-btn" type="button" ${canEdit ? '' : 'disabled title="Not authorized"'} aria-label="Edit ${escapeHtml(i.name)}">Edit</button>
         </td>
       </tr>`;
     }).join('') || `<tr><td colspan="10" class="muted" style="padding:12px">No inventory items</td></tr>`;
@@ -1198,12 +1180,15 @@ const privilegedStock = ['owner','admin','baker','assistant']; // stock in/out a
     // Save / In/Out wiring — call API and refresh current page
     container.querySelectorAll('button.save-row').forEach(btn => {
       btn.addEventListener('click', async (ev) => {
-        const me = (typeof getSession === 'function' ? getSession() : null) || window.CURRENT_USER || window.ME || { id: null, role: '' };
-  const role = (me.role || '').toString().toLowerCase();
-  const canEdit = ['owner','admin','baker'].includes(role);
-  const canStock = ['owner','admin','baker','assistant','cashier'].includes(role);
-  if (!canEdit && !canStock) { notify('You are not authorized'); return; }
-  
+        // re-evaluate permissions in case role changed
+        const me = window.CURRENT_USER || window.ME || { id: null, role: 'assistant' };
+        const role = (me.role || '').toString().toLowerCase();
+        const canEdit = ['owner','admin','baker'].includes(role);
+        const canStock = ['owner','admin','baker','assistant'].includes(role);
+        const saveAllowed = canStock || canEdit;
+
+        if (!saveAllowed) { notify('You are not authorized'); return; }
+
         const tr = ev.currentTarget.closest('tr');
         if (!tr) return;
         const id = Number(tr.dataset.id);
@@ -1565,15 +1550,9 @@ async function apiFetch(path, opts = {}) {
   cfg.headers = Object.assign({}, cfg.headers || {}, { 'Content-Type': 'application/json' });
   cfg.credentials = 'include'; // include cookie JWT
   if (cfg.body && typeof cfg.body !== 'string') cfg.body = JSON.stringify(cfg.body);
-  const defaultOpts = { credentials: 'include', headers: { 'Content-Type': 'application/json' }, method: 'GET' };
-  const final = Object.assign({}, defaultOpts, opts || {});
-  if (final.body && typeof final.body === 'object') final.body = JSON.stringify(final.body);
-  const url = `${window.location.origin}${path}`;
-  
-  const res = await fetch(url, final, path, cfg);
+
+  const res = await fetch(path, cfg);
   // try JSON parse for both success and error bodies
-  if (res.status === 401) throw new Error('Not authenticated');
-  
   const text = await res.text().catch(() => '');
   let json = null;
   try { json = text ? JSON.parse(text) : null; } catch(e){ json = null; }
@@ -2911,18 +2890,23 @@ document.addEventListener('DOMContentLoaded', ()=> {
       body: JSON.stringify({ username, password })
     });
     const data = await res.json();
-if (!res.ok) {
-  notify(data?.message || data?.error || 'Login failed');
-  setButtonLoadingWithMin(btn, false, 600);
-  showGlobalLoader(false);
-  return;
+      if (!res.ok) {
+
+        if (data && data.user) {
+  window.CURRENT_USER = data.user;
+  try { localStorage.setItem('CURRENT_USER', JSON.stringify(data.user)); } catch(e){}
+  // update UI elements that show username / role
+  document.getElementById('sidebarUser') && (document.getElementById('sidebarUser').innerText = data.user.name || data.user.username);
+  document.getElementById('userBadgeText') && (document.getElementById('userBadgeText').innerText = data.user.username || '');
 }
+        notify(data?.message || data?.error || 'Login failed');
+        setButtonLoadingWithMin(btn, false, 600);
+        showGlobalLoader(false);
+        return;
+      }
 
-const userObj = { id: data.user.id, username: data.user.username, role: data.user.role, name: data.user.name || data.user.username };
-window.CURRENT_USER = userObj;
-try { localStorage.setItem('CURRENT_USER', JSON.stringify(userObj)); } catch(e){}
-
-setSession(userObj, remember);
+      const userObj = { username: data.user.username, role: data.user.role, name: data.user.name || data.user.username, id: data.user.id };
+      setSession(userObj, remember);
       // keep recent profiles code if you added it
       if (typeof saveRecentProfileLocally === 'function') saveRecentProfileLocally(username);
 

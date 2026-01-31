@@ -24,13 +24,9 @@ const JWT_SECRET = process.env.JWT_SECRET || 'replace_with_strong_secret';
 const TOKEN_NAME = process.env.COOKIE_NAME || 'bakery_token';
 
 const crypto = require('crypto');
-let nodemailer = null;
-try {
-  nodemailer = require('nodemailer');
-} catch (e) {
-  console.warn('[startup] nodemailer not available (not installed). Email features disabled.');
-  nodemailer = null;
-}
+let nodemailer;
+try { nodemailer = require('nodemailer'); } catch(e) { nodemailer = null; }
+
 // mail transporter
 const SMTP_HOST = process.env.SMTP_HOST;
 const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
@@ -40,35 +36,19 @@ const EMAIL_FROM = process.env.EMAIL_FROM || `"Eric's Bakery" <archlinux@google.
 
 // Only create transporter if SMTP config is present
 let mailTransporter = null;
-if (nodemailer && SMTP_HOST && SMTP_USER && SMTP_PASS) {
-  try {
-    mailTransporter = nodemailer.createTransport({
-      host: SMTP_HOST,
-      port: SMTP_PORT,
-      secure: SMTP_PORT === 465, // true for 465, false for others
-      auth: {
-        user: SMTP_USER,
-        pass: SMTP_PASS
-      }
-    });
-    // verify transporter on startup (logs only)
-    mailTransporter.verify().then(() => {
-      console.info('[sendResetEmail] SMTP transporter verified');
-    }).catch((err) => {
-      console.warn('[sendResetEmail] transporter verification failed:', err && err.message ? err.message : err);
-    });
-  } catch (e) {
-    console.warn('Failed to create mail transporter (nodemailer present?)', e && e.message ? e.message : e);
-    mailTransporter = null;
-  }
+if (SMTP_HOST && SMTP_USER && SMTP_PASS) {
+  mailTransporter = nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: SMTP_PORT,
+    secure: SMTP_PORT === 465, // true for 465, false for others
+    auth: {
+      user: SMTP_USER,
+      pass: SMTP_PASS
+    }
+  });
 } else {
-  if (!nodemailer && (SMTP_HOST || SMTP_USER || SMTP_PASS)) {
-    console.warn('nodemailer missing: add nodemailer to package.json dependencies for SMTP to work.');
-  } else {
-    console.warn('SMTP not configured — forgot-password emails will not be sent.');
-  }
+  console.warn('SMTP not configured — forgot-password emails will not be sent.');
 }
-
 
 function signToken(user) {
     return jwt.sign({
@@ -104,16 +84,15 @@ function authMiddleware(req, res, next) {
 }
 
 function canEditIngredient(user) {
-  if (!user || !user.role) return false;
-  const role = String(user.role).toLowerCase();
-  // adjust allowed roles if your DB uses different names (e.g., 'admin' vs 'Owner')
-  return ['owner', 'admin', 'baker'].includes(role);
+  if(!user || !user.role) return false;
+  // Owner/Admin/Baker can edit ingredients
+  return ['Owner','Admin','Baker'].includes(user.role);
 }
 
 function canStockIngredient(user) {
-  if (!user || !user.role) return false;
-  const role = String(user.role).toLowerCase();
-  return ['owner', 'admin', 'baker', 'assistant'].includes(role);
+  if(!user || !user.role) return false;
+  // Owner/Admin/Baker/Assistant can do stock in/out
+  return ['Owner','Admin','Baker','Assistant'].includes(user.role);
 }
 
 let mailer = null;
@@ -255,7 +234,7 @@ app.put('/api/users/me', authMiddleware, async (req, res) => {
     // Role may only be changed if current user is Owner
     if (requestedRole && req.user && req.user.role === 'Owner') {
       // whitelist roles to avoid injection
-      const allowedRoles = ['Owner','Cashier','Assistant','Baker'];
+      const allowedRoles = ['Owner','Baker','Cashier','Assistant'];
       if (!allowedRoles.includes(requestedRole)) return res.status(400).json({ error: 'Invalid role' });
       fields.push('role = ?'); params.push(requestedRole);
     }
@@ -286,6 +265,16 @@ app.put('/api/users/me', authMiddleware, async (req, res) => {
     return res.status(500).json({ error: 'Server error' });
   }
 });
+
+async function onLoginSuccess(resp) {
+  // resp.user is from server { id, username, role, name }
+  window.CURRENT_USER = resp.user;
+  // persist small user info so UI survives reloads:
+  try { localStorage.setItem('CURRENT_USER', JSON.stringify(resp.user)); } catch(e){ /* ignore */ }
+
+  // update any UI
+  updateUIAfterLogin(resp.user);
+}
 
 app.post('/api/auth/logout', (req, res) => {
     res.clearCookie(TOKEN_NAME, {
@@ -452,50 +441,6 @@ app.get('/api/ingredients/:id', authMiddleware, async (req, res) => {
     return res.json({ ingredient: row });
   } catch (e) {
     console.error('GET /api/ingredients/:id err', e);
-    return res.status(500).json({ error: 'Server error' });
-  }
-});
-
-// PUT /api/ingredients/:id
-app.put('/api/ingredients/:id', authMiddleware, async (req, res) => {
-  try {
-    const id = Number(req.params.id || 0);
-    if (!id) return res.status(400).json({ error: 'Invalid id' });
-
-    const body = req.body || {};
-    const allowed = ['name','type','supplier','unit','min_qty','max_qty','expiry','attrs'];
-    const fields = [];
-    const params = [];
-
-    for (const k of allowed) {
-      if (typeof body[k] !== 'undefined') {
-        // small normalization
-        if (k === 'min_qty' || k === 'max_qty') {
-          fields.push(`${k} = ?`); params.push(body[k] === null ? null : Number(body[k]));
-        } else if (k === 'attrs') {
-          fields.push('attrs = ?'); params.push(body.attrs ? JSON.stringify(body.attrs) : null);
-        } else {
-          fields.push(`${k} = ?`); params.push(body[k]);
-        }
-      }
-    }
-
-    if (fields.length === 0) return res.status(400).json({ error: 'No fields to update' });
-
-    // Update updated_at as well
-    params.push(id);
-    const q = `UPDATE ingredients SET ${fields.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`;
-    await pool.query(q, params);
-
-    const [rows] = await pool.query('SELECT id,name,type,supplier,qty,unit,min_qty,max_qty,expiry,attrs,created_at,updated_at FROM ingredients WHERE id = ?', [id]);
-    const updated = rows && rows[0] ? rows[0] : null;
-    if (updated && typeof updated.attrs === 'string' && updated.attrs) {
-      try { updated.attrs = JSON.parse(updated.attrs); } catch(e){}
-    }
-
-    return res.json({ ingredient: updated });
-  } catch (e) {
-    console.error('PUT /api/ingredients/:id err', e);
     return res.status(500).json({ error: 'Server error' });
   }
 });
@@ -908,35 +853,39 @@ async function sendResetEmail(toEmail, code) {
     </body></html>`;
 
     // If SMTP config present, use it and ensure FROM matches SMTP_USER (improves deliverability)
-    const fromAddress = process.env.EMAIL_FROM || process.env.SMTP_USER || (`no-reply@${(process.env.FRONTEND_ORIGIN||'bakery.local').replace(/^https?:\/\//,'')}`);
+    if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+      const nodemailer = require('nodemailer');
+      const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: Number(process.env.SMTP_PORT || 587),
+        secure: (String(process.env.SMTP_PORT || '587') === '465'), // true for 465
+        auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+      });
 
-if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-  const nodemailer = require('nodemailer');
-  const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT || 587),
-    secure: Number(process.env.SMTP_PORT || 587) === 465,
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
-  });
+      // verify transporter once (will be cheap; logs useful on Vercel)
+      try {
+        await transporter.verify();
+        console.info('[sendResetEmail] SMTP transporter verified');
+      } catch (verr) {
+        console.warn('[sendResetEmail] transporter verify failed (continuing):', verr && verr.message ? verr.message : verr);
+      }
 
-  // optional: verify before sending so we get clear logs
-  try {
-    await transporter.verify();
-    console.info('[sendResetEmail] SMTP transporter verified');
-  } catch (verr) {
-    console.warn('[sendResetEmail] transporter verify failed:', verr && verr.message ? verr.message : verr);
-  }
+      // choose FROM: prefer explicit EMAIL_FROM, else use SMTP_USER
+      const fromAddress = (process.env.EMAIL_FROM && process.env.EMAIL_FROM.trim()) ? process.env.EMAIL_FROM.trim() : process.env.SMTP_USER;
 
-  const info = await transporter.sendMail({
-    from: fromAddress,
-    to: toEmail,
-    subject,
-    text: plain,
-    html
-  });
-  console.info('[sendResetEmail] SMTP send info:', JSON.stringify(info));
-  return;
-}
+      const info = await transporter.sendMail({
+        from: fromAddress,
+        to: toEmail,
+        subject,
+        text: plain,
+        html
+      });
+
+      console.info('[sendResetEmail] SMTP send info:', {
+        accepted: info.accepted, rejected: info.rejected, envelope: info.envelope, messageId: info.messageId, response: info.response
+      });
+      return;
+    }
 
     // Fallback: SMTP not configured — log the HTML so you can copy it for testing
     console.info('[sendResetEmail] SMTP not configured — printing fallback HTML preview for', toEmail);
