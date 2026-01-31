@@ -83,25 +83,17 @@ function authMiddleware(req, res, next) {
     }
 }
 
-function requireRole(allowed = []) {
-  return (req, res, next) => {
-    if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
-    if (!Array.isArray(allowed) || allowed.length === 0) return next();
-    if (!allowed.includes(req.user.role)) return res.status(403).json({ error: 'Forbidden' });
-    next();
-  };
-}
-
 function canEditIngredient(user) {
-  if(!user || !user.role) return false;
-  // Owner/Admin/Baker can edit ingredients
-  return ['Owner','Admin','Baker'].includes(user.role);
+  if (!user || !user.role) return false;
+  const role = String(user.role).toLowerCase();
+  // adjust allowed roles if your DB uses different names (e.g., 'admin' vs 'Owner')
+  return ['owner', 'admin', 'baker'].includes(role);
 }
 
 function canStockIngredient(user) {
-  if(!user || !user.role) return false;
-  // Owner/Admin/Baker/Assistant can do stock in/out
-  return ['Owner','Admin','Baker','Assistant'].includes(user.role);
+  if (!user || !user.role) return false;
+  const role = String(user.role).toLowerCase();
+  return ['owner', 'admin', 'baker', 'assistant'].includes(role);
 }
 
 let mailer = null;
@@ -361,7 +353,7 @@ app.get('/api/ingredients', authMiddleware, async (req, res) => {
         });
     }
 });
-
+// POST /api/ingredients  (replace existing handler)
 app.post('/api/ingredients', authMiddleware, async (req, res) => {
   try {
     const data = req.body || {};
@@ -381,14 +373,12 @@ app.post('/api/ingredients', authMiddleware, async (req, res) => {
     const max_qty = data.max_qty == null ? null : data.max_qty;
     const expiry = data.expiry || null;
     const attrs = data.attrs ? JSON.stringify(data.attrs) : null;
-
-    // record the user who created the item (may be null for system)
-    const createdBy = (req.user && req.user.id) ? req.user.id : null;
+    const userId = (req.user && req.user.id) ? req.user.id : null;
 
     const [r] = await pool.query(
       `INSERT INTO ingredients (name, type, supplier, qty, unit, min_qty, max_qty, expiry, attrs, created_by)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [name, type, supplier, qty, unit, min_qty, max_qty, expiry, attrs, createdBy]
+      [name, type, supplier, qty, unit, min_qty, max_qty, expiry, attrs, userId]
     );
 
     // fetch the inserted row (so we rely on the DB value for unit etc.)
@@ -423,7 +413,7 @@ app.post('/api/ingredients', authMiddleware, async (req, res) => {
 // GET single ingredient by id
 app.get('/api/ingredients/:id', authMiddleware, async (req, res) => {
   try {
-    const id = Number(req.params.id);
+    const id = Number(req.params.id || 0);
     if (!id) return res.status(400).json({ error: 'Invalid id' });
 
     if (!canEditIngredient(req.user)) {
@@ -446,102 +436,130 @@ app.get('/api/ingredients/:id', authMiddleware, async (req, res) => {
   }
 });
 
-// --- recommended PUT handler for /api/ingredients/:id (replace existing) ---
+// PUT /api/ingredients/:id
 app.put('/api/ingredients/:id', authMiddleware, async (req, res) => {
   try {
-    const id = Number(req.params.id);
+    const id = Number(req.params.id || 0);
     if (!id) return res.status(400).json({ error: 'Invalid id' });
 
-    // fetch owner and current row
-    const [rows] = await pool.query('SELECT created_by FROM ingredients WHERE id = ? LIMIT 1', [id]);
-    if (!rows || !rows[0]) return res.status(404).json({ error: 'Not found' });
-    const ownerId = rows[0].created_by;
-
-    // privileged roles that can edit anything
-    const privileged = ['Owner','Baker'];
-    if (!privileged.includes(req.user.role)) {
-      // if not privileged, only owner (creator) can edit
-      if (!ownerId || ownerId !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
-    }
-
+    const body = req.body || {};
     const allowed = ['name','type','supplier','unit','min_qty','max_qty','expiry','attrs'];
-    const sets = []; const params = [];
+    const fields = [];
+    const params = [];
+
     for (const k of allowed) {
-      if (k in req.body) {
-        sets.push(`${k} = ?`);
-        params.push(k === 'attrs' ? JSON.stringify(req.body[k]) : req.body[k]);
+      if (typeof body[k] !== 'undefined') {
+        // small normalization
+        if (k === 'min_qty' || k === 'max_qty') {
+          fields.push(`${k} = ?`); params.push(body[k] === null ? null : Number(body[k]));
+        } else if (k === 'attrs') {
+          fields.push('attrs = ?'); params.push(body.attrs ? JSON.stringify(body.attrs) : null);
+        } else {
+          fields.push(`${k} = ?`); params.push(body[k]);
+        }
       }
     }
-    if (sets.length === 0) return res.status(400).json({ error: 'No fields to update' });
+
+    if (fields.length === 0) return res.status(400).json({ error: 'No fields to update' });
+
+    // Update updated_at as well
     params.push(id);
-    await pool.query(`UPDATE ingredients SET ${sets.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, params);
-    const [newRows] = await pool.query('SELECT id,name,type,supplier,qty,unit,min_qty,max_qty,expiry,attrs,created_by FROM ingredients WHERE id = ?', [id]);
-    return res.json({ ingredient: newRows[0] });
+    const q = `UPDATE ingredients SET ${fields.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`;
+    await pool.query(q, params);
+
+    const [rows] = await pool.query('SELECT id,name,type,supplier,qty,unit,min_qty,max_qty,expiry,attrs,created_at,updated_at FROM ingredients WHERE id = ?', [id]);
+    const updated = rows && rows[0] ? rows[0] : null;
+    if (updated && typeof updated.attrs === 'string' && updated.attrs) {
+      try { updated.attrs = JSON.parse(updated.attrs); } catch(e){}
+    }
+
+    return res.json({ ingredient: updated });
   } catch (e) {
     console.error('PUT /api/ingredients/:id err', e);
     return res.status(500).json({ error: 'Server error' });
   }
 });
 
-// --- replace existing POST /api/ingredients/:id/stock with this block ---
 app.post('/api/ingredients/:id/stock', authMiddleware, async (req, res) => {
-  const id = Number(req.params.id);
-  const type = req.body.type;
-  const qty = Number(req.body.qty || 0);
-  const note = req.body.note || '';
-  if (!id || !['in', 'out'].includes(type) || qty <= 0) {
-    return res.status(400).json({ error: 'Invalid request (id/type/qty)' });
-  }
+    const id = Number(req.params.id);
+    const type = req.body.type;
+    const qty = Number(req.body.qty || 0);
+    const note = req.body.note || '';
 
-  try {
-    // fetch ingredient row including created_by, unit, qty, name
-    const [rows] = await pool.query('SELECT qty, unit, name, created_by FROM ingredients WHERE id = ?', [id]);
-    if (!rows || rows.length === 0) return res.status(404).json({ error: 'Ingredient not found' });
-    const ing = rows[0];
-
-    // check ownership unless privileged role
-    const privileged = ['Owner','Baker'];
-    if (!privileged.includes(req.user.role)) {
-      if (!ing.created_by || ing.created_by !== req.user.id) {
-        return res.status(403).json({ error: 'Forbidden' });
-      }
+    if (!canStockIngredient(req.user)) {
+    return res.status(403).json({ error: 'Not authorized to change stock' });
     }
 
-    const current = Number(ing.qty || 0);
-    let newQty = current;
-    if (type === 'in') newQty = +(current + qty).toFixed(3);
-    else {
-      if (qty > current) return res.status(400).json({ error: 'Not enough stock' });
-      newQty = +(current - qty).toFixed(3);
+    if (!id || !['in', 'out'].includes(type) || qty <= 0) {
+        return res.status(400).json({
+            error: 'Invalid request (id/type/qty)'
+        });
     }
 
-    await pool.query('UPDATE ingredients SET qty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [newQty, id]);
+    try {
 
-    res.json({ ok: true, ingredient: { id, qty: newQty } });
+        const [rows] = await pool.query('SELECT qty, unit, name FROM ingredients WHERE id = ?', [
+            id
+        ]);
+        if (!rows || rows.length === 0) return res.status(404).json({
+            error: 'Ingredient not found'
+        });
+        const ing = rows[0];
+        const current = Number(ing.qty || 0);
+        let newQty = current;
+        if (type === 'in') newQty = +(current + qty).toFixed(3);
+        else {
+            if (qty > current) return res.status(400).json({
+                error: 'Not enough stock'
+            });
+            newQty = +(current - qty).toFixed(3);
+        }
 
-    // log activity asynchronously
-    (async () => {
-      try {
-        const actionText = type === 'in'
-          ? `Stock in ${qty} ${ing.unit || ''} — ${ing.name}`
-          : `Stock out ${qty} ${ing.unit || ''} — ${ing.name}`;
-        const txt = note ? `${actionText} — ${note}` : actionText;
-        const userId = (req.user && req.user.id) ? req.user.id : null;
-        const action = (type === 'in') ? 'stock_in' : 'stock_out';
-        await pool.query('INSERT INTO activity (ingredient_id, user_id, action, text) VALUES (?, ?, ?, ?)', [id, userId, action, txt]);
-        console.info(`[activity] logged: ingredient=${id} user=${userId} type=${type} qty=${qty}`);
-      } catch (actErr) {
-        console.error('[activity] failed to log (non-blocking):', actErr && actErr.message ? actErr.message : actErr);
-      }
-    })();
+        await pool.query(
+            'UPDATE ingredients SET qty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [
+                newQty, id
+            ]);
 
-    return;
-  } catch (err) {
-    console.error('POST /api/ingredients/:id/stock error:', err && err.message ? err.message : err);
-    return res.status(500).json({ error: 'Server error', detail: err && err.message ? err.message : String(err) });
-  }
+        res.json({
+            ok: true,
+            ingredient: {
+                id,
+                qty: newQty
+            }
+        });
+
+        (async () => {
+            try {
+                const actionText = type === 'in' ?
+                    `Stock in ${qty} ${ing.unit} — ${ing.name}` :
+                    `Stock out ${qty} ${ing.unit} — ${ing.name}`;
+                const txt = note ? `${actionText} — ${note}` : actionText;
+                const userId = (req.user && req.user.id) ? req.user.id : null;
+
+                const action = (type === 'in') ? 'stock_in' : 'stock_out';
+                await pool.query(
+                    'INSERT INTO activity (ingredient_id, user_id, action, text) VALUES (?, ?, ?, ?)',
+                    [id, userId, action, txt]);
+                console.info(
+                    `[activity] logged: ingredient=${id} user=${userId} type=${type} qty=${qty}`
+                    );
+            } catch (actErr) {
+
+                console.error('[activity] failed to log (non-blocking):', actErr && actErr
+                    .message ? actErr.message : actErr);
+            }
+        })();
+        return;
+    } catch (err) {
+        console.error('POST /api/ingredients/:id/stock error:', err && err.message ? err.message :
+            err);
+
+        return res.status(500).json({
+            error: 'Server error',
+            detail: err && err.message ? err.message : String(err)
+        });
+    }
 });
-
 app.get('/api/activity', authMiddleware, async (req, res) => {
     try {
         const page = Math.max(1, Number(req.query.page || 1));
