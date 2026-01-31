@@ -1103,6 +1103,13 @@ async function renderIngredientCards(page = 1, limit = 5) {
     const items = (res && res.items) ? res.items : [];
     const meta = (res && res.meta) ? res.meta : { total: items.length, page: page, limit, totalPages: Math.ceil(items.length / limit) };
 
+    const me = (typeof getSession === 'function' ? getSession() : null) || window.CURRENT_USER || window.ME || { id: null, role: '' };
+const myRole = (me.role || '').toString().toLowerCase();
+
+// role buckets (lowercase)
+const privilegedEdit = ['owner','admin','baker'];     // who can edit metadata
+const privilegedStock = ['owner','admin','baker','assistant','cashier'];
+
     // Header with radios, export, print, and pagination placeholder
     const header = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;flex-wrap:wrap">
@@ -1147,18 +1154,10 @@ async function renderIngredientCards(page = 1, limit = 5) {
       const lowBadge = (isMaterial && (Number(i.qty || 0) <= (Number(i.min_qty || 0) || threshold))) ? '<span class="badge low">Low</span>' : '';
       const expiryNote = (isMaterial && i.expiry ? `<div class="muted small">${daysUntil(i.expiry)}d</div>` : '');
 
-      // current user (ensure you set window.CURRENT_USER on login)
-      const me = window.CURRENT_USER || window.ME || { id: null, role: '' };
-      const myRole = (me.role || '').toString().toLowerCase();
-
-      // allowed roles (lowercased)
-      const privilegedEdit = ['owner', 'admin', 'baker'];
-      const privilegedStock = ['owner', 'admin', 'baker', 'assistant'];
-
-      // explicit booleans used in the template + handlers
-      const canEdit = privilegedEdit.includes(myRole);
+      const editAllowed = privilegedEdit.includes(myRole);
       const canStock = privilegedStock.includes(myRole);
-      const saveAllowed = canStock || canEdit;
+      const saveAllowed = canStock || editAllowed;
+      const canEdit = editAllowed;
 
       return `<tr data-id="${i.id}" data-type="${escapeHtml(i.type||'')}" style="background:var(--card);border-bottom:1px solid rgba(0,0,0,0.04)">
         <td style="padding:10px;vertical-align:middle">${i.id}</td>
@@ -1171,9 +1170,9 @@ async function renderIngredientCards(page = 1, limit = 5) {
         <td style="padding:10px;vertical-align:middle"><input class="in-input" type="number" step="0.01" style="width:90px" /></td>
         <td style="padding:10px;vertical-align:middle"><input class="out-input" type="number" step="0.01" style="width:90px" /></td>
         <td role="cell" style="padding:10px;vertical-align:middle">
-            <button class="btn small save-row" type="button" ${saveAllowed ? '' : 'disabled title="Not authorized"'} aria-label="Save changes for ${escapeHtml(i.name)}">Save</button>
+            <button class="btn small save-row" type="button" ${saveAllowed ? '' : 'disabled title="Not authorized"'}>Save</button>
             <button class="btn small soft details-btn" data-id="${i.id}" type="button" aria-controls="modal" aria-label="Show details for ${escapeHtml(i.name)}">Details</button>
-            <button class="btn small soft edit-btn" type="button" ${canEdit ? '' : 'disabled title="Not authorized"'} aria-label="Edit ${escapeHtml(i.name)}">Edit</button>
+            <button class="btn small soft edit-btn" type="button" ${editAllowed ? '' : 'disabled title="Not authorized"'}>Edit</button>
         </td>
       </tr>`;
     }).join('') || `<tr><td colspan="10" class="muted" style="padding:12px">No inventory items</td></tr>`;
@@ -1193,15 +1192,12 @@ async function renderIngredientCards(page = 1, limit = 5) {
     // Save / In/Out wiring — call API and refresh current page
     container.querySelectorAll('button.save-row').forEach(btn => {
       btn.addEventListener('click', async (ev) => {
-        // re-evaluate permissions in case role changed
-        const me = window.CURRENT_USER || window.ME || { id: null, role: 'assistant' };
-        const role = (me.role || '').toString().toLowerCase();
-        const canEdit = ['owner','admin','baker'].includes(role);
-        const canStock = ['owner','admin','baker','assistant'].includes(role);
-        const saveAllowed = canStock || canEdit;
-
-        if (!saveAllowed) { notify('You are not authorized'); return; }
-
+        const me = (typeof getSession === 'function' ? getSession() : null) || window.CURRENT_USER || window.ME || { id: null, role: '' };
+  const role = (me.role || '').toString().toLowerCase();
+  const canEdit = ['owner','admin','baker'].includes(role);
+  const canStock = ['owner','admin','baker','assistant','cashier'].includes(role);
+  if (!canEdit && !canStock) { notify('You are not authorized'); return; }
+  
         const tr = ev.currentTarget.closest('tr');
         if (!tr) return;
         const id = Number(tr.dataset.id);
@@ -1218,7 +1214,7 @@ async function renderIngredientCards(page = 1, limit = 5) {
               await apiFetch(`/api/ingredients/${id}`, { method: 'PUT', body: { min_qty: Number(newMin) }});
             } else {
               // user tried to change metadata but lacks permission — ignore and notify
-              // notify('You are not authorized to modify item metadata (min/max/supplier). Changes to stock were applied only.');
+              notify('You are not authorized to modify item metadata (min/max/supplier). Changes to stock were applied only.');
             }
           }
 
@@ -2903,23 +2899,25 @@ document.addEventListener('DOMContentLoaded', ()=> {
       body: JSON.stringify({ username, password })
     });
     const data = await res.json();
-      if (!res.ok) {
-
-        if (data && data.user) {
-  window.CURRENT_USER = data.user;
-  try { localStorage.setItem('CURRENT_USER', JSON.stringify(data.user)); } catch(e){}
-  // update UI elements that show username / role
-  document.getElementById('sidebarUser') && (document.getElementById('sidebarUser').innerText = data.user.name || data.user.username);
-  document.getElementById('userBadgeText') && (document.getElementById('userBadgeText').innerText = data.user.username || '');
+if (!res.ok) {
+  // don't set CURRENT_USER here — only show the message
+  notify(data?.message || data?.error || 'Login failed');
+  setButtonLoadingWithMin(btn, false, 600);
+  showGlobalLoader(false);
+  return;
 }
-        notify(data?.message || data?.error || 'Login failed');
-        setButtonLoadingWithMin(btn, false, 600);
-        showGlobalLoader(false);
-        return;
-      }
 
-      const userObj = { username: data.user.username, role: data.user.role, name: data.user.name || data.user.username, id: data.user.id };
-      setSession(userObj, remember);
+      const userObj = {
+  id: data.user.id,
+  username: data.user.username,
+  role: data.user.role,
+  name: data.user.name || data.user.username
+};
+
+window.CURRENT_USER = userObj;
+try { localStorage.setItem('CURRENT_USER', JSON.stringify(userObj)); } catch(e){/* ignore */}
+
+setSession(userObj, remember);
       // keep recent profiles code if you added it
       if (typeof saveRecentProfileLocally === 'function') saveRecentProfileLocally(username);
 
