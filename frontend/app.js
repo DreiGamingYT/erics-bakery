@@ -1154,10 +1154,16 @@ const privilegedStock = ['owner','admin','baker','assistant','cashier'];
       const lowBadge = (isMaterial && (Number(i.qty || 0) <= (Number(i.min_qty || 0) || threshold))) ? '<span class="badge low">Low</span>' : '';
       const expiryNote = (isMaterial && i.expiry ? `<div class="muted small">${daysUntil(i.expiry)}d</div>` : '');
 
+      const me = window.CURRENT_USER || window.ME || { id: null, role: '' };
+const myRole = (me.role || '').toString().toLowerCase();
+
+// whitelists
+const privilegedEdit = ['owner','admin','baker'];   // edit metadata (min,max,supplier etc.)
+const privilegedStock = ['owner','admin','baker','assistant']; // stock in/out allowed
+
       const editAllowed = privilegedEdit.includes(myRole);
       const canStock = privilegedStock.includes(myRole);
       const saveAllowed = canStock || editAllowed;
-      const canEdit = editAllowed;
 
       return `<tr data-id="${i.id}" data-type="${escapeHtml(i.type||'')}" style="background:var(--card);border-bottom:1px solid rgba(0,0,0,0.04)">
         <td style="padding:10px;vertical-align:middle">${i.id}</td>
@@ -1172,7 +1178,7 @@ const privilegedStock = ['owner','admin','baker','assistant','cashier'];
         <td role="cell" style="padding:10px;vertical-align:middle">
             <button class="btn small save-row" type="button" ${saveAllowed ? '' : 'disabled title="Not authorized"'}>Save</button>
             <button class="btn small soft details-btn" data-id="${i.id}" type="button" aria-controls="modal" aria-label="Show details for ${escapeHtml(i.name)}">Details</button>
-            <button class="btn small soft edit-btn" type="button" ${editAllowed ? '' : 'disabled title="Not authorized"'}>Edit</button>
+            <button class="btn small soft edit-btn" type="button" ${canEdit ? '' : 'disabled title="Not authorized"'}>Edit</button>
         </td>
       </tr>`;
     }).join('') || `<tr><td colspan="10" class="muted" style="padding:12px">No inventory items</td></tr>`;

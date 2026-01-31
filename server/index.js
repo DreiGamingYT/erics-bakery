@@ -40,28 +40,35 @@ const EMAIL_FROM = process.env.EMAIL_FROM || `"Eric's Bakery" <archlinux@google.
 
 // Only create transporter if SMTP config is present
 let mailTransporter = null;
-
 if (nodemailer && SMTP_HOST && SMTP_USER && SMTP_PASS) {
   try {
     mailTransporter = nodemailer.createTransport({
       host: SMTP_HOST,
       port: SMTP_PORT,
-      secure: SMTP_PORT === 465,
-      auth: { user: SMTP_USER, pass: SMTP_PASS }
+      secure: SMTP_PORT === 465, // true for 465, false for others
+      auth: {
+        user: SMTP_USER,
+        pass: SMTP_PASS
+      }
     });
-
-    // optional runtime verification (will print verified or warn)
-    mailTransporter.verify()
-      .then(() => console.info('[sendResetEmail] SMTP transporter verified'))
-      .catch(err => console.warn('[sendResetEmail] SMTP transporter verify failed:', err && err.message ? err.message : err));
-  } catch (err) {
-    console.warn('[startup] failed to create SMTP transporter — email disabled', err && err.message ? err.message : err);
+    // verify transporter on startup (logs only)
+    mailTransporter.verify().then(() => {
+      console.info('[sendResetEmail] SMTP transporter verified');
+    }).catch((err) => {
+      console.warn('[sendResetEmail] transporter verification failed:', err && err.message ? err.message : err);
+    });
+  } catch (e) {
+    console.warn('Failed to create mail transporter (nodemailer present?)', e && e.message ? e.message : e);
     mailTransporter = null;
   }
 } else {
-  if (!nodemailer) console.warn('[startup] nodemailer module missing — install with: npm i nodemailer');
-  if (!(SMTP_HOST && SMTP_USER && SMTP_PASS)) console.warn('[startup] SMTP env not configured (SMTP_HOST/SMTP_USER/SMTP_PASS)');
+  if (!nodemailer && (SMTP_HOST || SMTP_USER || SMTP_PASS)) {
+    console.warn('nodemailer missing: add nodemailer to package.json dependencies for SMTP to work.');
+  } else {
+    console.warn('SMTP not configured — forgot-password emails will not be sent.');
+  }
 }
+
 
 function signToken(user) {
     return jwt.sign({
@@ -901,39 +908,35 @@ async function sendResetEmail(toEmail, code) {
     </body></html>`;
 
     // If SMTP config present, use it and ensure FROM matches SMTP_USER (improves deliverability)
-    if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-      const nodemailer = require('nodemailer');
-      const transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST,
-        port: Number(process.env.SMTP_PORT || 587),
-        secure: (String(process.env.SMTP_PORT || '587') === '465'), // true for 465
-        auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
-      });
+    const fromAddress = process.env.EMAIL_FROM || process.env.SMTP_USER || (`no-reply@${(process.env.FRONTEND_ORIGIN||'bakery.local').replace(/^https?:\/\//,'')}`);
 
-      // verify transporter once (will be cheap; logs useful on Vercel)
-      try {
-        await transporter.verify();
-        console.info('[sendResetEmail] SMTP transporter verified');
-      } catch (verr) {
-        console.warn('[sendResetEmail] transporter verify failed (continuing):', verr && verr.message ? verr.message : verr);
-      }
+if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+  const nodemailer = require('nodemailer');
+  const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT || 587),
+    secure: Number(process.env.SMTP_PORT || 587) === 465,
+    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+  });
 
-      // choose FROM: prefer explicit EMAIL_FROM, else use SMTP_USER
-      const fromAddress = (process.env.EMAIL_FROM && process.env.EMAIL_FROM.trim()) ? process.env.EMAIL_FROM.trim() : process.env.SMTP_USER;
+  // optional: verify before sending so we get clear logs
+  try {
+    await transporter.verify();
+    console.info('[sendResetEmail] SMTP transporter verified');
+  } catch (verr) {
+    console.warn('[sendResetEmail] transporter verify failed:', verr && verr.message ? verr.message : verr);
+  }
 
-      const info = await transporter.sendMail({
-        from: fromAddress,
-        to: toEmail,
-        subject,
-        text: plain,
-        html
-      });
-
-      console.info('[sendResetEmail] SMTP send info:', {
-        accepted: info.accepted, rejected: info.rejected, envelope: info.envelope, messageId: info.messageId, response: info.response
-      });
-      return;
-    }
+  const info = await transporter.sendMail({
+    from: fromAddress,
+    to: toEmail,
+    subject,
+    text: plain,
+    html
+  });
+  console.info('[sendResetEmail] SMTP send info:', JSON.stringify(info));
+  return;
+}
 
     // Fallback: SMTP not configured — log the HTML so you can copy it for testing
     console.info('[sendResetEmail] SMTP not configured — printing fallback HTML preview for', toEmail);
