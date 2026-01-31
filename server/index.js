@@ -99,6 +99,12 @@ function authMiddleware(req, res, next) {
     }
 }
 
+function hasRole(user, roles){
+  if(!user || !user.role) return false;
+  const r = String(user.role || '').toLowerCase();
+  return roles.map(x => String(x).toLowerCase()).includes(r);
+}
+
 let mailer = null;
 if(process.env.MAIL_HOST && process.env.MAIL_USER && process.env.MAIL_PASS){
   mailer = nodemailer.createTransport({
@@ -357,6 +363,10 @@ app.get('/api/ingredients', authMiddleware, async (req, res) => {
 app.post('/api/ingredients', authMiddleware, async (req, res) => {
   try {
     const data = req.body || {};
+    if(!hasRole(req.user, ['Owner','Baker','Admin'])) {
+      return res.status(403).json({ error: 'Forbidden: insufficient permissions to create items' });
+    }
+
     const name = (data.name || '').trim();
     if (!name) return res.status(400).json({ error: 'Name required' });
 
@@ -416,9 +426,9 @@ app.get('/api/ingredients/:id', authMiddleware, async (req, res) => {
     const id = Number(req.params.id || 0);
     if (!id) return res.status(400).json({ error: 'Invalid id' });
 
-    if (!canEditIngredient(req.user)) {
-      return res.status(403).json({ error: 'Not authorized to edit ingredients' });
-    }
+    if(!hasRole(req.user, ['Owner','Baker','Admin'])) {
+  return res.status(403).json({ error: 'Forbidden: insufficient permissions to edit items' });
+}
 
     const [rows] = await pool.query('SELECT id,name,type,supplier,qty,unit,min_qty,max_qty,expiry,attrs,created_at,updated_at FROM ingredients WHERE id = ?', [id]);
     if (!rows || rows.length === 0) return res.status(404).json({ error: 'Not found' });
@@ -438,19 +448,18 @@ app.get('/api/ingredients/:id', authMiddleware, async (req, res) => {
 
 app.post('/api/ingredients/:id/stock', authMiddleware, async (req, res) => {
     const id = Number(req.params.id);
-    const type = req.body.type;
-    const qty = Number(req.body.qty || 0);
-    const note = req.body.note || '';
+  const type = req.body.type;
+  const qty = Number(req.body.qty || 0);
+  const note = req.body.note || '';
 
-    if (!canStockIngredient(req.user)) {
-    return res.status(403).json({ error: 'Not authorized to change stock' });
-    }
+  // allow Owner/Admin/Baker/Assistant/Cashier to do stock adjustments
+  if(!hasRole(req.user, ['Owner','Baker','Assistant','Cashier','Admin'])) {
+    return res.status(403).json({ error: 'Forbidden: insufficient permissions to update stock' });
+  }
 
-    if (!id || !['in', 'out'].includes(type) || qty <= 0) {
-        return res.status(400).json({
-            error: 'Invalid request (id/type/qty)'
-        });
-    }
+  if (!id || !['in', 'out'].includes(type) || qty <= 0) {
+    return res.status(400).json({ error: 'Invalid request (id/type/qty)' });
+  }
 
     try {
 
