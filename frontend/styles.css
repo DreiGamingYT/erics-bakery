@@ -52,7 +52,6 @@ body{
   background: linear-gradient(180deg, var(--bg) 0%);
   -webkit-font-smoothing:antialiased;
   line-height:1.45;
-  cursor: url('./defualt.png') 16 16, auto;
 }
 
 .hidden{display:none!important}
@@ -159,16 +158,12 @@ body{
 .auth-form .field{ display:flex; flex-direction:column; gap:8px; }
 .auth-form .field .field-label{ font-size:13px; font-weight:700; color: #fff; padding-top:6px; }
 .auth-form input[type="text"],
-.auth-form input[type="email"],
-.form input[type="email"],
-.form input[type="text"],
-.form input[type="password"],
 .auth-form input[type="password"],
 .auth-form select{
   height:46px;
   padding:10px 12px;
   border-radius:10px;
-  border:1px solid rgba(0, 0, 0, 0.58);
+  border:1px solid rgba(0,0,0,0.06);
   font-size:15px;
   background:#fff;
   color:var(--text);
@@ -933,12 +928,13 @@ body{
   .calendar-cell { border-color: rgba(255,255,255,0.03); }
 }
 
-@media (min-width: 1500px) {
+@media (min-width: 1300px) {
   .main { margin-left: 20px; }
 }
 
 @media (min-width:901px){
   .top-nav{display:flex}
+  .main{margin-left:20px}
 
   .sidebar {
     display: flex !important;        
@@ -981,8 +977,8 @@ body{
   .avatar-preview{ width:96px; height:96px; }
   .page-header{ flex-direction:column; align-items:flex-start; gap:8px; }
   .page-actions{ width:100%; display:flex; justify-content:flex-end; gap:8px; }
-  .profile-left{ order:1; }
-  .profile-right{ order:0; }
+  .profile-left{ order:0; }
+  .profile-right{ order:1; }
 
   .top-search{display:none}
 
@@ -1440,64 +1436,4 @@ body{
   .global-loader .global-spinner { width:40px; height:40px; border-width:3px; }
   .global-loader .loader-title { font-size:14px; }
   .global-loader .loader-sub { font-size:13px; }
-}
-
-/* --- profile & settings extras --- */
-.profile-big .avatar-preview { width:160px; height:160px; border-radius:14px; overflow:hidden; display:flex; align-items:center; justify-content:center; background:linear-gradient(180deg,#f6f7fb,#fff); border:1px solid rgba(0,0,0,0.04); box-shadow:0 10px 30px rgba(0,0,0,0.04); }
-.profile-big .profile-left { width:350px; }
-.profile-big .profile-right { flex:1; padding-left: 40px; box-sizing: border-box; }
-
-.settings-grid .card { box-shadow: var(--shadow); border-radius:12px; }
-
-#recentLogins li { list-style:none; }
-#recentLogins li button { min-width:64px; }
-
-/* small adjustments for small screens */
-@media (max-width:900px){
-  .profile-big .avatar-preview { width:120px; height:120px; }
-  .profile-grid { grid-template-columns: 1fr; }
-  .settings-grid { grid-template-columns: 1fr; }
-  .profile-big .profile-left { width:100%; order:2; }
-  .profile-big .profile-right { order:1; }
-}
-
-button,
-.btn,
-a,
-[role="button"],
-.clickable {
-  cursor: url('./defualt.png') 32 32, auto;
-}
-
-/* Disabled buttons */
-button:disabled,
-.btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.in-input,
-.out-input,
-.min-input,
-#editQty,
-#editMin,
-#ingQty,
-#ingMin {
-  cursor: url('./add_default.png') 32 32, auto;
-}
-
-.btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-  filter: brightness(1.05);
-}
-
-.btn:active:not(:disabled) {
-  transform: translateY(0);
-}
-
-.save-row,
-.edit-btn,
-.details-btn,
-#addIngredientBtn {
-  cursor: url('./add_default.png') 32 32, auto;
 }
