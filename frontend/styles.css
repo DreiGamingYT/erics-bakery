@@ -1561,3 +1561,27 @@ button:disabled,
   .kpi-popover-mobile { padding: 6px; }
   .kpi-popover-mobile li { font-size:13px; padding:6px 8px; }
 }
+
+/* KPI popover styles (add to styles.css) */
+.kpi-popover,
+.kpi-popover-mobile {
+  display: none;
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 12px;
+  width: 320px;
+  max-width: calc(100vw - 40px);
+  background: var(--card);
+  border-radius: 10px;
+  box-shadow: 0 12px 30px rgba(19,28,38,0.08);
+  border: 1px solid rgba(0,0,0,0.06);
+  z-index: 2500;
+  padding: 6px;
+  box-sizing: border-box;
+}
+.kpi-card { position: relative; } /* ensure popover anchors */
+.kpi-popover-mobile { right: auto; left: 12px; } /* mobile variant */
+@media (max-width:700px){
+  .kpi-popover { display: none !important; } /* only mobile popovers used on small screens */
+  .kpi-popover-mobile { width: auto; left: 8px; right: 8px; max-height: 40vh; overflow:auto; }
+}

@@ -3735,19 +3735,151 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  function renderKpiList(container, items){
-    if(!container) return;
-    container.innerHTML = '';
-    const ul = document.createElement('ul');
-    for(const it of items){
-      const li = document.createElement('li');
-      const name = escapeHtml(it.name || it.label || it.username || it.title || 'Item');
-      const qty = escapeHtml(it.qty != null ? (it.qty + (it.unit ? ' ' + it.unit : '')) : (it.qtyText || ''));
-      li.innerHTML = `<span class="kpi-item-name">${name}</span><span class="kpi-item-qty muted small">${qty}</span>`;
-      ul.appendChild(li);
-    }
-    container.appendChild(ul);
+  function ensureKpiPopContainers(card){
+  if(!card) return;
+  if(!card.querySelector('.kpi-popover')){
+    const dp = document.createElement('div');
+    dp.className = 'kpi-popover';
+    dp.setAttribute('aria-hidden','true');
+    card.appendChild(dp);
   }
+  if(!card.querySelector('.kpi-popover-mobile')){
+    const mp = document.createElement('div');
+    mp.className = 'kpi-popover-mobile';
+    mp.setAttribute('aria-hidden','true');
+    card.appendChild(mp);
+  }
+}
+
+function renderKpiList(container, items){
+  if(!container) return;
+  container.innerHTML = '';
+  const list = document.createElement('div');
+  list.style.padding = '6px';
+  list.style.maxHeight = '260px';
+  list.style.overflow = 'auto';
+  items.slice(0, 10).forEach(it => {
+    const row = document.createElement('div');
+    row.style.display = 'flex';
+    row.style.justifyContent = 'space-between';
+    row.style.alignItems = 'center';
+    row.style.padding = '8px';
+    row.style.borderBottom = '1px solid rgba(0,0,0,0.04)';
+    row.style.fontWeight = '700';
+    const left = document.createElement('div');
+    left.textContent = it.name || '(unnamed)';
+    left.style.whiteSpace = 'nowrap';
+    left.style.overflow = 'hidden';
+    left.style.textOverflow = 'ellipsis';
+    left.style.maxWidth = '65%';
+    const right = document.createElement('div');
+    const qtyText = (typeof it.qty !== 'undefined') ? `${it.qty}${it.unit ? ' ' + it.unit : ''}` : '';
+    right.textContent = qtyText;
+    right.style.opacity = '0.9';
+    right.style.fontWeight = '800';
+    row.appendChild(left);
+    row.appendChild(right);
+    list.appendChild(row);
+  });
+  if(items.length === 0){
+    const empty = document.createElement('div');
+    empty.textContent = 'No items to show';
+    empty.className = 'muted small';
+    empty.style.padding = '8px';
+    list.appendChild(empty);
+  }
+  container.appendChild(list);
+}
+
+/* show/hide helpers */
+function showKpiPopover(card){
+  const d = card.querySelector('.kpi-popover');
+  if(d){ d.style.display = 'block'; d.setAttribute('aria-hidden','false'); }
+}
+function hideKpiPopover(card){
+  const d = card.querySelector('.kpi-popover');
+  if(d){ d.style.display = 'none'; d.setAttribute('aria-hidden','true'); }
+}
+function toggleKpiPopoverMobile(card){
+  const m = card.querySelector('.kpi-popover-mobile');
+  if(!m) return;
+  const hidden = m.getAttribute('aria-hidden') === 'true';
+  m.style.display = hidden ? 'block' : 'none';
+  m.setAttribute('aria-hidden', hidden ? 'false' : 'true');
+}
+
+/* attach hover/tap handlers for any KPI card element */
+function attachKpiHover(card){
+  if(!card || card.__kpiHandlersAttached) return;
+  card.addEventListener('mouseenter', () => showKpiPopover(card));
+  card.addEventListener('mouseleave', () => hideKpiPopover(card));
+  // mobile: toggle on click/tap
+  card.addEventListener('click', (ev) => {
+    // avoid opening if user clicked an actionable child (button)
+    if(ev.target && (ev.target.tagName === 'BUTTON' || ev.target.closest('button'))) return;
+    toggleKpiPopoverMobile(card);
+  }, { passive: true });
+  card.__kpiHandlersAttached = true;
+}
+
+/* KPI renderer for equipment/tools — call from KPI init or just run once on load */
+async function initEquipmentKpi(){
+  try {
+    const el = document.querySelector('#kpi-equipment');
+    if(!el) return;
+    const card = el.closest('.kpi-card') || el.parentElement;
+    ensureKpiPopContainers(card);
+    attachKpiHover(card);
+
+    // get sample items: fetch ingredients with type=equipment if you use 'type' in DB
+    // fallback: get first 10 ingredients and filter by type===equipment client-side
+    let items = [];
+    try {
+      // try server-side filter first (if API supports)
+      const res = await fetch('/api/ingredients?limit=50&page=1');
+      if(res.ok){
+        const json = await res.json();
+        if(json && Array.isArray(json.items)){
+          // prefer server-side `type` field if present
+          items = json.items.filter(i => (i.type && String(i.type).toLowerCase().includes('equip')) || (i.type && String(i.type).toLowerCase()==='equipment'));
+          // fallback: if none matched, show a short list of items with 'tool' in name
+          if(items.length === 0) {
+            items = json.items.filter(i => String(i.name || '').toLowerCase().includes('tool') || String(i.name || '').toLowerCase().includes('equipment'));
+          }
+        }
+      }
+      // set kpi value as count of equipment
+      const count = items.length > 0 ? items.length : (json && json.meta ? Number(json.meta.total) : 0);
+      el.textContent = count || 0;
+    } catch(e){
+      console.warn('initEquipmentKpi fetch failed', e);
+      el.textContent = '—';
+    }
+
+    // render lists
+    renderKpiList(card.querySelector('.kpi-popover'), items);
+    renderKpiList(card.querySelector('.kpi-popover-mobile'), items);
+
+  } catch (err){
+    console.error('initEquipmentKpi err', err);
+  }
+}
+
+/* On DOM ready, init equipment KPI + ensure other KPI cards are wired too */
+document.addEventListener('DOMContentLoaded', () => {
+  // init equipment KPI
+  initEquipmentKpi().catch(()=>{});
+  // auto-attach handlers to any existing kpi-card elements (defensive)
+  document.querySelectorAll('.kpi-card').forEach(c => {
+    ensureKpiPopContainers(c);
+    attachKpiHover(c);
+  });
+  // small click-away handler for mobile: hide any visible mobile popovers when clicking outside
+  document.addEventListener('click', (ev) => {
+    if(ev.target.closest && ev.target.closest('.kpi-card')) return;
+    document.querySelectorAll('.kpi-popover-mobile').forEach(p => { p.style.display = 'none'; p.setAttribute('aria-hidden','true'); });
+  });
+});
 
   // mapping from KPI element id to API query used to populate it
   const KPI_MAP = {
