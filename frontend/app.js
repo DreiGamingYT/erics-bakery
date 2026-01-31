@@ -57,6 +57,17 @@ async function changeStockAPI(id, type, qty, note=''){
   return res.json();
 }
 
+ // run at app startup
+(function restoreCurrentUser(){
+  try {
+    const raw = localStorage.getItem('CURRENT_USER');
+    if (raw) window.CURRENT_USER = JSON.parse(raw);
+    else window.CURRENT_USER = null;
+  } catch(e) {
+    window.CURRENT_USER = null;
+  }
+})();
+
 const sampleIngredients = [
   { id:1, name:'Flour', unit:'kg', qty:250, min:62.5, max:300, expiry:null, supplier:'Protego Inc.', icon:'fa-wheat', type:'ingredient', attrs:{ antiAmag:false, shelfLifeDays:1 }},
   { id:2, name:'Sugar', unit:'kg', qty:80, min:16, max:120, expiry:null, supplier:'Protego Inc.', icon:'fa-cubes-stacked', type:'ingredient', attrs:{ antiAmag:false, shelfLifeDays:365 }},
@@ -121,6 +132,16 @@ let chartIngredientUsage = null;
 const ACCOUNTS_KEY = 'bakery_accounts';
 const SESSION_KEY = 'bakery_session';
 const THEME_KEY = 'bakery_theme';
+
+async function onLoginSuccess(resp) {
+  // resp.user is from server { id, username, role, name }
+  window.CURRENT_USER = resp.user;
+  // persist small user info so UI survives reloads:
+  try { localStorage.setItem('CURRENT_USER', JSON.stringify(resp.user)); } catch(e){ /* ignore */ }
+
+  // update any UI
+  updateUIAfterLogin(resp.user);
+}
 
 function q(id){ return document.getElementById(id) || null; }
 function on(id, ev, fn){ const el = q(id); if(el) el.addEventListener(ev, fn); else console.debug(`[on] missing #${id}`); }
@@ -198,19 +219,6 @@ function nextOrderId(){
   const arr = sampleOrders.map(o=> o.id || 0);
   return (arr.length? Math.max(...arr) : 1000) + 1;
 }
-
-(function restoreCurrentUser(){
-  try {
-    const raw = localStorage.getItem('CURRENT_USER');
-    if (raw) {
-      window.CURRENT_USER = JSON.parse(raw);
-    } else {
-      window.CURRENT_USER = null;
-    }
-  } catch(e){
-    window.CURRENT_USER = null;
-  }
-})();
 
 function getCurrentUserRole() {
   const me = window.CURRENT_USER || null;
@@ -1137,16 +1145,14 @@ async function renderIngredientCards(page = 1, limit = 5) {
       const expiryNote = (isMaterial && i.expiry ? `<div class="muted small">${daysUntil(i.expiry)}d</div>` : '');
 
       // current user (ensure you set window.CURRENT_USER on login)
-      const me = window.CURRENT_USER || window.ME || { id: null, role: '' };
-      const myRole = (me.role || '').toString().toLowerCase();
+      const me = window.CURRENT_USER || window.ME || { id: null, role: 'assistant' };
+      const role = (me.role || '').toString().toLowerCase();
 
-      // allowed roles (lowercased)
-      const privilegedEdit = ['owner', 'admin', 'baker'];
-      const privilegedStock = ['owner', 'admin', 'baker', 'assistant'];
+      // normalize role checks (lowercase)
+      const canEdit = ['owner','admin','baker'].includes(role);
+      const canStock = ['owner','admin','baker','assistant'].includes(role);
 
-      // explicit booleans used in the template + handlers
-      const canEdit = privilegedEdit.includes(myRole);
-      const canStock = privilegedStock.includes(myRole);
+      // Save button allowed if user canStock (for in/out) OR canEdit (for metadata)
       const saveAllowed = canStock || canEdit;
 
       return `<tr data-id="${i.id}" data-type="${escapeHtml(i.type||'')}" style="background:var(--card);border-bottom:1px solid rgba(0,0,0,0.04)">
@@ -1207,7 +1213,7 @@ async function renderIngredientCards(page = 1, limit = 5) {
               await apiFetch(`/api/ingredients/${id}`, { method: 'PUT', body: { min_qty: Number(newMin) }});
             } else {
               // user tried to change metadata but lacks permission — ignore and notify
-              // notify('You are not authorized to modify item metadata (min/max/supplier). Changes to stock were applied only.');
+              notify('You are not authorized to modify item metadata (min/max/supplier). Changes to stock were applied only.');
             }
           }
 
