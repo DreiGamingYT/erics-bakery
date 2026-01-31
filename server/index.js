@@ -2,9 +2,10 @@ require('dotenv').config();
 const path = require('path');
 const express = require('express');
 const pool = require('./db');
-const bcrypt = require('bcrypt');
-const crypto = require('crypto');
-const nodemailer = require('nodemailer');
+const bcrypt = require('bcryptjs');
+
+const { promisify } = require('util');
+
 const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
 const cors = require('cors');
@@ -18,8 +19,36 @@ app.use(cors({
     origin: process.env.FRONTEND_ORIGIN || 'http://localhost:3000',
     credentials: true
 }));
+
 const JWT_SECRET = process.env.JWT_SECRET || 'replace_with_strong_secret';
 const TOKEN_NAME = process.env.COOKIE_NAME || 'bakery_token';
+
+const crypto = require('crypto');
+let nodemailer;
+try { nodemailer = require('nodemailer'); } catch(e) { nodemailer = null; }
+
+// mail transporter
+const SMTP_HOST = process.env.SMTP_HOST;
+const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
+const SMTP_USER = process.env.SMTP_USER;
+const SMTP_PASS = process.env.SMTP_PASS;
+const EMAIL_FROM = process.env.EMAIL_FROM || `"Eric's Bakery" <archlinux@google.com>`;
+
+// Only create transporter if SMTP config is present
+let mailTransporter = null;
+if (SMTP_HOST && SMTP_USER && SMTP_PASS) {
+  mailTransporter = nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: SMTP_PORT,
+    secure: SMTP_PORT === 465, // true for 465, false for others
+    auth: {
+      user: SMTP_USER,
+      pass: SMTP_PASS
+    }
+  });
+} else {
+  console.warn('SMTP not configured — forgot-password emails will not be sent.');
+}
 
 function signToken(user) {
     return jwt.sign({
@@ -54,6 +83,19 @@ function authMiddleware(req, res, next) {
     }
 }
 
+function canEditIngredient(user) {
+  if (!user || !user.role) return false;
+  const role = String(user.role).toLowerCase();
+  // adjust allowed roles if your DB uses different names (e.g., 'admin' vs 'Owner')
+  return ['owner', 'admin', 'baker'].includes(role);
+}
+
+function canStockIngredient(user) {
+  if (!user || !user.role) return false;
+  const role = String(user.role).toLowerCase();
+  return ['owner', 'admin', 'baker', 'assistant'].includes(role);
+}
+
 let mailer = null;
 if(process.env.MAIL_HOST && process.env.MAIL_USER && process.env.MAIL_PASS){
   mailer = nodemailer.createTransport({
@@ -70,8 +112,12 @@ app.post('/api/auth/signup', async (req, res) => {
             username,
             password,
             role = 'Baker',
-            name = null
+            name = null,
+            email=''
         } = req.body;
+        if (!email) return res.status(400).json({ 
+            message: 'Email required' 
+        });
         if (!username || !password) return res.status(400).json({
             message: 'username & password required'
         });
@@ -81,8 +127,8 @@ app.post('/api/auth/signup', async (req, res) => {
         });
         const hash = await bcrypt.hash(password, 10);
         const [r] = await pool.query(
-            'INSERT INTO users (username, password_hash, role, name) VALUES (?, ?, ?, ?)', [
-                username, hash, role, name || username
+            'INSERT INTO users (username, password_hash, role, name, email) VALUES (?, ?, ?, ?, ?)', [
+                username, hash, role, name || username, email
             ]);
         const user = {
             id: r.insertId,
@@ -154,6 +200,73 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
     });
 });
 
+app.put('/api/users/me', authMiddleware, async (req, res) => {
+  try {
+    const uid = Number(req.user && req.user.id);
+    if (!uid) return res.status(401).json({ error: 'Not authenticated' });
+
+    const body = req.body || {};
+    const newName = typeof body.name === 'string' ? body.name.trim() : undefined;
+    const newEmail = typeof body.email === 'string' ? body.email.trim().toLowerCase() : undefined;
+    const newPhone = typeof body.phone === 'string' ? body.phone.trim() : undefined;
+    const requestedRole = typeof body.role === 'string' ? body.role.trim() : undefined;
+
+    const fields = [];
+    const params = [];
+
+    // Validate email format (simple)
+    if (typeof newEmail === 'string' && newEmail.length > 0) {
+      const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRe.test(newEmail)) return res.status(400).json({ error: 'Invalid email' });
+      // ensure email not used by another account
+      const [ex] = await pool.query('SELECT id FROM users WHERE email = ? AND id != ? LIMIT 1', [newEmail, uid]);
+      if (ex && ex.length > 0) return res.status(409).json({ error: 'Email already in use' });
+      fields.push('email = ?'); params.push(newEmail);
+    }
+
+    if (typeof newName === 'string' && newName.length > 0) {
+      fields.push('name = ?'); params.push(newName);
+    }
+
+    if (typeof newPhone === 'string') {
+      fields.push('phone = ?'); params.push(newPhone);
+    }
+
+    // Role may only be changed if current user is Owner
+    if (requestedRole && req.user && req.user.role === 'Owner') {
+      // whitelist roles to avoid injection
+      const allowedRoles = ['Owner','Cashier','Assistant','Baker'];
+      if (!allowedRoles.includes(requestedRole)) return res.status(400).json({ error: 'Invalid role' });
+      fields.push('role = ?'); params.push(requestedRole);
+    }
+
+    if (fields.length === 0) return res.status(400).json({ error: 'No updatable fields provided' });
+
+    params.push(uid);
+    const q = `UPDATE users SET ${fields.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`;
+    await pool.query(q, params);
+
+    // fetch updated user (exclude password_hash)
+    const [rows] = await pool.query('SELECT id, username, role, name, email, phone FROM users WHERE id = ? LIMIT 1', [uid]);
+    if (!rows || rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    const user = rows[0];
+
+    // re-issue token so client session reflects the changes (name/role)
+    try {
+        const isProd = process.env.NODE_ENV === 'production';
+      const token = signToken({ id: user.id, username: user.username, role: user.role, name: user.name });
+      res.cookie(TOKEN_NAME, token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' });
+    } catch (e) {
+      console.warn('Could not reissue token after profile update', e && e.message ? e.message : e);
+    }
+
+    return res.json({ user });
+  } catch (err) {
+    console.error('PUT /api/users/me err', err && err.stack ? err.stack : err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
 app.post('/api/auth/logout', (req, res) => {
     res.clearCookie(TOKEN_NAME, {
         httpOnly: true
@@ -200,7 +313,7 @@ app.get('/api/ingredients', authMiddleware, async (req, res) => {
             `SELECT COUNT(*) as cnt FROM ingredients ${whereSql}`, params);
         const total = countRows && countRows[0] ? Number(countRows[0].cnt) : 0;
 
-        const q = `SELECT id,name,type,supplier,qty,unit,min_qty,max_qty,expiry,attrs,created_at,updated_at
+        const q = `SELECT id,name,type,supplier,qty,unit,min_qty,max_qty,expiry,attrs,created_at,updated_at,created_by
                FROM ingredients
                ${whereSql}
                ORDER BY ${pool.escapeId ? pool.escapeId(sort) : sort} ${order}
@@ -260,11 +373,12 @@ app.post('/api/ingredients', authMiddleware, async (req, res) => {
     const max_qty = data.max_qty == null ? null : data.max_qty;
     const expiry = data.expiry || null;
     const attrs = data.attrs ? JSON.stringify(data.attrs) : null;
+    const userId = (req.user && req.user.id) ? req.user.id : null;
 
     const [r] = await pool.query(
-      `INSERT INTO ingredients (name, type, supplier, qty, unit, min_qty, max_qty, expiry, attrs)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [name, type, supplier, qty, unit, min_qty, max_qty, expiry, attrs]
+      `INSERT INTO ingredients (name, type, supplier, qty, unit, min_qty, max_qty, expiry, attrs, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [name, type, supplier, qty, unit, min_qty, max_qty, expiry, attrs, userId]
     );
 
     // fetch the inserted row (so we rely on the DB value for unit etc.)
@@ -302,6 +416,10 @@ app.get('/api/ingredients/:id', authMiddleware, async (req, res) => {
     const id = Number(req.params.id || 0);
     if (!id) return res.status(400).json({ error: 'Invalid id' });
 
+    if (!canEditIngredient(req.user)) {
+      return res.status(403).json({ error: 'Not authorized to edit ingredients' });
+    }
+
     const [rows] = await pool.query('SELECT id,name,type,supplier,qty,unit,min_qty,max_qty,expiry,attrs,created_at,updated_at FROM ingredients WHERE id = ?', [id]);
     if (!rows || rows.length === 0) return res.status(404).json({ error: 'Not found' });
 
@@ -318,11 +436,60 @@ app.get('/api/ingredients/:id', authMiddleware, async (req, res) => {
   }
 });
 
+// PUT /api/ingredients/:id
+app.put('/api/ingredients/:id', authMiddleware, async (req, res) => {
+  try {
+    const id = Number(req.params.id || 0);
+    if (!id) return res.status(400).json({ error: 'Invalid id' });
+
+    const body = req.body || {};
+    const allowed = ['name','type','supplier','unit','min_qty','max_qty','expiry','attrs'];
+    const fields = [];
+    const params = [];
+
+    for (const k of allowed) {
+      if (typeof body[k] !== 'undefined') {
+        // small normalization
+        if (k === 'min_qty' || k === 'max_qty') {
+          fields.push(`${k} = ?`); params.push(body[k] === null ? null : Number(body[k]));
+        } else if (k === 'attrs') {
+          fields.push('attrs = ?'); params.push(body.attrs ? JSON.stringify(body.attrs) : null);
+        } else {
+          fields.push(`${k} = ?`); params.push(body[k]);
+        }
+      }
+    }
+
+    if (fields.length === 0) return res.status(400).json({ error: 'No fields to update' });
+
+    // Update updated_at as well
+    params.push(id);
+    const q = `UPDATE ingredients SET ${fields.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`;
+    await pool.query(q, params);
+
+    const [rows] = await pool.query('SELECT id,name,type,supplier,qty,unit,min_qty,max_qty,expiry,attrs,created_at,updated_at FROM ingredients WHERE id = ?', [id]);
+    const updated = rows && rows[0] ? rows[0] : null;
+    if (updated && typeof updated.attrs === 'string' && updated.attrs) {
+      try { updated.attrs = JSON.parse(updated.attrs); } catch(e){}
+    }
+
+    return res.json({ ingredient: updated });
+  } catch (e) {
+    console.error('PUT /api/ingredients/:id err', e);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
 app.post('/api/ingredients/:id/stock', authMiddleware, async (req, res) => {
     const id = Number(req.params.id);
     const type = req.body.type;
     const qty = Number(req.body.qty || 0);
     const note = req.body.note || '';
+
+    if (!canStockIngredient(req.user)) {
+    return res.status(403).json({ error: 'Not authorized to change stock' });
+    }
+
     if (!id || !['in', 'out'].includes(type) || qty <= 0) {
         return res.status(400).json({
             error: 'Invalid request (id/type/qty)'
@@ -461,5 +628,327 @@ app.get('/api/ingredients/export/csv', authMiddleware, async (req, res) => {
         res.status(500).send('Server error');
     }
 });
+
+// Replace existing app.post('/api/auth/forgot', ...) with this block
+app.post('/api/auth/forgot', async (req, res) => {
+  try {
+    const emailOrUsername = (req.body && (req.body.email || '')).toString().trim();
+    if (!emailOrUsername) return res.status(400).json({ error: 'email required' });
+
+    console.info('[forgot] request for', emailOrUsername);
+
+    // try find user by email first, then by username
+    let user = null;
+    try {
+      const [byEmail] = await pool.query('SELECT id, username, email FROM users WHERE email = ? LIMIT 1', [emailOrUsername]);
+      user = byEmail && byEmail[0] ? byEmail[0] : null;
+    } catch (e) {
+      // ignore and fallback to username search
+      console.warn('[forgot] SELECT by email failed (continuing):', e && e.message ? e.message : e);
+      user = null;
+    }
+    if (!user) {
+      const [byUser] = await pool.query('SELECT id, username, email FROM users WHERE username = ? LIMIT 1', [emailOrUsername]);
+      user = byUser && byUser[0] ? byUser[0] : null;
+    }
+
+    // generate 6-digit plaintext code
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    const expiresAt = new Date(Date.now() + (Number(process.env.RESET_CODE_EXPIRE_MIN || 15) * 60 * 1000));
+    const userId = user ? user.id : null;
+    const emailToStore = user ? (user.email || emailOrUsername) : emailOrUsername;
+
+    // securely hash the code for storage
+    const hashed = await bcrypt.hash(code, 10);
+
+    // insert hashed token into password_resets.token (and mark used/consumed = 0)
+    await pool.query(
+      `INSERT INTO password_resets (user_id, email, token, expires_at, used, consumed, created_at)
+       VALUES (?, ?, ?, ?, 0, 0, CURRENT_TIMESTAMP)`,
+      [userId, emailToStore, hashed, expiresAt]
+    );
+
+    console.info('[forgot] inserted reset row for', emailToStore);
+
+    // send email async (do not block response). sendResetEmail will output logging.
+    try {
+  await sendResetEmail(emailToStore, code);
+  console.info('[forgot] sendResetEmail completed for', emailToStore);
+} catch (e) {
+  // log but DO NOT fail the endpoint (we still return OK to avoid leaking existence)
+  console.warn('[forgot] sendResetEmail failed (will still return OK):', e && e.message ? e.message : e);
+}
+
+    // always return OK to avoid revealing whether the address exists
+    return res.json({ ok: true, message: 'Reset code created (if the address exists).' });
+  } catch (err) {
+    console.error('POST /api/auth/forgot error', err && err.stack ? err.stack : err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+
+// POST /api/auth/forgot/verify  (quick patch: do NOT mark the row used here)
+app.post('/api/auth/forgot/verify', async (req, res) => {
+  try {
+    const email = (req.body && (req.body.email || '')).trim();
+    const code = (req.body && (req.body.code || '')).trim();
+    if(!email || !code) return res.status(400).json({ error: 'email & code required' });
+
+    // fetch latest reset row for this email
+    const [rows] = await pool.query(
+      `SELECT id, token, used, consumed, expires_at
+       FROM password_resets
+       WHERE email = ?
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [email]
+    );
+    const row = rows && rows[0] ? rows[0] : null;
+    if (!row) return res.status(400).json({ error: 'Invalid code' });
+    if (row.used || row.consumed) return res.status(400).json({ error: 'Code already used' });
+    if (new Date(row.expires_at) < new Date()) return res.status(400).json({ error: 'Code expired' });
+
+    const ok = await bcrypt.compare(code, row.token);
+    if (!ok) return res.status(400).json({ error: 'Invalid code' });
+
+    // DO NOT mark it used here. Let the reset endpoint mark it consumed when password is changed.
+    return res.json({ ok: true, message: 'Code verified' });
+  } catch (err) {
+    console.error('POST /api/auth/forgot/verify err', err && err.stack ? err.stack : err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// POST /api/auth/forgot/reset
+app.post('/api/auth/forgot/reset', async (req, res) => {
+  try {
+    const email = (req.body && (req.body.email || '')).trim();
+    const code = (req.body && (req.body.code || '')).trim();
+    const password = req.body && req.body.password;
+    if (!email || !code || !password) return res.status(400).json({ error: 'email/code/password required' });
+    if (typeof password !== 'string' || password.length < 6) return res.status(400).json({ error: 'password too short' });
+
+    // find latest reset entry for this email
+    const [rows] = await pool.query(
+      `SELECT id, user_id, token, expires_at, used, consumed
+       FROM password_resets
+       WHERE email = ?
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [email]
+    );
+    const pr = rows && rows[0] ? rows[0] : null;
+    if (!pr) return res.status(400).json({ error: 'Invalid code' });
+    if (pr.used || pr.consumed) return res.status(400).json({ error: 'Code already used' });
+    if (new Date(pr.expires_at) < new Date()) return res.status(400).json({ error: 'Code expired' });
+
+    // compare provided code with stored hashed token
+    const ok = await bcrypt.compare(code, pr.token);
+    if (!ok) return res.status(400).json({ error: 'Invalid code' });
+
+    // resolve user id (some rows may not have user_id set)
+    let userId = pr.user_id;
+    if (!userId) {
+      const [uRows] = await pool.query('SELECT id FROM users WHERE email = ? OR username = ? LIMIT 1', [email, email]);
+      if (uRows && uRows[0]) userId = uRows[0].id;
+    }
+    if (!userId) return res.status(404).json({ error: 'User not found for email' });
+
+    // update password
+    const hash = await bcrypt.hash(password, 10);
+    await pool.query('UPDATE users SET password_hash = ? WHERE id = ?', [hash, userId]);
+
+    // mark reset entry used
+    await pool.query('UPDATE password_resets SET used = 1, consumed = 1 WHERE id = ?', [pr.id]);
+
+    return res.json({ ok: true, message: 'Password updated' });
+  } catch (err) {
+    console.error('POST /api/auth/forgot/reset err', err && err.stack ? err.stack : err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// POST /api/auth/verify-reset  { email, code }  -> returns { ok:true, resetToken }
+app.post('/api/auth/verify-reset', async (req, res) => {
+  try {
+    const email = (req.body.email || '').trim().toLowerCase();
+    const code = (req.body.code || '').trim();
+    if (!email || !code) return res.status(400).json({ error: 'Email and code required' });
+
+    const [urows] = await pool.query('SELECT id FROM users WHERE email = ?', [email]);
+    if (!urows || urows.length === 0) return res.status(400).json({ error: 'Invalid email or code' });
+    const uid = urows[0].id;
+
+    // fetch most recent unused reset for user within expiry window
+    const [resRows] = await pool.query(
+      'SELECT id, code_hash, expires_at, used FROM password_resets WHERE user_id = ? AND used = 0 ORDER BY created_at DESC LIMIT 1',
+      [uid]
+    );
+    if (!resRows || resRows.length === 0) return res.status(400).json({ error: 'Invalid or expired code' });
+
+    const rec = resRows[0];
+    if (new Date(rec.expires_at) < new Date()) return res.status(400).json({ error: 'Code expired' });
+
+    const ok = await bcrypt.compare(code, rec.code_hash);
+    if (!ok) return res.status(400).json({ error: 'Invalid code' });
+
+    // create short-lived reset token (signed) — includes reset record id
+    const token = signResetToken({ uid, rid: rec.id });
+    return res.json({ ok: true, resetToken: token });
+  } catch (e) {
+    console.error('POST /api/auth/verify-reset err', e);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// POST /api/auth/reset  { resetToken, newPassword }
+app.post('/api/auth/reset', async (req, res) => {
+  try {
+    const { resetToken, newPassword } = req.body || {};
+    if (!resetToken || !newPassword) return res.status(400).json({ error: 'Token and new password required' });
+
+    let payload;
+    try {
+      payload = jwt.verify(resetToken, JWT_SECRET);
+    } catch (e) {
+      return res.status(400).json({ error: 'Invalid or expired reset token' });
+    }
+    const uid = payload.uid;
+    const rid = payload.rid;
+    if (!uid || !rid) return res.status(400).json({ error: 'Invalid token payload' });
+
+    // ensure reset record exists and is unused and not expired
+    const [rows] = await pool.query('SELECT id, used, expires_at FROM password_resets WHERE id = ? AND user_id = ?', [rid, uid]);
+    if (!rows || rows.length === 0) return res.status(400).json({ error: 'Reset request not found' });
+    const rec = rows[0];
+    if (rec.used) return res.status(400).json({ error: 'This reset code has already been used' });
+    if (new Date(rec.expires_at) < new Date()) return res.status(400).json({ error: 'Reset code expired' });
+
+    // update password
+    const newHash = await bcrypt.hash(newPassword, 10);
+    await pool.query('UPDATE users SET password_hash = ? WHERE id = ?', [newHash, uid]);
+
+    // mark reset used
+    await pool.query('UPDATE password_resets SET used = 1 WHERE id = ?', [rid]);
+
+    return res.json({ ok: true, message: 'Password updated' });
+  } catch (e) {
+    console.error('POST /api/auth/reset err', e);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+async function hasColumn(tableName, columnName){
+  try {
+    const [rows] = await pool.query(
+      `SELECT COUNT(*) as c FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`,
+      [tableName, columnName]
+    );
+    return !!(rows && rows[0] && rows[0].c);
+  } catch(err){
+    console.error('hasColumn error', err && err.stack ? err.stack : err);
+    return false;
+  }
+}
+
+// Replace existing sendResetEmail with this block
+async function sendResetEmail(toEmail, code) {
+  try {
+    // Build nice HTML card email
+    const logoUrl = process.env.RESET_EMAIL_LOGO_URL || `https://i.ibb.co/9HshkkkB/logo.png`;
+    const expiresMinutes = Number(process.env.RESET_CODE_EXPIRE_MIN || 15);
+    const subject = `Eric's Bakery — Password reset code`;
+    const plain = `Your password reset code: ${code}\n\nThis code will expire in ${expiresMinutes} minutes.\n\nIf you did not request this, ignore this message.`;
+
+    const html = `<!doctype html><html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /><title>Password reset</title>
+    <style>
+      body{background:#f3f6fb;margin:0;padding:24px;font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial;color:#12202f}
+      .wrapper{max-width:600px;margin:20px auto}
+      .card{background:#fff;border-radius:12px;padding:26px;text-align:center;border:1px solid rgba(0,0,0,0.06);box-shadow:0 10px 30px rgba(16,24,40,0.06)}
+      .logo{width:84px;height:84px;border-radius:12px;margin:0 auto 14px;object-fit:cover}
+      h1{margin:6px 0 8px;font-size:20px;color:#0f2b4b}
+      .lead{color:#475569;font-size:14px;margin:0 0 18px}
+      .code{display:inline-block;padding:18px 14px;background:linear-gradient(180deg,#f6f7fb,#fff);border-radius:10px;font-weight:800;font-size:28px;letter-spacing:4px;color:#112233;border:1px solid rgba(0,0,0,0.06);min-width:220px}
+      .footer{margin-top:20px;font-size:12px;color:#555;text-align:center}
+      @media (max-width:420px){.code{font-size:22px;min-width:180px}.card{padding:18px}}
+    </style>
+    </head><body>
+      <div class="wrapper" role="article" aria-label="Password reset email">
+        <div class="card">
+          <img src="${logoUrl}" alt="Eric's Bakery" class="logo" />
+          <h1>Password reset code</h1>
+          <p class="lead">Use the code below to reset your account password. The code expires in ${expiresMinutes} minutes.</p>
+          <div class="code" aria-live="polite" aria-atomic="true">${code}</div>
+          <p style="margin-top:12px;color:#666;font-size:13px">If you did not request this, ignore this message.</p>
+          <div style="margin-top:18px"><a href="${(process.env.FRONTEND_ORIGIN||'https://erics-bakery.vercel.app')}" target="_blank" rel="noreferrer noopener" style="display:inline-block;background:#1b85ec;color:#fff;padding:10px 16px;border-radius:10px;text-decoration:none;font-weight:700">Open Eric's Bakery</a></div>
+          <div class="footer">Sent to ${toEmail}</div>
+        </div>
+      </div>
+    </body></html>`;
+
+    // If SMTP config present, use it and ensure FROM matches SMTP_USER (improves deliverability)
+    if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+      const nodemailer = require('nodemailer');
+      const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: Number(process.env.SMTP_PORT || 587),
+        secure: (String(process.env.SMTP_PORT || '587') === '465'), // true for 465
+        auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+      });
+
+      // verify transporter once (will be cheap; logs useful on Vercel)
+      try {
+        await transporter.verify();
+        console.info('[sendResetEmail] SMTP transporter verified');
+      } catch (verr) {
+        console.warn('[sendResetEmail] transporter verify failed (continuing):', verr && verr.message ? verr.message : verr);
+      }
+
+      // choose FROM: prefer explicit EMAIL_FROM, else use SMTP_USER
+      const fromAddress = (process.env.EMAIL_FROM && process.env.EMAIL_FROM.trim()) ? process.env.EMAIL_FROM.trim() : process.env.SMTP_USER;
+
+      const info = await transporter.sendMail({
+        from: fromAddress,
+        to: toEmail,
+        subject,
+        text: plain,
+        html
+      });
+
+      console.info('[sendResetEmail] SMTP send info:', {
+        accepted: info.accepted, rejected: info.rejected, envelope: info.envelope, messageId: info.messageId, response: info.response
+      });
+      return;
+    }
+
+    // Fallback: SMTP not configured — log the HTML so you can copy it for testing
+    console.info('[sendResetEmail] SMTP not configured — printing fallback HTML preview for', toEmail);
+    console.info('==== TEXT ====\n', plain);
+    console.info('==== HTML PREVIEW ====\n', html);
+    return;
+  } catch (err) {
+    console.error('sendResetEmail: error', err && err.stack ? err.stack : err);
+    // Do not throw so main flow continues; caller expects fire-and-forget
+  }
+}
+
+function signResetToken(payload) {
+  // short lived token used to perform the reset after code verification
+  const expires = (process.env.RESET_TOKEN_EXPIRE_MIN ? Number(process.env.RESET_TOKEN_EXPIRE_MIN) : 10);
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: `${expires}m` });
+}
+
+// GET /api/events?date=YYYY-MM-DD
+app.get('/api/events', authMiddleware, async (req,res)=>{
+  const date = (req.query.date || '').slice(0,10);
+  try {
+    if(!date) return res.json({ items: [] });
+    // use activity rows as events for calendar
+    const [rows] = await pool.query('SELECT a.id, a.text, a.time, a.ingredient_id, i.name as ingredient_name FROM activity a LEFT JOIN ingredients i ON i.id = a.ingredient_id WHERE DATE(a.time) = ? ORDER BY a.time DESC', [date]);
+    res.json({ items: rows });
+  } catch(e){ console.error(e); res.status(500).json({ error: 'Server error' }); }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log('API + static server listening on', PORT));
