@@ -15,10 +15,26 @@ app.use(cookieParser());
 
 app.use(express.static(path.join(__dirname, '..', 'frontend')));
 
+const frontendOrigin = process.env.FRONTEND_ORIGIN || 'http://localhost:3000';
+
 app.use(cors({
-    origin: process.env.FRONTEND_ORIGIN || 'http://localhost:3000',
-    credentials: true
+  origin: frontendOrigin,    // set this in Vercel to https://erics-bakery.vercel.app
+  credentials: true
 }));
+
+function buildCookieOptions() {
+  const isProd = process.env.NODE_ENV === 'production';
+  // In production we want SameSite none + secure true (to allow cross-site JS fetch)
+  const sameSite = process.env.COOKIE_SAMESITE || (isProd ? 'none' : 'lax');
+  const opts = {
+    httpOnly: true,
+    sameSite, // 'none' in prod
+    secure: isProd, // must be true when sameSite='none'
+    maxAge: 7 * 24 * 60 * 60 * 1000 // optional: 7 days
+  };
+  if (process.env.COOKIE_DOMAIN) opts.domain = process.env.COOKIE_DOMAIN; // optional override
+  return opts;
+}
 
 const JWT_SECRET = process.env.JWT_SECRET || 'replace_with_strong_secret';
 const TOKEN_NAME = process.env.COOKIE_NAME || 'bakery_token';
@@ -124,11 +140,7 @@ app.post('/api/auth/signup', async (req, res) => {
             name: name || username
         };
         const token = signToken(user);
-        res.cookie(TOKEN_NAME, token, {
-            httpOnly: true,
-            sameSite: 'lax',
-            secure: process.env.NODE_ENV === 'production'
-        });
+        res.cookie(TOKEN_NAME, token, buildCookieOptions());
         res.json({
             user
         });
@@ -160,10 +172,9 @@ app.post('/api/auth/login', async (req, res) => {
             role: user.role,
             name: user.name
         });
-        res.cookie(TOKEN_NAME, token, {
-            httpOnly: true,
-            sameSite: 'lax',
-            secure: process.env.NODE_ENV === 'production'
+        res.cookie(TOKEN_NAME, token, buildCookieOptions());
+        res.json({
+            user
         });
         res.json({
             user: {
@@ -243,7 +254,7 @@ app.put('/api/users/me', authMiddleware, async (req, res) => {
     try {
         const isProd = process.env.NODE_ENV === 'production';
       const token = signToken({ id: user.id, username: user.username, role: user.role, name: user.name });
-      res.cookie(TOKEN_NAME, token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' });
+      res.cookie(TOKEN_NAME, token, buildCookieOptions());
     } catch (e) {
       console.warn('Could not reissue token after profile update', e && e.message ? e.message : e);
     }
