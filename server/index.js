@@ -24,9 +24,13 @@ const JWT_SECRET = process.env.JWT_SECRET || 'replace_with_strong_secret';
 const TOKEN_NAME = process.env.COOKIE_NAME || 'bakery_token';
 
 const crypto = require('crypto');
-let nodemailer;
-try { nodemailer = require('nodemailer'); } catch(e) { nodemailer = null; }
-
+let nodemailer = null;
+try {
+  nodemailer = require('nodemailer');
+} catch (e) {
+  console.warn('[startup] nodemailer not available (not installed). Email features disabled.');
+  nodemailer = null;
+}
 // mail transporter
 const SMTP_HOST = process.env.SMTP_HOST;
 const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
@@ -36,18 +40,27 @@ const EMAIL_FROM = process.env.EMAIL_FROM || `"Eric's Bakery" <archlinux@google.
 
 // Only create transporter if SMTP config is present
 let mailTransporter = null;
-if (SMTP_HOST && SMTP_USER && SMTP_PASS) {
-  mailTransporter = nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: SMTP_PORT,
-    secure: SMTP_PORT === 465, // true for 465, false for others
-    auth: {
-      user: SMTP_USER,
-      pass: SMTP_PASS
-    }
-  });
+
+if (nodemailer && SMTP_HOST && SMTP_USER && SMTP_PASS) {
+  try {
+    mailTransporter = nodemailer.createTransport({
+      host: SMTP_HOST,
+      port: SMTP_PORT,
+      secure: SMTP_PORT === 465,
+      auth: { user: SMTP_USER, pass: SMTP_PASS }
+    });
+
+    // optional runtime verification (will print verified or warn)
+    mailTransporter.verify()
+      .then(() => console.info('[sendResetEmail] SMTP transporter verified'))
+      .catch(err => console.warn('[sendResetEmail] SMTP transporter verify failed:', err && err.message ? err.message : err));
+  } catch (err) {
+    console.warn('[startup] failed to create SMTP transporter — email disabled', err && err.message ? err.message : err);
+    mailTransporter = null;
+  }
 } else {
-  console.warn('SMTP not configured — forgot-password emails will not be sent.');
+  if (!nodemailer) console.warn('[startup] nodemailer module missing — install with: npm i nodemailer');
+  if (!(SMTP_HOST && SMTP_USER && SMTP_PASS)) console.warn('[startup] SMTP env not configured (SMTP_HOST/SMTP_USER/SMTP_PASS)');
 }
 
 function signToken(user) {
