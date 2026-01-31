@@ -1559,9 +1559,15 @@ async function apiFetch(path, opts = {}) {
   cfg.headers = Object.assign({}, cfg.headers || {}, { 'Content-Type': 'application/json' });
   cfg.credentials = 'include'; // include cookie JWT
   if (cfg.body && typeof cfg.body !== 'string') cfg.body = JSON.stringify(cfg.body);
-
-  const res = await fetch(path, cfg);
+  const defaultOpts = { credentials: 'include', headers: { 'Content-Type': 'application/json' }, method: 'GET' };
+  const final = Object.assign({}, defaultOpts, opts || {});
+  if (final.body && typeof final.body === 'object') final.body = JSON.stringify(final.body);
+  const url = `${window.location.origin}${path}`;
+  
+  const res = await fetch(url, final, path, cfg);
   // try JSON parse for both success and error bodies
+  if (res.status === 401) throw new Error('Not authenticated');
+  
   const text = await res.text().catch(() => '');
   let json = null;
   try { json = text ? JSON.parse(text) : null; } catch(e){ json = null; }
@@ -2900,22 +2906,15 @@ document.addEventListener('DOMContentLoaded', ()=> {
     });
     const data = await res.json();
 if (!res.ok) {
-  // don't set CURRENT_USER here — only show the message
   notify(data?.message || data?.error || 'Login failed');
   setButtonLoadingWithMin(btn, false, 600);
   showGlobalLoader(false);
   return;
 }
 
-      const userObj = {
-  id: data.user.id,
-  username: data.user.username,
-  role: data.user.role,
-  name: data.user.name || data.user.username
-};
-
+const userObj = { id: data.user.id, username: data.user.username, role: data.user.role, name: data.user.name || data.user.username };
 window.CURRENT_USER = userObj;
-try { localStorage.setItem('CURRENT_USER', JSON.stringify(userObj)); } catch(e){/* ignore */}
+try { localStorage.setItem('CURRENT_USER', JSON.stringify(userObj)); } catch(e){}
 
 setSession(userObj, remember);
       // keep recent profiles code if you added it
