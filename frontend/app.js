@@ -1576,7 +1576,7 @@ async function apiFetch(path, opts = {}) {
       return { items: [], meta: { total: 0, page: 1, limit: 0 } };
     }
   } catch(e){ /* continue normally */ }
-  
+
   const res = await fetch(path, cfg);
   // try JSON parse for both success and error bodies
   const text = await res.text().catch(() => '');
@@ -3713,3 +3713,193 @@ document.addEventListener('DOMContentLoaded', () => {
   // small defer to ensure elements exist after your app boot
   setTimeout(()=> attachHelpButtons(), 420);
 });
+
+/* ==== KPI popover & mobile expand: initialize lists and fetch KPI values ==== */
+(function(){
+  // small util
+  function escapeHtml(s){
+    return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c] || c));
+  }
+  async function fetchJson(url){
+    try {
+      const res = await fetch(url, { credentials: 'include' });
+      if(!res.ok) {
+        // return structured error so callers can handle 401 etc.
+        const text = await res.text().catch(()=>'');
+        throw new Error(`${res.status} ${res.statusText} ${text ? '- '+text : ''}`);
+      }
+      return await res.json();
+    } catch (e){
+      console.warn('fetchJson error', url, e && e.message ? e.message : e);
+      throw e;
+    }
+  }
+
+  function renderKpiList(container, items){
+    if(!container) return;
+    container.innerHTML = '';
+    const ul = document.createElement('ul');
+    for(const it of items){
+      const li = document.createElement('li');
+      const name = escapeHtml(it.name || it.label || it.username || it.title || 'Item');
+      const qty = escapeHtml(it.qty != null ? (it.qty + (it.unit ? ' ' + it.unit : '')) : (it.qtyText || ''));
+      li.innerHTML = `<span class="kpi-item-name">${name}</span><span class="kpi-item-qty muted small">${qty}</span>`;
+      ul.appendChild(li);
+    }
+    container.appendChild(ul);
+  }
+
+  // mapping from KPI element id to API query used to populate it
+  const KPI_MAP = {
+    'kpi-total-ing': async (el) => {
+      // fetch single page meta.total from /api/ingredients
+      try {
+        const json = await fetchJson('/api/ingredients?limit=1&page=1');
+        const total = json && json.meta && Number(json.meta.total) ? Number(json.meta.total) : (Array.isArray(json.items) ? json.items.length : 0);
+        el.textContent = total;
+      } catch (e) {
+        el.textContent = '—';
+      }
+    },
+    'kpi-low': async (el, card) => {
+      try {
+        const json = await fetchJson('/api/ingredients?filter=low&limit=20');
+        const items = json.items || [];
+        el.textContent = items.length;
+        // create two pop containers if missing
+        ensurePopContainers(card);
+        renderKpiList(card.querySelector('.kpi-popover'), items.map(i => ({ name: i.name, qty: i.qty, unit: i.unit })));
+        renderKpiList(card.querySelector('.kpi-popover-mobile'), items.map(i => ({ name: i.name, qty: i.qty, unit: i.unit })));
+      } catch (e) {
+        el.textContent = '—';
+      }
+    },
+    'kpi-exp': async (el, card) => {
+      try {
+        const json = await fetchJson('/api/ingredients?filter=expiring&limit=20');
+        const items = json.items || [];
+        el.textContent = items.length;
+        ensurePopContainers(card);
+        renderKpiList(card.querySelector('.kpi-popover'), items.map(i => ({ name: i.name, qty: i.qty, unit: i.unit })));
+        renderKpiList(card.querySelector('.kpi-popover-mobile'), items.map(i => ({ name: i.name, qty: i.qty, unit: i.unit })));
+      } catch (e) {
+        el.textContent = '—';
+      }
+    },
+    'kpi-equipment': async (el, card) => {
+      try {
+        // 'equipment' type is used by your server logic — adjust if your type name differs
+        const json = await fetchJson('/api/ingredients?type=equipment&limit=20');
+        const items = json.items || [];
+        el.textContent = items.length;
+        ensurePopContainers(card);
+        renderKpiList(card.querySelector('.kpi-popover'), items.map(i => ({ name: i.name, qty: i.qty, unit: i.unit })));
+        renderKpiList(card.querySelector('.kpi-popover-mobile'), items.map(i => ({ name: i.name, qty: i.qty, unit: i.unit })));
+      } catch (e) {
+        el.textContent = '—';
+      }
+    }
+  };
+
+  function ensurePopContainers(card){
+    if(!card) return;
+    if(!card.querySelector('.kpi-popover')){
+      const dp = document.createElement('div');
+      dp.className = 'kpi-popover';
+      dp.setAttribute('aria-hidden','true');
+      card.appendChild(dp);
+    }
+    if(!card.querySelector('.kpi-popover-mobile')){
+      const mp = document.createElement('div');
+      mp.className = 'kpi-popover-mobile';
+      mp.setAttribute('aria-hidden','true');
+      card.appendChild(mp);
+    }
+  }
+
+  function attachInteractions(){
+    const isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+    document.querySelectorAll('.kpi-card').forEach(card => {
+      // add pop containers if server didn't render data-items
+      ensurePopContainers(card);
+
+      if(!isTouch){
+        card.addEventListener('mouseenter', () => {
+          card.classList.add('hover');
+          const dp = card.querySelector('.kpi-popover');
+          if(dp) dp.setAttribute('aria-hidden','false');
+        });
+        card.addEventListener('mouseleave', () => {
+          card.classList.remove('hover');
+          const dp = card.querySelector('.kpi-popover');
+          if(dp) dp.setAttribute('aria-hidden','true');
+        });
+        card.addEventListener('keydown', (ev) => {
+          if(ev.key === 'Enter' || ev.key === ' '){
+            ev.preventDefault();
+            card.classList.toggle('hover');
+            const dp = card.querySelector('.kpi-popover');
+            if(dp) dp.setAttribute('aria-hidden', card.classList.contains('hover') ? 'false' : 'true');
+          }
+        });
+      } else {
+        // touch: tap toggles expanded panel
+        card.addEventListener('click', (ev) => {
+          if(ev.target.closest('button, input, a, select')) return; // ignore UI controls
+          const open = card.classList.contains('expanded');
+          // close others
+          document.querySelectorAll('.kpi-card.expanded').forEach(c => { if(c !== card) c.classList.remove('expanded'); });
+          if(open) card.classList.remove('expanded');
+          else card.classList.add('expanded');
+        });
+      }
+    });
+
+    // close expanded on outside click
+    document.addEventListener('click', (e) => {
+      if(e.target.closest('.kpi-card')) return;
+      document.querySelectorAll('.kpi-card.expanded').forEach(c => c.classList.remove('expanded'));
+    });
+  }
+
+  // init logic — call after DOM ready and after dashboard content is rendered
+  async function initKpiLists(){
+    // Attach interactions asap
+    attachInteractions();
+
+    // Populate KPI values and lists based on mapping
+    for(const [id, fn] of Object.entries(KPI_MAP)){
+      const el = document.getElementById(id);
+      if(!el) continue;
+      const card = el.closest('.kpi-card') || el.parentElement;
+      try {
+        await fn(el, card);
+      } catch (e){
+        console.warn('initKpiLists error for', id, e && e.message ? e.message : e);
+      }
+    }
+
+    // Additionally, allow developer to put client-side 'data-items' JSON on .kpi-card elements:
+    document.querySelectorAll('.kpi-card').forEach(card => {
+      const itemsAttr = card.getAttribute('data-items');
+      if(itemsAttr){
+        try {
+          const items = JSON.parse(itemsAttr);
+          ensurePopContainers(card);
+          renderKpiList(card.querySelector('.kpi-popover'), items);
+          renderKpiList(card.querySelector('.kpi-popover-mobile'), items);
+        } catch(e){}
+      }
+    });
+  }
+
+  // Wait for DOMContentLoaded, but also allow manual init if dashboard renders later
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', () => setTimeout(initKpiLists, 40));
+  } else {
+    setTimeout(initKpiLists, 40);
+  }
+
+  // expose for manual call (useful in SPA partial re-renders)
+  window.initKpiLists = initKpiLists;
+})();

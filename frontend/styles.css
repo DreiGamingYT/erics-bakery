@@ -52,7 +52,7 @@ body{
   background: linear-gradient(180deg, var(--bg) 0%);
   -webkit-font-smoothing:antialiased;
   line-height:1.45;
-  cursor: url('./defualt.png') 16 16, auto;
+  cursor: url('./default.png') 16 16, auto;
 }
 
 .hidden{display:none!important}
@@ -1500,4 +1500,64 @@ button:disabled,
 .details-btn,
 #addIngredientBtn {
   cursor: url('./add_default.png') 32 32, auto;
+}
+
+/* KPI popover + responsive improvements (append) */
+.kpi-card { position: relative; cursor: pointer; transition: transform .12s ease; }
+.kpi-card:focus { outline: 2px solid rgba(27,133,236,0.12); border-radius: 12px; }
+
+/* Desktop popover */
+.kpi-popover {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 8px;
+  min-width: 220px;
+  max-width: 420px;
+  background: var(--card);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  padding: 8px;
+  border: 1px solid rgba(0,0,0,0.06);
+  display: none;
+  z-index: 300;
+}
+.kpi-popover ul { list-style: none; margin: 0; padding: 6px 4px; max-height: 260px; overflow: auto; }
+.kpi-popover li { padding: 8px; border-radius: 8px; font-weight:700; color:var(--text); display:flex; justify-content:space-between; gap:12px; border-bottom: 1px solid rgba(0,0,0,0.04); }
+.kpi-popover li:last-child { border-bottom: none; }
+.kpi-card:hover .kpi-popover,
+.kpi-card.hover .kpi-popover { display: block; }
+
+/* Mobile/touch view: a stacked panel below card when tapped */
+.kpi-popover-mobile {
+  display: none;
+  margin-top: 8px;
+  background: var(--card);
+  border-radius: 10px;
+  padding: 8px;
+  box-shadow: var(--shadow);
+  border: 1px solid rgba(0,0,0,0.06);
+}
+.kpi-popover-mobile ul { list-style:none; margin:0; padding:0; max-height: 320px; overflow:auto; }
+.kpi-card.expanded .kpi-popover-mobile { display:block; }
+
+/* Make KPI row friendly on small screens */
+.kpi-row { display:flex; gap:12px; flex-wrap:nowrap; align-items:stretch; -webkit-overflow-scrolling: touch; }
+.kpi-row .kpi-card { flex: 0 0 260px; min-width: 220px; }
+
+/* Smaller screens compress card sizes */
+@media (max-width:900px) {
+  .kpi-row { overflow-x: auto; padding-bottom: 8px; -webkit-overflow-scrolling: touch; }
+  .kpi-row .kpi-card { flex: 0 0 220px; min-width: 190px; }
+  .kpi-card .kpi-title { font-size:12px; }
+  .kpi-value { font-size:18px; }
+  /* hide desktop popover on touch screens to avoid visual overlap */
+  .kpi-popover { display: none !important; }
+}
+
+/* Very small screens: let KPI cards stack */
+@media (max-width:420px) {
+  .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:10px; }
+  .kpi-row .kpi-card { flex: 1 1 auto; min-width: auto; }
+  .kpi-popover-mobile { padding: 6px; }
+  .kpi-popover-mobile li { font-size:13px; padding:6px 8px; }
 }
