@@ -159,44 +159,39 @@ app.post('/api/auth/signup', async (req, res) => {
 });
 
 app.post('/api/auth/login', async (req, res) => {
-    try {
-        const {
-            username,
-            password
-        } = req.body;
-        const user = await getUserByUsername(username);
-        if (!user) return res.status(401).json({
-            message: 'Invalid credentials'
-        });
-        const ok = await bcrypt.compare(password, user.password_hash);
-        if (!ok) return res.status(401).json({
-            message: 'Invalid credentials'
-        });
-        const token = signToken({
-            id: user.id,
-            username: user.username,
-            role: user.role,
-            name: user.name
-        });
-        res.cookie(TOKEN_NAME, token, buildCookieOptions());
-        res.json({
-            user
-        });
-        res.json({
-            user: {
-                id: user.id,
-                username: user.username,
-                role: user.role,
-                name: user.name
-            }
-        });
-    } catch (e) {
-        console.error('login error', e);
-        res.status(500).json({
-            message: 'Login error'
-        });
-    }
+  try {
+    const { username, password } = req.body;
+    const user = await getUserByUsername(username);
+    if (!user) return res.status(401).json({ message: 'Invalid credentials' });
+
+    const ok = await bcrypt.compare(password, user.password_hash);
+    if (!ok) return res.status(401).json({ message: 'Invalid credentials' });
+
+    const token = signToken({
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      name: user.name
+    });
+
+    // issue cookie with your helper so it works both locally and in prod
+    res.cookie(TOKEN_NAME, token, buildCookieOptions());
+
+    // return the user object once
+    return res.json({
+      user: {
+        id: user.id,
+        username: user.username,
+        role: user.role,
+        name: user.name
+      }
+    });
+  } catch (e) {
+    console.error('login error', e);
+    res.status(500).json({ message: 'Login error' });
+  }
 });
+
 
 app.get('/api/auth/me', authMiddleware, async (req, res) => {
     res.json({
@@ -426,10 +421,6 @@ app.get('/api/ingredients/:id', authMiddleware, async (req, res) => {
     const id = Number(req.params.id || 0);
     if (!id) return res.status(400).json({ error: 'Invalid id' });
 
-    if(!hasRole(req.user, ['Owner','Baker','Admin'])) {
-  return res.status(403).json({ error: 'Forbidden: insufficient permissions to edit items' });
-}
-
     const [rows] = await pool.query('SELECT id,name,type,supplier,qty,unit,min_qty,max_qty,expiry,attrs,created_at,updated_at FROM ingredients WHERE id = ?', [id]);
     if (!rows || rows.length === 0) return res.status(404).json({ error: 'Not found' });
 
@@ -446,8 +437,46 @@ app.get('/api/ingredients/:id', authMiddleware, async (req, res) => {
   }
 });
 
-app.post('/api/ingredients/:id/stock', authMiddleware, async (req, res) => {
+// PUT /api/ingredients/:id  -> update metadata (only Owner/Baker/Admin)
+app.put('/api/ingredients/:id', authMiddleware, async (req, res) => {
+  try {
     const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ error: 'Invalid id' });
+
+    if (!hasRole(req.user, ['Owner','Baker','Admin'])) {
+      return res.status(403).json({ error: 'Forbidden: insufficient permissions to edit items' });
+    }
+
+    const body = req.body || {};
+    const updates = [];
+    const params = [];
+
+    if (typeof body.name === 'string') { updates.push('name = ?'); params.push(body.name.trim()); }
+    if (typeof body.type === 'string') { updates.push('type = ?'); params.push(body.type.trim()); }
+    if (typeof body.supplier === 'string') { updates.push('supplier = ?'); params.push(body.supplier.trim()); }
+    if (body.unit !== undefined) { updates.push('unit = ?'); params.push(body.unit ? String(body.unit).trim() : ''); }
+    if (body.qty !== undefined) { updates.push('qty = ?'); params.push(Number(body.qty || 0)); }
+    if (body.min_qty !== undefined) { updates.push('min_qty = ?'); params.push(Number(body.min_qty || 0)); }
+    if (body.max_qty !== undefined) { updates.push('max_qty = ?'); params.push(body.max_qty == null ? null : Number(body.max_qty)); }
+    if (body.expiry !== undefined) { updates.push('expiry = ?'); params.push(body.expiry || null); }
+    if (body.attrs !== undefined) { updates.push('attrs = ?'); params.push(body.attrs ? JSON.stringify(body.attrs) : null); }
+
+    if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
+
+    params.push(id);
+    const q = `UPDATE ingredients SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`;
+    await pool.query(q, params);
+
+    const [rows] = await pool.query('SELECT * FROM ingredients WHERE id = ?', [id]);
+    return res.json({ ingredient: rows && rows[0] ? rows[0] : null });
+  } catch (err) {
+    console.error('PUT /api/ingredients/:id err', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/ingredients/:id/stock', authMiddleware, async (req, res) => {
+  const id = Number(req.params.id);
   const type = req.body.type;
   const qty = Number(req.body.qty || 0);
   const note = req.body.note || '';
