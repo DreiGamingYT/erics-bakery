@@ -122,17 +122,6 @@ const ACCOUNTS_KEY = 'bakery_accounts';
 const SESSION_KEY = 'bakery_session';
 const THEME_KEY = 'bakery_theme';
 
-
-async function onLoginSuccess(resp) {
-  // resp.user is from server { id, username, role, name }
-  window.CURRENT_USER = resp.user;
-  // persist small user info so UI survives reloads:
-  try { localStorage.setItem('CURRENT_USER', JSON.stringify(resp.user)); } catch(e){ /* ignore */ }
-
-  // update any UI
-  updateUIAfterLogin(resp.user);
-}
-
 function q(id){ return document.getElementById(id) || null; }
 function on(id, ev, fn){ const el = q(id); if(el) el.addEventListener(ev, fn); else console.debug(`[on] missing #${id}`); }
 function offsetDateISO(days){ const d = new Date(); d.setDate(d.getDate() + days); return d.toISOString(); }
@@ -208,25 +197,6 @@ function nextProductId(){
 function nextOrderId(){
   const arr = sampleOrders.map(o=> o.id || 0);
   return (arr.length? Math.max(...arr) : 1000) + 1;
-}
-
-(function restoreCurrentUser(){
-  try {
-    const raw = localStorage.getItem('CURRENT_USER');
-    if (raw) {
-      window.CURRENT_USER = JSON.parse(raw);
-    } else {
-      window.CURRENT_USER = null;
-    }
-  } catch(e){
-    window.CURRENT_USER = null;
-  }
-})();
-
-function getCurrentUserRole() {
-  const me = window.CURRENT_USER || null;
-  if (!me || !me.role) return '';
-  return (String(me.role || '')).toLowerCase();
 }
 
 const PROGRAMMED_CONSUMPTION = {
@@ -395,152 +365,6 @@ function setButtonLoadingWithMin(btn, loading, minMs = 450) {
   }
 }
 
-// small helper to show loader on overlay
-function showOverlayLoader(show, text='') {
-  let el = document.getElementById('overlayLoader');
-  if(!el){
-    el = document.createElement('div');
-    el.id = 'overlayLoader';
-    el.style.position = 'fixed';
-    el.style.inset = 0;
-    el.style.display = 'flex';
-    el.style.alignItems = 'center';
-    el.style.justifyContent = 'center';
-    el.style.zIndex = 12000;
-    el.innerHTML = `<div style="background:rgba(255,255,255,0.95);padding:18px;border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,0.12);text-align:center">
-      <div class="muted small" id="overlayLoaderText">${escapeHtml(text)}</div>
-      <div style="margin-top:10px"><svg width="36" height="36" viewBox="0 0 50 50"><path fill="none" stroke="#1b85ec" stroke-width="4" d="M25 5 a20 20 0 0 1 0 40 a20 20 0 0 1 0 -40" stroke-linecap="round"><animateTransform attributeName="transform" type="rotate" dur="1s" from="0 25 25" to="360 25 25" repeatCount="indefinite"/></path></svg></div>
-    </div>`;
-    document.body.appendChild(el);
-  }
-  el.style.display = show ? 'flex' : 'none';
-  if(show) q('overlayLoaderText').textContent = text || '';
-}
-
-// Open a simple forgot modal (call this from a 'Forgot password' link)
-function openForgotPasswordModal(){
-  openModalHTML(`
-    <h3>Forgot password</h3>
-    <form id="forgotForm" class="form">
-      <label class="field"><span class="field-label">Registered email</span><input id="forgotEmail" type="email" required /></label>
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
-        <button class="btn ghost" id="forgotCancel" type="button">Cancel</button>
-        <button class="btn primary" id="forgotSendBtn" type="submit">Send code</button>
-      </div>
-    </form>
-  `);
-  q('forgotCancel')?.addEventListener('click', closeModal);
-  q('forgotForm')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const email = (q('forgotEmail')?.value || '').trim();
-    if(!email) return notify('Enter your email');
-    showOverlayLoader(true, 'Sending reset code…');
-    try {
-      const r = await fetch('/api/auth/forgot', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email })
-      });
-      const txt = await r.text();
-      let data = null;
-      try { data = txt ? JSON.parse(txt) : null; } catch(e){}
-      if(!r.ok) {
-        notify(data?.error || data?.message || txt || `Error: ${r.status}`);
-        showOverlayLoader(false);
-        return;
-      }
-      showOverlayLoader(false);
-      notify(data?.message || 'If the email exists, a code was sent.');
-      closeModal();
-      openVerifyResetModal(email); // next step
-    } catch (err) {
-      console.error('forgot fetch err', err);
-      showOverlayLoader(false);
-      notify('Network error sending code — check server & Network tab.');
-    }
-  });
-}
-
-function openVerifyResetModal(email=''){
-  openModalHTML(`
-    <h3>Verify code</h3>
-    <form id="verifyForm" class="form">
-      <label class="field"><span class="field-label">Email</span><input id="verifyEmail" type="email" value="${escapeHtml(email)}" required/></label>
-      <label class="field"><span class="field-label">6-digit code</span><input id="verifyCode" type="text" inputmode="numeric" pattern="\\d{6}" required/></label>
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
-        <button class="btn ghost" id="verifyCancel" type="button">Cancel</button>
-        <button class="btn primary" id="verifyBtn" type="submit">Verify</button>
-      </div>
-    </form>
-  `);
-  q('verifyCancel')?.addEventListener('click', closeModal);
-  q('verifyForm')?.addEventListener('submit', async (e)=> {
-    e.preventDefault();
-    const email = (q('verifyEmail')?.value||'').trim();
-    const code = (q('verifyCode')?.value||'').trim();
-    if(!email||!code) return notify('Email and code required');
-    showOverlayLoader(true,'Verifying...');
-    try {
-      const r = await fetch('/api/auth/forgot/verify', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ email, code })
-      });
-      const txt = await r.text();
-      let data=null; try{ data = txt ? JSON.parse(txt) : null }catch(e){}
-      showOverlayLoader(false);
-      if(!r.ok) { notify(data?.error || data?.message || txt || `Error ${r.status}`); return; }
-      notify('Code verified — set new password');
-      closeModal();
-      openResetPasswordModal(email, code);
-    } catch(err) {
-      showOverlayLoader(false);
-      console.error('verify err', err);
-      notify('Network error verifying code');
-    }
-  });
-}
-
-function openResetPasswordModal(email='', code=''){
-  openModalHTML(`
-    <h3>Reset password</h3>
-    <form id="resetForm" class="form">
-      <label class="field"><span class="field-label">Email</span><input id="resetEmail" type="email" value="${escapeHtml(email)}" required/></label>
-      <label class="field"><span class="field-label">Code</span><input id="resetCode" type="text" value="${escapeHtml(code)}" required/></label>
-      <label class="field"><span class="field-label">New password</span><input id="resetPassword" type="password" required minlength="6"/></label>
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
-        <button class="btn ghost" id="resetCancel" type="button">Cancel</button>
-        <button class="btn primary" id="resetBtn" type="submit">Reset password</button>
-      </div>
-    </form>
-  `);
-  q('resetCancel')?.addEventListener('click', closeModal);
-  q('resetForm')?.addEventListener('submit', async (e)=> {
-    e.preventDefault();
-    const email = (q('resetEmail')?.value||'').trim();
-    const code = (q('resetCode')?.value||'').trim();
-    const pw = q('resetPassword')?.value || '';
-    if(!email||!code||!pw) return notify('Complete the form');
-    showOverlayLoader(true,'Resetting password…');
-    try {
-      const r = await fetch('/api/auth/forgot/reset', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ email, code, password: pw })
-      });
-      const txt = await r.text();
-      let data=null; try{ data = txt ? JSON.parse(txt) : null }catch(e){}
-      showOverlayLoader(false);
-      if(!r.ok){ notify(data?.error || data?.message || txt || `Error ${r.status}`); return; }
-      notify('Password changed — you can sign in now');
-      closeModal();
-    } catch(err){
-      showOverlayLoader(false);
-      console.error('reset err', err);
-      notify('Network error resetting password');
-    }
-  });
-}
 
 function applyTheme(theme){
   localStorage.setItem(THEME_KEY, theme);
@@ -1078,6 +902,7 @@ function renderPaginationControls(container, meta, onPageClick) {
   }
 }
 
+// ------------------- main: server-backed renderIngredientCards -------------------
 async function renderIngredientCards(page = 1, limit = 5) {
   const container = q('ingredientList');
   if (!container) return;
@@ -1102,13 +927,6 @@ async function renderIngredientCards(page = 1, limit = 5) {
     const res = await apiFetch(`/api/ingredients?${params.toString()}`);
     const items = (res && res.items) ? res.items : [];
     const meta = (res && res.meta) ? res.meta : { total: items.length, page: page, limit, totalPages: Math.ceil(items.length / limit) };
-
-    const me = (typeof getSession === 'function' ? getSession() : null) || window.CURRENT_USER || window.ME || { id: null, role: '' };
-const myRole = (me.role || '').toString().toLowerCase();
-
-// role buckets (lowercase)
-const privilegedEdit = ['owner','admin','baker'];     // who can edit metadata
-const privilegedStock = ['owner','admin','baker','assistant','cashier'];
 
     // Header with radios, export, print, and pagination placeholder
     const header = `
@@ -1153,12 +971,6 @@ const privilegedStock = ['owner','admin','baker','assistant','cashier'];
       const threshold = isMaterial ? computeThresholdForIngredient(i) : '';
       const lowBadge = (isMaterial && (Number(i.qty || 0) <= (Number(i.min_qty || 0) || threshold))) ? '<span class="badge low">Low</span>' : '';
       const expiryNote = (isMaterial && i.expiry ? `<div class="muted small">${daysUntil(i.expiry)}d</div>` : '');
-
-      const editAllowed = privilegedEdit.includes(myRole);
-      const canStock = privilegedStock.includes(myRole);
-      const saveAllowed = canStock || editAllowed;
-      const canEdit = editAllowed;
-
       return `<tr data-id="${i.id}" data-type="${escapeHtml(i.type||'')}" style="background:var(--card);border-bottom:1px solid rgba(0,0,0,0.04)">
         <td style="padding:10px;vertical-align:middle">${i.id}</td>
         <td style="padding:10px;vertical-align:middle"><strong>${escapeHtml(i.name)}</strong><div class="muted small">${escapeHtml(i.type)}</div></td>
@@ -1169,10 +981,10 @@ const privilegedStock = ['owner','admin','baker','assistant','cashier'];
         <td style="padding:10px;vertical-align:middle">${isMaterial ? `<input class="min-input" type="number" value="${i.min_qty||0}" step="0.01" style="width:80px" />` : ''}</td>
         <td style="padding:10px;vertical-align:middle"><input class="in-input" type="number" step="0.01" style="width:90px" /></td>
         <td style="padding:10px;vertical-align:middle"><input class="out-input" type="number" step="0.01" style="width:90px" /></td>
-        <td role="cell" style="padding:10px;vertical-align:middle">
-            <button class="btn small save-row" type="button" ${saveAllowed ? '' : 'disabled title="Not authorized"'}>Save</button>
-            <button class="btn small soft details-btn" data-id="${i.id}" type="button" aria-controls="modal" aria-label="Show details for ${escapeHtml(i.name)}">Details</button>
-            <button class="btn small soft edit-btn" type="button" ${editAllowed ? '' : 'disabled title="Not authorized"'}>Edit</button>
+        <td style="padding:10px;vertical-align:middle">
+          <button class="btn small save-row" type="button">Save</button>
+          <button class="btn small soft details-btn" data-id="${i.id}" type="button">Details</button>
+          <button class="btn small soft edit-btn" type="button">Edit</button>
         </td>
       </tr>`;
     }).join('') || `<tr><td colspan="10" class="muted" style="padding:12px">No inventory items</td></tr>`;
@@ -1192,44 +1004,26 @@ const privilegedStock = ['owner','admin','baker','assistant','cashier'];
     // Save / In/Out wiring — call API and refresh current page
     container.querySelectorAll('button.save-row').forEach(btn => {
       btn.addEventListener('click', async (ev) => {
-        const me = (typeof getSession === 'function' ? getSession() : null) || window.CURRENT_USER || window.ME || { id: null, role: '' };
-  const role = (me.role || '').toString().toLowerCase();
-  const canEdit = ['owner','admin','baker'].includes(role);
-  const canStock = ['owner','admin','baker','assistant','cashier'].includes(role);
-  if (!canEdit && !canStock) { notify('You are not authorized'); return; }
-  
         const tr = ev.currentTarget.closest('tr');
         if (!tr) return;
         const id = Number(tr.dataset.id);
         const inVal = Number(tr.querySelector('.in-input')?.value || 0);
         const outVal = Number(tr.querySelector('.out-input')?.value || 0);
         const minInput = tr.querySelector('.min-input');
-        const newMinRaw = (minInput ? minInput.value : null);
-        const newMin = (newMinRaw !== null && newMinRaw !== '') ? Number(newMinRaw) : null;
+        const newMin = minInput ? Number(minInput.value || 0) : null;
 
         try {
-          // metadata update (min_qty) only if user canEdit
           if (newMin !== null && !Number.isNaN(newMin)) {
-            if (canEdit) {
-              await apiFetch(`/api/ingredients/${id}`, { method: 'PUT', body: { min_qty: Number(newMin) }});
-            } else {
-              // user tried to change metadata but lacks permission — ignore and notify
-              notify('You are not authorized to modify item metadata (min/max/supplier). Changes to stock were applied only.');
-            }
+            await apiFetch(`/api/ingredients/${id}`, { method: 'PUT', body: { min_qty: Number(newMin) }});
           }
-
-          // stock in / out require canStock
           if (inVal > 0) {
-            if (!canStock) { notify('Not authorized to perform stock in'); }
-            else await apiFetch(`/api/ingredients/${id}/stock`, { method: 'POST', body: { type: 'in', qty: Number(inVal), note: 'Stock-in' }});
+            await apiFetch(`/api/ingredients/${id}/stock`, { method: 'POST', body: { type: 'in', qty: Number(inVal), note: 'Stock-in' }});
           }
           if (outVal > 0) {
-            if (!canStock) { notify('Not authorized to perform stock out'); }
-            else await apiFetch(`/api/ingredients/${id}/stock`, { method: 'POST', body: { type: 'out', qty: Number(outVal), note: 'Stock-out' }});
+            await apiFetch(`/api/ingredients/${id}/stock`, { method: 'POST', body: { type: 'out', qty: Number(outVal), note: 'Stock-out' }});
           }
-
           notify('Inventory updated');
-          // refresh current page and activity
+          // refresh current page
           await renderIngredientCards(meta.page || page, limit);
           await renderInventoryActivity();
         } catch (err) {
@@ -1244,8 +1038,10 @@ const privilegedStock = ['owner','admin','baker','assistant','cashier'];
       btn.addEventListener('click', async (e) => {
         const id = Number(btn.dataset.id);
         try {
+          // fetch single ingredient if you want detail (server doesn't have single GET endpoint in provided code)
+          // fallback: use current items array
           const ing = items.find(x => Number(x.id) === id) || {};
-          const historyResp = await apiFetch(`/api/activity?limit=50`);
+          const historyResp = await apiFetch(`/api/activity?limit=50`); // server returns activity
           const history = (historyResp && historyResp.items) ? historyResp.items.filter(a => Number(a.ingredient_id) === id) : [];
           const histHtml = history.length ? history.slice().map(h => `<li>${escapeHtml(h.text)} <div class="muted small">${escapeHtml(new Date(h.time).toLocaleString())}</div></li>`).join('') : '<li class="muted">No history</li>';
           const attrs = ing.attrs ? (typeof ing.attrs === 'string' ? (() => { try { return JSON.parse(ing.attrs) } catch(e){ return {}; } })() : ing.attrs) : {};
@@ -1284,18 +1080,21 @@ const privilegedStock = ['owner','admin','baker','assistant','cashier'];
       if (invType && invType !== 'all') qs.set('type', invType);
       if (chip && chip !== 'all') qs.set('filter', chip);
       if (qv) qs.set('search', qv);
+      // direct link to server endpoint
       window.open(`/api/ingredients/export/csv?${qs.toString()}`, '_self');
     });
 
-    // Print: fetch all matching rows and render print HTML in iframe
+    // Print: fetch all matching rows (limit big) and render print HTML in iframe
     q('printInventoryBtn')?.addEventListener('click', async () => {
       try {
         const qs = new URLSearchParams();
         if (invType && invType !== 'all') qs.set('type', invType);
         if (chip && chip !== 'all') qs.set('filter', chip);
         if (qv) qs.set('search', qv);
+        // request a large limit will return all matches (server max is 100 controlled server-side)
         const allResp = await apiFetch(`/api/ingredients?${qs.toString()}&limit=1000&page=1`);
         const allItems = allResp && allResp.items ? allResp.items : [];
+        // build print html (similar to previous printInventoryTable but using allItems)
         let rows = allItems.map(i => `<tr>
           <td>${i.id}</td>
           <td>${escapeHtml(i.name)}</td>
@@ -1318,11 +1117,13 @@ const privilegedStock = ['owner','admin','baker','assistant','cashier'];
         <table><thead><tr><th>ID</th><th>Name</th><th>Type</th><th>Supplier</th><th style="text-align:right">Qty</th><th>Unit</th><th style="text-align:right">Min</th><th>Expiry</th></tr></thead><tbody>${rows}</tbody></table>
         <div style="margin-top:18px" class="no-print"><button onclick="window.print()" style="padding:10px 14px;border-radius:8px;cursor:pointer">Print</button></div>
         </body></html>`;
+        // print in hidden iframe (no new tab)
         const iframe = document.createElement('iframe');
         iframe.style.position = 'fixed'; iframe.style.right = '0'; iframe.style.bottom = '0'; iframe.style.width = '0'; iframe.style.height = '0'; iframe.style.border = '0'; iframe.setAttribute('aria-hidden','true');
         document.body.appendChild(iframe);
         const idoc = iframe.contentWindow.document;
         idoc.open(); idoc.write(html); idoc.close();
+        // give time to render then print
         setTimeout(() => {
           try { iframe.contentWindow.focus(); iframe.contentWindow.print(); } catch (e) { try { window.print(); } catch(e2){} }
           setTimeout(()=> iframe.remove(), 800);
@@ -1337,6 +1138,7 @@ const privilegedStock = ['owner','admin','baker','assistant','cashier'];
     const pagWrap = q('invPagination');
     renderPaginationControls(pagWrap, meta, (p) => {
       renderIngredientCards(p, limit);
+      // auto-scroll to top of table for better UX
       const top = container.getBoundingClientRect().top + window.scrollY - 80;
       window.scrollTo({ top, behavior: 'smooth' });
     });
@@ -1352,6 +1154,7 @@ const privilegedStock = ['owner','admin','baker','assistant','cashier'];
     container.innerHTML = `<div class="card muted">Failed to load inventory</div>`;
   }
 }
+
 
 function initSearchFeature(){
   const wrap = ensureSuggestionContainer();
@@ -1559,15 +1362,9 @@ async function apiFetch(path, opts = {}) {
   cfg.headers = Object.assign({}, cfg.headers || {}, { 'Content-Type': 'application/json' });
   cfg.credentials = 'include'; // include cookie JWT
   if (cfg.body && typeof cfg.body !== 'string') cfg.body = JSON.stringify(cfg.body);
-  const defaultOpts = { credentials: 'include', headers: { 'Content-Type': 'application/json' }, method: 'GET' };
-  const final = Object.assign({}, defaultOpts, opts || {});
-  if (final.body && typeof final.body === 'object') final.body = JSON.stringify(final.body);
-  const url = `${window.location.origin}${path}`;
-  
-  const res = await fetch(url, final, path, cfg);
+
+  const res = await fetch(path, cfg);
   // try JSON parse for both success and error bodies
-  if (res.status === 401) throw new Error('Not authenticated');
-  
   const text = await res.text().catch(() => '');
   let json = null;
   try { json = text ? JSON.parse(text) : null; } catch(e){ json = null; }
@@ -1584,24 +1381,22 @@ async function apiFetch(path, opts = {}) {
 // --- Render recent inventory activity in the right column ---
 async function renderInventoryActivity(limit = 20) {
   const el = q('inventoryRecentActivity');
-  if (!el) return;
+  if(!el) return;
   el.innerHTML = '<li class="muted">Loading…</li>';
   try {
     const resp = await apiFetch(`/api/activity?limit=${limit}`);
     const items = (resp && resp.items) ? resp.items : [];
-    if (!items.length) {
-      el.innerHTML = '<li class="muted">No recent inventory activity</li>';
-      return;
-    }
+    if (!items.length) { el.innerHTML = '<li class="muted">No activity</li>'; return; }
     el.innerHTML = items.slice(0, limit).map(it => {
       const time = it.time ? new Date(it.time).toLocaleString() : '';
-      return `<li tabindex="0" role="listitem"><div>${escapeHtml(it.text)}</div><div class="muted small">${escapeHtml(time)}</div></li>`;
+      return `<li><div>${escapeHtml(it.text)}</div><div class="muted small">${escapeHtml(time)}</div></li>`;
     }).join('');
-  } catch (err) {
-    console.error('renderInventoryActivity err', err);
+  } catch (e) {
+    console.error('renderInventoryActivity err', e);
     el.innerHTML = '<li class="muted">Failed to load activity</li>';
   }
 }
+
 
 function renderReports(rangeStart, rangeEnd, reportFilter) {
   const startInput = rangeStart || q('reportStart')?.value || null;
@@ -2407,58 +2202,79 @@ function openAddIngredient(){
   toggleMaterialFields();
 
   q('cancelAdd')?.addEventListener('click', closeModal);
-  q('addIngForm')?.addEventListener('submit', async (e) => {
-  e.preventDefault();
+    q('addIngForm')?.addEventListener('submit', async (e)=>{ 
+    e.preventDefault();
 
-  const payload = {
-    name: (q('ingName')?.value || '').trim(),
-    type: (q('ingType')?.value || 'ingredient'),
-    unit: (q('ingUnit')?.value || '').trim(),
-    qty: Number(q('ingQty')?.value || 0),
-    min_qty: Number(q('ingMin')?.value || 0),
-    max_qty: q('ingMax')?.value ? Number(q('ingMax')?.value) : null,
-    expiry: q('ingExpiry')?.value || null,
-    supplier: q('ingSupplier')?.value || '',
-    attrs: {} // keep placeholder - update if you have attribute fields
-  };
+    const name = (q('ingName')?.value || '').trim();
+    if(!name){ notify('Name required'); return; }
 
-  try {
-    // call server
-    const res = await apiFetch('/api/ingredients', { method: 'POST', body: payload });
-    // server returns created ingredient as res.ingredient (per server code)
-    const created = res && res.ingredient ? res.ingredient : null;
+    const type = (q('ingType')?.value || 'ingredient');
+    // take the actual unit input value, but don't force 'kg' here.
+    // For non-ingredient types, leave unit empty unless user supplied one.
+    const rawUnit = (q('ingUnit')?.value || '').trim();
+    const unit = rawUnit || (type === 'ingredient' ? 'kg' : '');
 
-    // update local cache (so UI is snappy). use same mapping as loadRemoteInventory
-    if (created) {
-      const local = {
-        id: created.id,
-        name: created.name,
-        unit: (created.unit && String(created.unit).trim()) || (created.unit_name && String(created.unit_name).trim()) || (created.type === 'ingredient' ? 'kg' : ''),
-        qty: Number(created.qty || 0),
-        min: Number(created.min_qty || created.min || 0),
-        max: created.max_qty || created.max || null,
-        expiry: created.expiry || null,
-        supplier: created.supplier || '',
-        type: created.type || 'ingredient',
-        attrs: (typeof created.attrs === 'string' ? (()=>{ try{ return JSON.parse(created.attrs); }catch(e){return null;} })() : created.attrs) || null,
-        icon: created.icon || 'fa-box-open'
-      };
-      // add to local list
-      DB.ingredients = DB.ingredients || [];
-      // insert at top
-      DB.ingredients.unshift(local);
+    const payload = {
+      name,
+      type,
+      supplier: (q('ingSupplier')?.value || '').trim(),
+      qty: Number(q('ingQty')?.value || 0),
+      unit,
+      min_qty: Number(q('ingMin')?.value || 0),
+      max_qty: q('ingMax')?.value ? Number(q('ingMax')?.value) : null,
+      expiry: q('ingExpiry')?.value || null,
+      attrs: {}
+    };
+
+    try {
+      // send to server and use server response as truth
+      const res = await fetch('/api/ingredients', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(payload)
+      });
+      if(!res.ok){
+        const err = await res.json().catch(()=>({ message: 'Create failed' }));
+        notify(err.message || err.error || 'Failed to create ingredient');
+        return;
+      }
+      const data = await res.json();
+      const created = data.ingredient || null;
+      closeModal();
+
+      // update local cache / UI: prefer server data (created) if available
+      if(created){
+        // keep DB in-sync if you still use it elsewhere
+        if(Array.isArray(DB.ingredients)){
+          // remove any placeholder with same name/id and push created
+          const idx = DB.ingredients.findIndex(x => Number(x.id) === Number(created.id));
+          if(idx >= 0) DB.ingredients[idx] = created;
+          else DB.ingredients.unshift(created);
+        }
+      } else {
+        // fallback: naive local push (shouldn't normally happen)
+        const fallback = {
+          id: Date.now(),
+          name: name,
+          type: type,
+          supplier: payload.supplier,
+          qty: payload.qty,
+          unit: unit,
+          min: payload.min_qty,
+          expiry: payload.expiry
+        };
+        DB.ingredients.unshift(fallback);
+      }
+
+      renderIngredientCards();
+      renderDashboard();
+      notify('Ingredient added');
+    } catch (err) {
+      console.error('create ingredient error', err);
+      notify('Network or server error');
     }
-
-    closeModal();
-    await renderIngredientCards();      // refresh table UI
-    await renderInventoryActivity();    // fetch the server activity (server will have logged initial stock)
-    renderDashboard();
-    notify('Ingredient added');
-  } catch (err) {
-    console.error('add ingredient err', err);
-    notify(err.message || 'Could not add ingredient');
-  }
-});
+  });
 
 
   function tryAutoSuggestMin(){
@@ -2613,7 +2429,7 @@ function openBakeModal(productId){
 function populateSettings(){
   const list=q('usersList'); if(list){
     const acc=loadAccounts(); const curr=getSession()?.username;
-    const rows=Object.keys(acc||{}).map(u=>{ const role=acc[u].role||''; return `<div class="user-row" style="display:flex;justify-content:space-between;align-items:center;padding:8px;border-radius:8px;background:var(--card);border:1px solid rgba(0,0,0,0.04)"><div><strong>${u}</strong><div class="muted small">${role}</div></div><div>${u!==curr?`<button class="btn small" data-del="${u}" type="button">Delete</button>`:`<span class="muted small">Signed in</span>`}</div></div>`}).join('');
+    const rows=Object.keys(acc).map(u=>{ const role=acc[u].role||''; return `<div class="user-row" style="display:flex;justify-content:space-between;align-items:center;padding:8px;border-radius:8px;background:var(--card);border:1px solid rgba(0,0,0,0.04)"><div><strong>${u}</strong><div class="muted small">${role}</div></div><div>${u!==curr?`<button class="btn small" data-del="${u}" type="button">Delete</button>`:`<span class="muted small">Signed in</span>`}</div></div>`}).join('');
     list.innerHTML = rows || '<div class="muted small">No users</div>';
     list.querySelectorAll('button[data-del]').forEach(b=> b.addEventListener('click', ()=> { const u=b.dataset.del; if(confirm(`Delete user ${u}?`)){ const ac=loadAccounts(); delete ac[u]; saveAccounts(ac); populateSettings(); notify('User deleted'); } }));
   }
@@ -2623,14 +2439,6 @@ function populateSettings(){
   if(q('bakeryName')) q('bakeryName').value = bakery.name || '';
   if(q('bakeryAddress')) q('bakeryAddress').value = bakery.address || '';
   if(q('bakeryUnit')) q('bakeryUnit').value = bakery.unit || '';
-
-  // save bakery
-  q('saveBakery')?.addEventListener('click', (e)=> { e.preventDefault(); const o={name:q('bakeryName')?.value||'', address:q('bakeryAddress')?.value||'', unit:q('bakeryUnit')?.value||''}; localStorage.setItem('bakery_profile', JSON.stringify(o)); });
-
-  q('themeToggle')?.addEventListener('change', ()=> {
-    const isDark = q('themeToggle')?.checked;
-    setTheme(isDark ? 'dark' : 'light');
-  });
 }
 
 // --- Fetch ingredients from backend and hydrate local DB ---
@@ -2644,19 +2452,18 @@ async function loadRemoteInventory(){
     if(!Array.isArray(items)) return;
     // map server fields to client DB shape
     DB.ingredients = items.map(i => ({
-  id: i.id,
-  name: i.name,
-  // prefer server-provided unit; fall back to unit_name; only default to 'kg' when server didn't provide
-  unit: (i.unit && String(i.unit).trim()) || (i.unit_name && String(i.unit_name).trim()) || ( (i.type === 'ingredient') ? 'kg' : '' ),
-  qty: Number(i.qty || i.quantity || 0),
-  min: Number(i.min_qty || i.min || 0),
-  max: i.max_qty || i.max || null,
-  expiry: i.expiry || null,
-  supplier: i.supplier || '',
-  type: i.type || 'ingredient',
-  attrs: (typeof i.attrs === 'string' ? (()=>{ try{ return JSON.parse(i.attrs); } catch(e){ return null; } })() : i.attrs) || null,
-  icon: i.icon || 'fa-box-open'
-}));
+      id: i.id,
+      name: i.name,
+      unit: i.unit || i.unit_name || 'kg',
+      qty: Number(i.qty || i.quantity || 0),
+      min: Number(i.min_qty || i.min || 0),
+      max: i.max_qty || i.max || null,
+      expiry: i.expiry || null,
+      supplier: i.supplier || '',
+      type: i.type || 'ingredient',
+      attrs: (typeof i.attrs === 'string' ? (()=>{ try{return JSON.parse(i.attrs);}catch(e){return null;} })() : i.attrs) || null,
+      icon: i.icon || 'fa-box-open'
+    }));
     // re-render currently-visible views
     renderIngredientCards();
     renderDashboard();
@@ -2790,11 +2597,7 @@ if (applyBtn) {
 }
 
 async function performLogout(){
-  try { await fetch('/api/auth/logout', { method:'POST', credentials:'include' }); 
-
-  try { localStorage.removeItem('CURRENT_USER'); } catch(e){}
-location.reload();
-} catch(e){}
+  try { await fetch('/api/auth/logout', { method:'POST', credentials:'include' }); } catch(e){}
   clearSession();
   destroyAllCharts();
   showApp(false);
@@ -2878,8 +2681,7 @@ document.addEventListener('DOMContentLoaded', ()=> {
 
   on('overlayToSignup','click', ()=> { overlay && overlay.classList.add('signup-mode'); loginPanel && loginPanel.classList.add('hidden'); signupPanel && signupPanel.classList.remove('hidden'); setTimeout(()=> q('overlay-su-username')?.focus(), 240); });
   on('overlayBackToLogin','click', ()=> { overlay && overlay.classList.remove('signup-mode'); signupPanel && signupPanel.classList.add('hidden'); loginPanel && loginPanel.classList.remove('hidden'); setTimeout(()=> q('overlay-username')?.focus(), 160); });
-  on('forgotPasswordBtn', 'click', (e) => { openForgotPasswordModal(); });
-
+  
   on('overlaySignInBtn','click', async (e) => {
   e.preventDefault();
   const btn = q('overlaySignInBtn');
@@ -2905,18 +2707,15 @@ document.addEventListener('DOMContentLoaded', ()=> {
       body: JSON.stringify({ username, password })
     });
     const data = await res.json();
-if (!res.ok) {
-  notify(data?.message || data?.error || 'Login failed');
-  setButtonLoadingWithMin(btn, false, 600);
-  showGlobalLoader(false);
-  return;
-}
+      if (!res.ok) {
+        notify(data?.message || data?.error || 'Login failed');
+        setButtonLoadingWithMin(btn, false, 600);
+        showGlobalLoader(false);
+        return;
+      }
 
-const userObj = { id: data.user.id, username: data.user.username, role: data.user.role, name: data.user.name || data.user.username };
-window.CURRENT_USER = userObj;
-try { localStorage.setItem('CURRENT_USER', JSON.stringify(userObj)); } catch(e){}
-
-setSession(userObj, remember);
+      const userObj = { username: data.user.username, role: data.user.role, name: data.user.name || data.user.username, id: data.user.id };
+      setSession(userObj, remember);
       // keep recent profiles code if you added it
       if (typeof saveRecentProfileLocally === 'function') saveRecentProfileLocally(username);
 
@@ -2990,7 +2789,7 @@ setSession(userObj, remember);
       method:'POST',
       headers:{'Content-Type':'application/json'},
       credentials: 'include',
-      body: JSON.stringify({ username, password, role, email: document.getElementById('overlay-su-email')?.value || null, name: username })
+      body: JSON.stringify({ username, password, role, name: username })
     });
     const data = await res.json();
       if (!res.ok) {
@@ -3066,40 +2865,23 @@ setSession(userObj, remember);
 
 });
 
-async function populateProfile(){
-  // fetch server user info if available
-  let s = getSession();
-  try {
-    const res = await fetch('/api/auth/me', { credentials:'include' });
-    if(res.ok){
-      const data = await res.json();
-      if(data && data.user){
-        s = data.user;
-        setSession(s, !!getPersistentSession()); // update local session to server truth
-      }
-    }
-  } catch(e){
-    // ignore (server may not be available)
-    console.debug('populateProfile: no server /api/auth/me', e && e.message ? e.message : e);
-  }
-
+function populateProfile(){
+  const s = getSession();
   if(!s) return;
   if(q('profileName')) q('profileName').value = s.name || '';
   if(q('profileRole')) q('profileRole').value = s.role || '';
   if(q('profileUsername')) q('profileUsername').value = s.username || '';
 
-  // prefs stored in localStorage per-user
   const prefsRaw = localStorage.getItem(prefsKeyFor(s.username)) || '{}';
   let prefs = {};
   try{ prefs = JSON.parse(prefsRaw); }catch(e){ prefs = {}; }
 
-  if(q('profileEmail')) q('profileEmail').value = prefs.email || s.email || '';
+  if(q('profileEmail')) q('profileEmail').value = prefs.email || '';
   if(q('profilePhone')) q('profilePhone').value = prefs.phone || '';
   if(q('profileTimezone')) q('profileTimezone').value = prefs.timezone || 'Asia/Manila';
   if(q('prefEmailNotif')) q('prefEmailNotif').checked = !!prefs.emailNotifications;
   if(q('prefPushNotif')) q('prefPushNotif').checked = !!prefs.pushNotifications;
 
-  // avatar preview logic (local)
   const avatarData = localStorage.getItem(avatarKeyFor(s.username));
   const avatarWrap = q('profileAvatarPreview');
   if(avatarWrap){
@@ -3113,10 +2895,6 @@ async function populateProfile(){
     }
   }
 
-  // load recent logins
-  renderRecentLogins();
-
-  // enable role editing only for owner
   const current = getSession();
   if(current && current.role === 'Owner'){
     if(q('profileRole')) q('profileRole').removeAttribute('readonly');
@@ -3128,31 +2906,6 @@ async function populateProfile(){
   if(q('curPassword')) q('curPassword').value = '';
   if(q('newPassword')) q('newPassword').value = '';
   if(q('confirmPassword')) q('confirmPassword').value = '';
-}
-
-function renderRecentLogins(){
-  // store recent login list in localStorage.recent_logins as [{username, time}]
-  const listEl = q('recentLogins');
-  if(!listEl) return;
-  const raw = localStorage.getItem('recent_logins') || '[]';
-  let arr = [];
-  try{ arr = JSON.parse(raw) }catch(e){ arr = []; }
-  listEl.innerHTML = arr.slice().reverse().slice(0,6).map(r => {
-    return `<li style="padding:8px;border-radius:8px;margin-bottom:8px;background:var(--card);display:flex;justify-content:space-between;gap:8px;align-items:center">
-      <div><strong>${escapeHtml(r.username)}</strong><div class="muted small">${escapeHtml(r.time)}</div></div>
-      <div><button class="btn small" data-username="${escapeHtml(r.username)}">Use</button></div>
-    </li>`;
-  }).join('') || '<div class="muted small">No recent logins</div>';
-  listEl.querySelectorAll('button[data-username]').forEach(b=>{
-    b.addEventListener('click', ()=> {
-      const u = b.dataset.username;
-      // prefill overlay username and focus password
-      const ou = q('overlay-username'); const op = q('overlay-password');
-      if(ou) { ou.value = u; ou.focus(); }
-      if(op) { setTimeout(()=> op.focus(), 120); }
-      showView(''); // don't change view, just keep overlay visible if present
-    });
-  });
 }
 
 function bindProfileAvatarUpload(){
@@ -3202,11 +2955,8 @@ function saveProfile(){
 
   setSession(s, !!getPersistentSession());
 
-  // update local accounts if legacy demo accounts exist
-  try {
-    const acc = loadAccounts();
-    if(acc && acc[s.username]){ acc[s.username].name = name; acc[s.username].role = s.role; saveAccounts(acc); }
-  } catch(e){ /* ignore */ }
+  const acc = loadAccounts();
+  if(acc && acc[s.username]){ acc[s.username].name = name; acc[s.username].role = s.role; saveAccounts(acc); }
 
   const prefs = { email, phone, timezone, emailNotifications: emailNotif, pushNotifications: pushNotif };
   localStorage.setItem(prefsKeyFor(s.username), JSON.stringify(prefs));
@@ -3214,17 +2964,8 @@ function saveProfile(){
   if(q('sidebarUser')) q('sidebarUser').textContent = `${s.name} — ${s.role}`;
   if(q('userBadgeText')) q('userBadgeText').textContent = `${s.name}`;
 
-  // record recent login if username present
-  try {
-    const arr = JSON.parse(localStorage.getItem('recent_logins') || '[]');
-    arr.push({ username: s.username || '', time: new Date().toLocaleString() });
-    // keep last 12
-    localStorage.setItem('recent_logins', JSON.stringify(arr.slice(-12)));
-  } catch(e){}
-
   notify('Profile saved');
 }
-
 
 function changePassword(){
   const s = getSession();
@@ -3259,45 +3000,8 @@ function deleteAccountDemo(){
 }
 
 function bindProfileControls(){
-  // avatar upload
-  const input = q('profileAvatarInput');
-  if(input) input.addEventListener('change', (e) => {
-    const file = input.files && input.files[0];
-    if(!file) return;
-    if(file.size > 1_800_000){ notify('Avatar too large (max ~1.8MB)'); return; }
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const s = getSession(); if(!s) return;
-      const dataURL = ev.target.result;
-      const wrap = q('profileAvatarPreview');
-      if(wrap){ wrap.innerHTML=''; const img=document.createElement('img'); img.src=dataURL; wrap.appendChild(img); }
-      localStorage.setItem(avatarKeyFor(s.username), dataURL);
-      notify('Avatar updated');
-    };
-    reader.readAsDataURL(file);
-  });
+  bindProfileAvatarUpload();
 
-  q('removeAvatar')?.addEventListener('click', ()=> {
-    const s = getSession(); if(!s) return;
-    localStorage.removeItem(avatarKeyFor(s.username));
-    const wrap = q('profileAvatarPreview');
-    if(wrap){ wrap.innerHTML = '<i class="fa fa-user fa-2x"></i>'; }
-    notify('Avatar removed');
-  });
-
-  q('profileSaveServer')?.addEventListener('click', async ()=> {
-    // try to call server to update user's public profile data if endpoint exists
-    const s = getSession();
-    if(!s) { notify('Sign in first'); return; }
-    const payload = { name: q('profileName')?.value || s.name, phone: q('profilePhone')?.value||'', email: q('profileEmail')?.value||'' };
-    try {
-      const res = await fetch('/api/users/me', { method:'PUT', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify(payload) });
-      if(res.ok){ notify('Profile updated on server'); const data = await res.json(); if(data && data.user){ setSession(data.user, !!getPersistentSession()); populateProfile(); } }
-      else { const text = await res.text().catch(()=>null); notify('Server update failed'); console.debug('profileSaveServer failed', res.status, text); }
-    } catch(e){ notify('Server update failed'); console.debug('profileSaveServer error', e && e.message ? e.message : e); }
-  });
-
-  // save / cancel binding
   const saveBtn = q('saveProfile');
   if(saveBtn){
     saveBtn.onclick = (e)=>{ e.preventDefault(); saveProfile(); populateProfile(); };
@@ -3314,7 +3018,6 @@ function bindProfileControls(){
   const delBtn = q('deleteAccountBtn');
   if(delBtn) delBtn.onclick = (e)=>{ e.preventDefault(); deleteAccountDemo(); };
 
-  // wire preference auto-save
   ['prefEmailNotif','prefPushNotif','profileTimezone','profileEmail','profilePhone'].forEach(id=>{
     const el = q(id);
     if(el) el.addEventListener('change', ()=> {
