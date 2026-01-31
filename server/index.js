@@ -50,6 +50,10 @@ const SMTP_USER = process.env.SMTP_USER;
 const SMTP_PASS = process.env.SMTP_PASS;
 const EMAIL_FROM = process.env.EMAIL_FROM || `"Eric's Bakery" <archlinux@google.com>`;
 
+app.all(['/api/products', '/api/products/*', '/api/product', '/api/product/*', '/api/orders', '/api/orders/*', '/api/order', '/api/order/*'], (req, res) => {
+  return res.status(404).json({ error: 'Not found' });
+});
+
 // Only create transporter if SMTP config is present
 let mailTransporter = null;
 if (SMTP_HOST && SMTP_USER && SMTP_PASS) {

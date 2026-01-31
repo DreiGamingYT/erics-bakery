@@ -2,6 +2,69 @@
 
 const INVENTORY_PAGE_LIMIT = 10;
 
+(function(){
+  const DISABLED = '[features-disabled]';
+  console.info(DISABLED, 'Product & Order features disabled');
+
+  // No-op stubs for commonly used functions relating to products/orders/search
+  const noops = [
+    'applySearch','attachTopSearchHandlers','ensureOrdersView','highlightSearchResultInProducts',
+    'initSearchFeature','injectSearchHighlightStyle','loadSearchHistory','nextOrderId','nextProductId',
+    'openAddProduct','openNewOrderModal','openOrderDetailModal','pushSearchQuery','renderProductGrid','saveSearchHistory'
+  ];
+  try {
+    noops.forEach(fn => {
+      if (typeof window !== 'undefined' && typeof window[fn] !== 'function') {
+        window[fn] = function(){ console.info(DISABLED, fn + '() called — feature disabled.'); };
+      }
+    });
+  } catch(e){ console.warn(DISABLED, 'stub install failed', e); }
+
+  // Hide product/order UI elements if present (attempt several common selectors)
+  function hideProductOrderUI(){
+    try {
+      const sel = [
+        '#view-products', '#view-orders', '#productsView', '#ordersView',
+        '[data-section="products"]', '[data-section="orders"]',
+        '.product-grid', '.orders-panel', '#productsList', '#ordersList',
+        '[data-nav="products"]', '[data-nav="orders"]', '.nav-item[data-view="products"]', '.nav-item[data-view="orders"]'
+      ];
+      sel.forEach(s=> document.querySelectorAll(s).forEach(el=>{
+        if (!el) return;
+        try { el.remove(); } catch(_) { el.style.display = 'none'; }
+      }));
+    } catch(e){ console.warn(DISABLED, 'hide UI failed', e); }
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', hideProductOrderUI);
+  else setTimeout(hideProductOrderUI, 20);
+
+  // Patch/wrap apiFetch if it exists (defensive)
+  function wrapApiFetchIfPresent(){
+    try {
+      if (typeof window.apiFetch === 'function' && !window.apiFetch._disabledPatch) {
+        const original = window.apiFetch;
+        window.apiFetch = async function(path, opts){
+          try {
+            const p = String(path||'');
+            if (/\/api\/products/i.test(p) || /\/api\/product/i.test(p) || /\/api\/orders/i.test(p) || /\/api\/order/i.test(p)) {
+              console.info(DISABLED, 'blocked API call to', p);
+              // typical list response shape so callers don't crash
+              return { items: [], meta: { total: 0, page: 1, limit: 0 } };
+            }
+          } catch(e){ /* continue to original */ }
+          return original.apply(this, arguments);
+        };
+        window.apiFetch._disabledPatch = true;
+      }
+    } catch(e){ console.warn(DISABLED, 'wrapApiFetchIfPresent err', e); }
+  }
+
+  // Try to wrap immediately and repeatedly for a short window (in case apiFetch is defined later)
+  try { wrapApiFetchIfPresent(); } catch(e){}
+  const _watch = setInterval(()=>{ try{ wrapApiFetchIfPresent(); } catch(e){} }, 200);
+  setTimeout(()=>clearInterval(_watch), 3000);
+})();
+
 async function fetchIngredientsAPI({ page=1, limit=INVENTORY_PAGE_LIMIT, type='all', filter='all', search='', sort='name', order='asc'} = {}){
   const qs = new URLSearchParams({ page, limit, type, filter, search, sort, order });
   const res = await fetch('/api/ingredients?' + qs.toString(), { credentials: 'include' });
@@ -1506,6 +1569,14 @@ async function apiFetch(path, opts = {}) {
   cfg.credentials = 'include'; // include cookie JWT
   if (cfg.body && typeof cfg.body !== 'string') cfg.body = JSON.stringify(cfg.body);
 
+  try {
+    const pathStr = String(path||'');
+    if (/\/api\/products/i.test(pathStr) || /\/api\/product/i.test(pathStr) || /\/api\/orders/i.test(pathStr) || /\/api\/order/i.test(pathStr)) {
+      console.info('[apiFetch-block] Request to', pathStr, 'blocked by disabled-features patch.');
+      return { items: [], meta: { total: 0, page: 1, limit: 0 } };
+    }
+  } catch(e){ /* continue normally */ }
+  
   const res = await fetch(path, cfg);
   // try JSON parse for both success and error bodies
   const text = await res.text().catch(() => '');
