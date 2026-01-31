@@ -1151,15 +1151,6 @@ async function renderIngredientCards(page = 1, limit = 5) {
     // Save / In/Out wiring — call API and refresh current page
     container.querySelectorAll('button.save-row').forEach(btn => {
       btn.addEventListener('click', async (ev) => {
-        // re-evaluate permissions in case role changed
-        const me = window.CURRENT_USER || window.ME || { id: null, role: 'assistant' };
-        const role = (me.role || '').toString().toLowerCase();
-        const canEdit = ['owner','admin','baker'].includes(role);
-        const canStock = ['owner','admin','baker','assistant'].includes(role);
-        const saveAllowed = canStock || canEdit;
-
-        if (!saveAllowed) { notify('You are not authorized'); return; }
-
         const tr = ev.currentTarget.closest('tr');
         if (!tr) return;
         const id = Number(tr.dataset.id);
@@ -1533,7 +1524,7 @@ async function apiFetch(path, opts = {}) {
 // --- Render recent inventory activity in the right column ---
 async function renderInventoryActivity(limit = 20) {
   const el = q('inventoryRecentActivity');
-  if(!el) return;
+  if (!el) return;
   el.innerHTML = '<li class="muted">Loading…</li>';
   try {
     const resp = await apiFetch(`/api/activity?limit=${limit}`);
@@ -2739,11 +2730,7 @@ if (applyBtn) {
 }
 
 async function performLogout(){
-  try { await fetch('/api/auth/logout', { method:'POST', credentials:'include' }); 
-
-  try { localStorage.removeItem('CURRENT_USER'); } catch(e){}
-location.reload();
-} catch(e){}
+  try { await fetch('/api/auth/logout', { method:'POST', credentials:'include' }); } catch(e){}
   clearSession();
   destroyAllCharts();
   showApp(false);

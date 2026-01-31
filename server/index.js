@@ -2,7 +2,7 @@ require('dotenv').config();
 const path = require('path');
 const express = require('express');
 const pool = require('./db');
-const bcrypt = require('bcryptjs');
+const bcrypt = require('bcrypt');
 
 const { promisify } = require('util');
 
@@ -81,18 +81,6 @@ function authMiddleware(req, res, next) {
             message: 'Invalid token'
         });
     }
-}
-
-function canEditIngredient(user) {
-  if(!user || !user.role) return false;
-  // Owner/Admin/Baker can edit ingredients
-  return ['Owner','Admin','Baker'].includes(user.role);
-}
-
-function canStockIngredient(user) {
-  if(!user || !user.role) return false;
-  // Owner/Admin/Baker/Assistant can do stock in/out
-  return ['Owner','Admin','Baker','Assistant'].includes(user.role);
 }
 
 let mailer = null;
