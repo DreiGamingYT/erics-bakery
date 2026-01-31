@@ -3751,16 +3751,47 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // mapping from KPI element id to API query used to populate it
   const KPI_MAP = {
-    'kpi-total-ing': async (el) => {
-      // fetch single page meta.total from /api/ingredients
-      try {
-        const json = await fetchJson('/api/ingredients?limit=1&page=1');
-        const total = json && json.meta && Number(json.meta.total) ? Number(json.meta.total) : (Array.isArray(json.items) ? json.items.length : 0);
-        el.textContent = total;
-      } catch (e) {
-        el.textContent = '—';
-      }
-    },
+    'kpi-total-ing': async (el, card) => {
+  try {
+    // get total count and sample items (first 10) for the popover
+    const [metaJson, sampleJson] = await Promise.all([
+      fetchJson('/api/ingredients?limit=1&page=1'),        // for meta.total
+      fetchJson('/api/ingredients?limit=10&page=1')       // sample list to show
+    ]);
+
+    const total = metaJson && metaJson.meta && Number(metaJson.meta.total) ? Number(metaJson.meta.total) : (Array.isArray(metaJson.items) ? metaJson.items.length : 0);
+    el.textContent = total;
+
+    // ensure pop containers exist and render a sample list
+    ensurePopContainers(card);
+    const items = (sampleJson && sampleJson.items) ? sampleJson.items : [];
+    // show top 10 (name + qty)
+    renderKpiList(card.querySelector('.kpi-popover'), items.map(i => ({ name: i.name, qty: i.qty, unit: i.unit })));
+    renderKpiList(card.querySelector('.kpi-popover-mobile'), items.map(i => ({ name: i.name, qty: i.qty, unit: i.unit })));
+
+    // also add a small footer/message when there are more items than shown
+    const desktopPop = card.querySelector('.kpi-popover');
+    if (desktopPop) {
+      const footer = document.createElement('div');
+      footer.style.padding = '8px';
+      footer.style.fontSize = '12px';
+      footer.style.color = 'var(--muted)';
+      footer.style.textAlign = 'center';
+      if (total > items.length) footer.textContent = `Showing ${items.length} of ${total} items — view Inventory for the full list`;
+      else footer.textContent = `Showing ${items.length} item${items.length !== 1 ? 's' : ''}`;
+      // remove previous footer if present
+      const old = desktopPop.querySelector('.kpi-popover-footer');
+      if (old) old.remove();
+      footer.className = 'kpi-popover-footer';
+      desktopPop.appendChild(footer);
+    }
+
+  } catch (e) {
+    el.textContent = '—';
+    console.warn('kpi-total-ing fetch error', e && e.message ? e.message : e);
+  }
+},
+
     'kpi-low': async (el, card) => {
       try {
         const json = await fetchJson('/api/ingredients?filter=low&limit=20');
