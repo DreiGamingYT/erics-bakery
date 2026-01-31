@@ -639,11 +639,6 @@ body{
   }
 }
 
-@media (max-width:420px) {
-  #view-profile .page-actions { flex-direction: column-reverse; align-items: stretch; }
-  #view-profile .page-actions button { width:100%; }
-}
-
 #view-profile .avatar-wrap .btn.small { padding: 6px 10px; font-size: 13px; }
 
 #view-profile input::placeholder { color: rgba(0,0,0,0.35); }
@@ -879,11 +874,124 @@ body{
   background: linear-gradient(180deg, transparent, rgba(255,255,255,0.02));
 }
 
-@media (max-width:700px){
-  .chart-container { height:220px; }
-  .grid-2 { grid-template-columns: 1fr; }
-  .search-suggestions { max-height: 180px; }
-  .main { margin-left: 18px !important; padding-right: 18px; }
+@media (max-width: 700px){
+
+  /* ---------- GLOBAL SCALE DOWN ---------- */
+
+  body { font-size: 14px; }
+
+  .card,
+  .kpi-card,
+  .modal-card,
+  .small-card {
+    padding: 10px !important;
+  }
+
+  .card > h3 { font-size: 15px; }
+
+  .page-header h2,
+  .page-header h3 { font-size: 16px; }
+
+  /* ---------- KPI ROW ---------- */
+
+  .kpi-row{
+    display: grid !important;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 8px;
+  }
+
+  .kpi-card{
+    min-height: 60px !important;
+    padding: 8px !important;
+  }
+
+  .kpi-title{ font-size: 11px !important; }
+  .kpi-value{ font-size: 16px !important; }
+
+  /* hide desktop hover popovers */
+  .kpi-popover{ display:none !important; }
+
+  /* mobile expand panel */
+  .kpi-popover-mobile{
+    position: relative !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin-top: 6px;
+    font-size: 13px;
+  }
+
+  /* ---------- CHARTS ---------- */
+
+  .chart-container{
+    height: 180px !important;
+  }
+
+  @media (max-width:420px){
+    .chart-container{
+      height: 150px !important;
+    }
+  }
+
+  /* ---------- GRID / CARDS ---------- */
+
+  .grid-2{
+    grid-template-columns: 1fr !important;
+    gap: 10px;
+  }
+
+  .cards-grid{
+    grid-template-columns: 1fr !important;
+  }
+
+  /* ---------- TOP BAR ---------- */
+
+  .topbar{ height:56px; padding:6px 10px; }
+
+  .meta-btn,
+  .user-badge{
+    height: 34px;
+    font-size: 12px;
+  }
+
+  /* ---------- BUTTONS ---------- */
+
+  .btn{
+    padding: 8px 10px !important;
+    font-size: 13px;
+  }
+
+  .btn.large{
+    padding: 10px 12px;
+    font-size: 14px;
+  }
+
+  /* ---------- MODALS ---------- */
+
+  .modal-card{
+    max-width: 95vw !important;
+    padding: 10px !important;
+  }
+
+  /* ---------- INVENTORY TABLE ---------- */
+
+  #ingredientList .inv-table td{
+    font-size: 12px !important;
+    padding: 6px !important;
+  }
+
+  #ingredientList .qty-value{
+    font-size: 14px !important;
+  }
+
+  /* ---------- PROFILE ---------- */
+
+  .avatar-preview{
+    width: 80px !important;
+    height: 80px !important;
+  }
+
 }
 
 .report-controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
@@ -1097,6 +1205,29 @@ body{
 
 @media (max-width:420px) {
 
+  body { font-size: 13px; }
+
+  .kpi-value{ font-size: 15px !important; }
+
+  .kpi-card{
+    min-height: 56px !important;
+  }
+
+  .chart-container{
+    height: 140px !important;
+  }
+
+  .btn{
+    font-size: 12px !important;
+  }
+  .recent-profile{ min-width: 48%; } .rp-name{ max-width:80px; 
+  } 
+  #helpBtn { padding:6px 8px; font-size:13px; }
+  .help-tooltip { font-size:14px; padding:10px; max-width: 90vw; }
+
+  #view-profile .page-actions { flex-direction: column-reverse; align-items: stretch; }
+  #view-profile .page-actions button { width:100%; }
+
   #view-reports .chart-container { height: 180px; }
   #reportSummary { font-size: 12px; }
 
@@ -1164,12 +1295,6 @@ body{
     max-height:none;
     overflow:visible;
   }
-}
-
-@media (max-width:420px){
-  .inventory-layout { gap:10px; }
-  .inv-right .card { padding:10px; }
-  #inventoryRecentActivity li { padding:8px; font-size:13px; }
 }
 
 /* Guided Help / Tour styles */
@@ -1306,19 +1431,8 @@ body{
 /* make sure tooltip is fully tappable on mobile */
 .help-tooltip:focus { outline: 2px solid rgba(27,133,236,0.12); }
 
-/* Slightly larger arrow on bigger screens for clarity */
-@media (min-width:700px) {
-  .help-tooltip:after { width: 16px; height: 16px; }
-}
-
 /* ensure spotlight border radius fallback */
 .help-spotlight { transition: all 220ms cubic-bezier(.2,.9,.2,1); }
-
-/* ensure help button spacing on small screens */
-@media (max-width:420px) {
-  #helpBtn { padding:6px 8px; font-size:13px; }
-  .help-tooltip { font-size:14px; padding:10px; max-width: 90vw; }
-}
 
 /* Recent profiles (signin) */
 .recent-profiles { display:block; gap:8px; }
@@ -1341,7 +1455,7 @@ body{
 .rp-name { font-weight:800; font-size:13px; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:120px;}
 .rp-remove { margin-left:8px; background:transparent;border:none;color:var(--muted);font-weight:800;font-size:14px;cursor:pointer;padding:6px;border-radius:6px }
 .rp-remove:focus{ outline:2px solid rgba(27,133,236,0.12) }
-@media (max-width:420px){ .recent-profile{ min-width: 48%; } .rp-name{ max-width:80px; } }
+
 .modal-card.modal-small{
   max-width:400px;
   padding:16px;
@@ -1581,7 +1695,3 @@ button:disabled,
 }
 .kpi-card { position: relative; } /* ensure popover anchors */
 .kpi-popover-mobile { right: auto; left: 12px; } /* mobile variant */
-@media (max-width:700px){
-  .kpi-popover { display: none !important; } /* only mobile popovers used on small screens */
-  .kpi-popover-mobile { width: auto; left: 8px; right: 8px; max-height: 40vh; overflow:auto; }
-}
