@@ -199,6 +199,7 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
     });
 });
 
+// PUT /api/users/me  -- update current user's profile
 app.put('/api/users/me', authMiddleware, async (req, res) => {
   try {
     const uid = Number(req.user && req.user.id);
@@ -266,15 +267,6 @@ app.put('/api/users/me', authMiddleware, async (req, res) => {
   }
 });
 
-async function onLoginSuccess(resp) {
-  // resp.user is from server { id, username, role, name }
-  window.CURRENT_USER = resp.user;
-  // persist small user info so UI survives reloads:
-  try { localStorage.setItem('CURRENT_USER', JSON.stringify(resp.user)); } catch(e){ /* ignore */ }
-
-  // update any UI
-  updateUIAfterLogin(resp.user);
-}
 
 app.post('/api/auth/logout', (req, res) => {
     res.clearCookie(TOKEN_NAME, {
