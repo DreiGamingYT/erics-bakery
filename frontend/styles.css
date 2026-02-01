@@ -456,7 +456,7 @@ body{
   min-width: 0;
 }
 
-.main{flex:1;margin-left:140px;overflow-y: auto; -webkit-overflow-scrolling: touch;min-height:calc(100vh - 64px);box-sizing:border-box;padding-bottom:96px}
+.main{flex:1;margin-left:110px;overflow-y: auto; -webkit-overflow-scrolling: touch;min-height:calc(100vh - 64px);box-sizing:border-box;padding-bottom:96px}
 
 .page-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
 .page-actions{display:flex;align-items:center;gap:10px}
@@ -1065,8 +1065,12 @@ body{
   .main { margin-left: 70px; }
 }
 
-@media (min-width: 1400px) {
-  .main { margin-left: 60px; }
+@media (min-width: 1600px) {
+  .main { margin-left: 10px; }
+}
+
+@media (min-width: 1700px) {
+  .main { margin-left: 10px; }
 }
 
 @media (min-width:901px){
