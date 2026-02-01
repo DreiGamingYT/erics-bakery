@@ -4900,12 +4900,5 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     container.appendChild(ul);
   }
-  async function fetchIngredients() {
-    try {
-      const res = await fetch('/api/ingredients?limit=1000&page=1', { credentials: 'include' });
-      if (!res.ok) {
-        return { ok: false, status: res.status, body: null, error: `HTTP ${res.status} ${res.statusText}` };
-      }
-    } catch(e) {}
-  }
+  
 })
