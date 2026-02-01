@@ -1062,7 +1062,11 @@ body{
 }
 
 @media (min-width: 1500px) {
-  .main { margin-left: 20px; }
+  .main { margin-left: 70px; }
+}
+
+@media (min-width: 2100px) {
+  .main { margin-left: 70px; }
 }
 
 @media (min-width:901px){
@@ -1684,6 +1688,7 @@ button:disabled,
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
     gap: 10px;
+    background: var(--surface);
   }
   .kpi-card { flex: 1 1 auto; min-width: auto; padding: 10px; }
   .kpi-value { font-size: 16px; }
