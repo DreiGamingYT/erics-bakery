@@ -4066,3 +4066,191 @@ document.addEventListener('DOMContentLoaded', () => {
   // expose for manual call (useful in SPA partial re-renders)
   window.initKpiLists = initKpiLists;
 })();
+
+/* ===== KPI popover + responsive behavior (append to app.js) ===== */
+
+(function(){
+  // small helper to render list items into a container (ul)
+  function renderListInto(container, items, emptyMessage = 'No items') {
+    container.innerHTML = '';
+    const ul = document.createElement('ul');
+    if (!items || items.length === 0) {
+      const li = document.createElement('li');
+      li.className = 'muted';
+      li.style.padding = '8px';
+      li.textContent = emptyMessage;
+      ul.appendChild(li);
+    } else {
+      items.slice(0, 50).forEach(it => {
+        const li = document.createElement('li');
+        const left = document.createElement('div');
+        left.style.overflow = 'hidden';
+        left.style.textOverflow = 'ellipsis';
+        left.style.whiteSpace = 'nowrap';
+        left.textContent = it.name || '(unnamed)';
+        const right = document.createElement('div');
+        right.style.opacity = '0.95';
+        right.textContent = (typeof it.qty !== 'undefined' ? `${it.qty}${it.unit ? ' ' + it.unit : ''}` : '');
+        li.appendChild(left);
+        li.appendChild(right);
+        ul.appendChild(li);
+      });
+    }
+    container.appendChild(ul);
+  }
+
+  // fetch ingredients (will return null on auth error)
+  async function fetchIngredientsAll() {
+    try {
+      const res = await fetch('/api/ingredients?limit=1000&page=1');
+      if (!res.ok) {
+        // unauthorized or server error -> return null so UI shows friendly message
+        return null;
+      }
+      const json = await res.json();
+      return Array.isArray(json.items) ? json.items : [];
+    } catch (e) {
+      console.warn('fetchIngredientsAll err', e);
+      return null;
+    }
+  }
+
+  // determine items for KPI type
+  function filterForKpi(type, items) {
+    if (!items) return [];
+    const lower = s => (s||'').toString().toLowerCase();
+    if (type === 'low') {
+      return items.filter(i => Number(i.qty || 0) <= Number(i.min_qty || 0));
+    }
+    if (type === 'exp') {
+      // expiring in next N days (server uses REPORT_EXPIRY_DAYS default 7)
+      // we check expiry exists and is within 0..N days
+      const days = Number((window.__REPORT_EXPIRY_DAYS || 7));
+      const now = new Date();
+      return items.filter(i => {
+        if (!i.expiry) return false;
+        const e = new Date(i.expiry);
+        const diff = (e - now) / (1000*60*60*24);
+        return diff >= 0 && diff <= days;
+      });
+    }
+    if (type === 'equipment') {
+      // try type field then name heuristics
+      const a = items.filter(i => lower(i.type || '').includes('equip') || lower(i.type || '').includes('tool'));
+      if (a.length) return a;
+      return items.filter(i => lower(i.name || '').includes('tool') || lower(i.name || '').includes('equipment'));
+    }
+    if (type === 'total') {
+      return items;
+    }
+    return [];
+  }
+
+  // main init
+  async function initKpiPopovers() {
+    const items = await fetchIngredientsAll(); // null means unauthorized or error
+    // map of KPI id -> type we interpret
+    const KPI_MAP = {
+      'kpi-total-ing': 'total',
+      'kpi-low': 'low',
+      'kpi-exp': 'exp',
+      'kpi-equipment': 'equipment'
+    };
+
+    Object.keys(KPI_MAP).forEach(kid => {
+      const el = document.getElementById(kid);
+      if(!el) return;
+      const card = el.closest('.kpi-card') || el.parentElement;
+
+      // ensure popover elements exist
+      if (!card.querySelector('.kpi-popover')) {
+        const dp = document.createElement('div');
+        dp.className = 'kpi-popover';
+        card.appendChild(dp);
+      }
+      if (!card.querySelector('.kpi-popover-mobile')) {
+        const mp = document.createElement('div');
+        mp.className = 'kpi-popover-mobile';
+        // mobile panel should appear right *after* the card (flow) so add as sibling
+        card.appendChild(mp);
+      }
+      const desktopPop = card.querySelector('.kpi-popover');
+      const mobilePop = card.querySelector('.kpi-popover-mobile');
+
+      // populate function (called initially and on demand)
+      function populate() {
+        if (items === null) {
+          const msg = 'Sign in to view list';
+          renderListInto(desktopPop, [], msg);
+          renderListInto(mobilePop, [], msg);
+          // set count to placeholder if null
+          el.textContent = '—';
+          return;
+        }
+        const type = KPI_MAP[kid];
+        const filtered = filterForKpi(type, items);
+        renderListInto(desktopPop, filtered, 'No items');
+        renderListInto(mobilePop, filtered, 'No items');
+        // set KPI count value (for total, low, equipment, exp)
+        if (type === 'total') el.textContent = filtered.length;
+        else el.textContent = filtered.length;
+      }
+
+      populate();
+
+      // Desktop hover: show desktopPop on mouseenter, hide on leave
+      card.addEventListener('mouseenter', (e) => {
+        // only on wide screens
+        if (window.matchMedia && window.matchMedia('(max-width:900px)').matches) return;
+        if (desktopPop) desktopPop.style.display = 'block';
+      });
+      card.addEventListener('mouseleave', (e) => {
+        if (desktopPop) desktopPop.style.display = 'none';
+      });
+
+      // Mobile / touch: toggle expanded state which shows mobile popover (stacked)
+      card.addEventListener('click', (e) => {
+        // avoid toggling when clicking a button inside
+        if (e.target.closest('button') || e.target.tagName === 'BUTTON') return;
+        if (window.matchMedia && window.matchMedia('(max-width:900px)').matches) {
+          const expanded = card.classList.toggle('expanded');
+          // if expanded, ensure mobilePop is visible else hide
+          if (expanded) {
+            mobilePop.style.display = 'block';
+            // scroll the card into view slightly so the mobile panel is visible
+            setTimeout(()=> {
+              card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 70);
+          } else {
+            mobilePop.style.display = 'none';
+          }
+        }
+      }, { passive: true });
+
+    });
+
+    // click outside closes any expanded mobile panels
+    document.addEventListener('click', (ev) => {
+      const kp = ev.target.closest && ev.target.closest('.kpi-card');
+      if (kp) return; // clicked inside a KPI card
+      document.querySelectorAll('.kpi-card.expanded').forEach(c => {
+        c.classList.remove('expanded');
+        const mp = c.querySelector('.kpi-popover-mobile');
+        if (mp) mp.style.display = 'none';
+      });
+    });
+    // also close desktop popovers on resize when switching to mobile
+    window.addEventListener('resize', () => {
+      if (window.matchMedia && window.matchMedia('(max-width:900px)').matches) {
+        document.querySelectorAll('.kpi-popover').forEach(p => p.style.display = 'none');
+      }
+    });
+  }
+
+  // run init on DOMContentLoaded (safe to run appended at end too)
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initKpiPopovers);
+  } else {
+    initKpiPopovers();
+  }
+})();
