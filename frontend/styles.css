@@ -465,6 +465,7 @@ body{
 .kpi-row {
   display: flex;
   gap: 12px;
+  margin-bottom: 16px;
   flex-wrap: nowrap;               /* desktop: horizontal scroll if needed */
   align-items: stretch;
   -webkit-overflow-scrolling: touch;

@@ -4066,14 +4066,15 @@ document.addEventListener('DOMContentLoaded', () => {
   // expose for manual call (useful in SPA partial re-renders)
   window.initKpiLists = initKpiLists;
 })();
-
-/* ===== KPI popover + responsive behavior (append to app.js) ===== */
-
+/* ===== REPLACEMENT: KPI popover + mobile tap fallback (paste/replace previous KPI block) ===== */
 (function(){
   // small helper to render list items into a container (ul)
   function renderListInto(container, items, emptyMessage = 'No items') {
     container.innerHTML = '';
     const ul = document.createElement('ul');
+    ul.style.listStyle = 'none';
+    ul.style.margin = '0';
+    ul.style.padding = '6px 4px';
     if (!items || items.length === 0) {
       const li = document.createElement('li');
       li.className = 'muted';
@@ -4083,6 +4084,13 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       items.slice(0, 50).forEach(it => {
         const li = document.createElement('li');
+        li.style.padding = '8px';
+        li.style.borderBottom = '1px solid rgba(0,0,0,0.04)';
+        li.style.display = 'flex';
+        li.style.justifyContent = 'space-between';
+        li.style.alignItems = 'center';
+        li.style.gap = '12px';
+        li.style.fontWeight = '700';
         const left = document.createElement('div');
         left.style.overflow = 'hidden';
         left.style.textOverflow = 'ellipsis';
@@ -4099,14 +4107,10 @@ document.addEventListener('DOMContentLoaded', () => {
     container.appendChild(ul);
   }
 
-  // fetch ingredients (will return null on auth error)
   async function fetchIngredientsAll() {
     try {
-      const res = await fetch('/api/ingredients?limit=1000&page=1');
-      if (!res.ok) {
-        // unauthorized or server error -> return null so UI shows friendly message
-        return null;
-      }
+      const res = await fetch('/api/ingredients?limit=1000&page=1', { credentials: 'include' });
+      if (!res.ok) return null;
       const json = await res.json();
       return Array.isArray(json.items) ? json.items : [];
     } catch (e) {
@@ -4115,41 +4119,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // determine items for KPI type
   function filterForKpi(type, items) {
     if (!items) return [];
+    const now = new Date();
+    const days = Number((window.__REPORT_EXPIRY_DAYS || 7));
     const lower = s => (s||'').toString().toLowerCase();
-    if (type === 'low') {
-      return items.filter(i => Number(i.qty || 0) <= Number(i.min_qty || 0));
-    }
-    if (type === 'exp') {
-      // expiring in next N days (server uses REPORT_EXPIRY_DAYS default 7)
-      // we check expiry exists and is within 0..N days
-      const days = Number((window.__REPORT_EXPIRY_DAYS || 7));
-      const now = new Date();
-      return items.filter(i => {
-        if (!i.expiry) return false;
-        const e = new Date(i.expiry);
-        const diff = (e - now) / (1000*60*60*24);
-        return diff >= 0 && diff <= days;
-      });
-    }
+    if (type === 'low') return items.filter(i => Number(i.qty || 0) <= Number(i.min_qty || 0));
+    if (type === 'exp') return items.filter(i => { if (!i.expiry) return false; const e = new Date(i.expiry); const diff = (e - now) / (1000*60*60*24); return diff >= 0 && diff <= days; });
     if (type === 'equipment') {
-      // try type field then name heuristics
-      const a = items.filter(i => lower(i.type || '').includes('equip') || lower(i.type || '').includes('tool'));
+      const a = items.filter(i => lower(i.type||'').includes('equip') || lower(i.type||'').includes('tool'));
       if (a.length) return a;
-      return items.filter(i => lower(i.name || '').includes('tool') || lower(i.name || '').includes('equipment'));
+      return items.filter(i => lower(i.name||'').includes('tool') || lower(i.name||'').includes('equipment'));
     }
-    if (type === 'total') {
-      return items;
-    }
+    if (type === 'total') return items;
     return [];
   }
 
-  // main init
   async function initKpiPopovers() {
-    const items = await fetchIngredientsAll(); // null means unauthorized or error
-    // map of KPI id -> type we interpret
+    const items = await fetchIngredientsAll(); // null => unauthorized / error
     const KPI_MAP = {
       'kpi-total-ing': 'total',
       'kpi-low': 'low',
@@ -4159,31 +4146,47 @@ document.addEventListener('DOMContentLoaded', () => {
 
     Object.keys(KPI_MAP).forEach(kid => {
       const el = document.getElementById(kid);
-      if(!el) return;
+      if (!el) return;
       const card = el.closest('.kpi-card') || el.parentElement;
+      if (!card) return;
 
-      // ensure popover elements exist
-      if (!card.querySelector('.kpi-popover')) {
-        const dp = document.createElement('div');
-        dp.className = 'kpi-popover';
-        card.appendChild(dp);
-      }
-      if (!card.querySelector('.kpi-popover-mobile')) {
-        const mp = document.createElement('div');
-        mp.className = 'kpi-popover-mobile';
-        // mobile panel should appear right *after* the card (flow) so add as sibling
-        card.appendChild(mp);
-      }
-      const desktopPop = card.querySelector('.kpi-popover');
-      const mobilePop = card.querySelector('.kpi-popover-mobile');
+      // remove any previous popovers we created (idempotent)
+      const existingDesktop = card.querySelector('.kpi-popover');
+      if (existingDesktop) existingDesktop.remove();
+      const existingMobile = card.nextElementSibling && card.nextElementSibling.classList && card.nextElementSibling.classList.contains('kpi-popover-mobile') ? card.nextElementSibling : null;
+      if (existingMobile && existingMobile._createdByScript) existingMobile.remove();
 
-      // populate function (called initially and on demand)
+      // desktop floating popover (inside card)
+      const desktopPop = document.createElement('div');
+      desktopPop.className = 'kpi-popover';
+      desktopPop.style.display = 'none';
+      desktopPop.style.position = 'absolute';
+      desktopPop.style.top = 'calc(100% + 10px)';
+      desktopPop.style.left = '8px';
+      desktopPop.style.minWidth = '220px';
+      desktopPop.style.maxWidth = '420px';
+      desktopPop.style.padding = '8px';
+      desktopPop.style.zIndex = 300;
+      desktopPop.style.boxSizing = 'border-box';
+      card.appendChild(desktopPop);
+
+      // mobile stacked popover — place AFTER the card so it flows naturally
+      const mobilePop = document.createElement('div');
+      mobilePop.className = 'kpi-popover-mobile';
+      mobilePop._createdByScript = true;
+      mobilePop.style.display = 'none';
+      mobilePop.style.boxSizing = 'border-box';
+      mobilePop.style.marginTop = '8px';
+      mobilePop.style.padding = '8px';
+      mobilePop.style.zIndex = 100;
+      // insert after card (flow)
+      card.insertAdjacentElement('afterend', mobilePop);
+
       function populate() {
         if (items === null) {
-          const msg = 'Sign in to view list';
-          renderListInto(desktopPop, [], msg);
-          renderListInto(mobilePop, [], msg);
-          // set count to placeholder if null
+          renderListInto(desktopPop, [], 'Sign in to view list');
+          renderListInto(mobilePop, [], 'Sign in to view list');
+          // show counts as dash if unauthenticated
           el.textContent = '—';
           return;
         }
@@ -4191,63 +4194,81 @@ document.addEventListener('DOMContentLoaded', () => {
         const filtered = filterForKpi(type, items);
         renderListInto(desktopPop, filtered, 'No items');
         renderListInto(mobilePop, filtered, 'No items');
-        // set KPI count value (for total, low, equipment, exp)
-        if (type === 'total') el.textContent = filtered.length;
-        else el.textContent = filtered.length;
+        el.textContent = filtered.length;
       }
 
       populate();
 
-      // Desktop hover: show desktopPop on mouseenter, hide on leave
-      card.addEventListener('mouseenter', (e) => {
-        // only on wide screens
+      // Desktop hover (only on non-touch / wide screens)
+      card.addEventListener('mouseenter', () => {
         if (window.matchMedia && window.matchMedia('(max-width:900px)').matches) return;
-        if (desktopPop) desktopPop.style.display = 'block';
+        desktopPop.style.display = 'block';
       });
-      card.addEventListener('mouseleave', (e) => {
-        if (desktopPop) desktopPop.style.display = 'none';
+      card.addEventListener('mouseleave', () => {
+        desktopPop.style.display = 'none';
       });
 
-      // Mobile / touch: toggle expanded state which shows mobile popover (stacked)
-      card.addEventListener('click', (e) => {
-        // avoid toggling when clicking a button inside
-        if (e.target.closest('button') || e.target.tagName === 'BUTTON') return;
-        if (window.matchMedia && window.matchMedia('(max-width:900px)').matches) {
+      // Mobile/touch: use pointerdown to detect touch and toggle mobile panel
+      let lastPointerWasTouch = false;
+      card.addEventListener('pointerdown', (ev) => {
+        lastPointerWasTouch = ev.pointerType === 'touch' || ev.pointerType === 'pen';
+      }, { passive: true });
+
+      // click toggles mobile panel on small screens OR opens desktop on non-touch small screens
+      card.addEventListener('click', (ev) => {
+        // ignore clicks on controls inside card
+        if (ev.target.closest('button') || ev.target.tagName === 'BUTTON' || ev.target.closest('a')) return;
+
+        const isSmall = window.matchMedia && window.matchMedia('(max-width:900px)').matches;
+        if (isSmall || lastPointerWasTouch) {
+          // toggle mobile panel (flowing under the card)
           const expanded = card.classList.toggle('expanded');
-          // if expanded, ensure mobilePop is visible else hide
+          mobilePop.style.display = expanded ? 'block' : 'none';
           if (expanded) {
-            mobilePop.style.display = 'block';
-            // scroll the card into view slightly so the mobile panel is visible
-            setTimeout(()=> {
-              card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }, 70);
-          } else {
-            mobilePop.style.display = 'none';
+            // close other expanded cards
+            document.querySelectorAll('.kpi-card.expanded').forEach(c => {
+              if (c !== card) {
+                c.classList.remove('expanded');
+                const sib = c.nextElementSibling;
+                if (sib && sib.classList && sib.classList.contains('kpi-popover-mobile')) sib.style.display = 'none';
+              }
+            });
+            // bring into view so user sees panel
+            setTimeout(()=> card.scrollIntoView({ behavior: 'smooth', block: 'center' }), 80);
           }
+        } else {
+          // on wide non-touch screens, a click behaves like hover: show desktop popover briefly
+          desktopPop.style.display = 'block';
+          setTimeout(()=> { desktopPop.style.display = 'none'; }, 3500);
         }
       }, { passive: true });
 
     });
 
-    // click outside closes any expanded mobile panels
+    // global click hides expanded mobile panels when clicking outside
     document.addEventListener('click', (ev) => {
-      const kp = ev.target.closest && ev.target.closest('.kpi-card');
-      if (kp) return; // clicked inside a KPI card
+      if (ev.target.closest && ev.target.closest('.kpi-card')) return;
       document.querySelectorAll('.kpi-card.expanded').forEach(c => {
         c.classList.remove('expanded');
-        const mp = c.querySelector('.kpi-popover-mobile');
-        if (mp) mp.style.display = 'none';
+        const mp = c.nextElementSibling;
+        if (mp && mp.classList && mp.classList.contains('kpi-popover-mobile')) mp.style.display = 'none';
       });
+      // also hide desktop popovers
+      document.querySelectorAll('.kpi-popover').forEach(p => p.style.display = 'none');
     });
-    // also close desktop popovers on resize when switching to mobile
+
+    // close floating popovers when resizing to mobile
     window.addEventListener('resize', () => {
       if (window.matchMedia && window.matchMedia('(max-width:900px)').matches) {
         document.querySelectorAll('.kpi-popover').forEach(p => p.style.display = 'none');
+      } else {
+        // hide all mobile panels when moving to wide screen
+        document.querySelectorAll('.kpi-popover-mobile').forEach(m => m.style.display = 'none');
+        document.querySelectorAll('.kpi-card.expanded').forEach(c => c.classList.remove('expanded'));
       }
     });
   }
 
-  // run init on DOMContentLoaded (safe to run appended at end too)
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initKpiPopovers);
   } else {
