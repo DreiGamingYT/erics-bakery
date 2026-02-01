@@ -1629,6 +1629,11 @@ button:disabled,
   cursor: url('./add_default.png') 32 32, auto;
 }
 
+.kpi-row,
+.layout .sidebar {
+    cursor: url('./default.png') 32 32, pointer;
+}
+
 /* KPI popover + responsive improvements (append) */
 .kpi-card { position: relative; cursor: pointer; transition: transform .12s ease; }
 .kpi-card:focus { outline: 2px solid rgba(27,133,236,0.12); border-radius: 12px; }
