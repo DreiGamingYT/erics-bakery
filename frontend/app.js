@@ -4066,15 +4066,28 @@ document.addEventListener('DOMContentLoaded', () => {
   // expose for manual call (useful in SPA partial re-renders)
   window.initKpiLists = initKpiLists;
 })();
-/* ===== REPLACEMENT: KPI popover + mobile tap fallback (paste/replace previous KPI block) ===== */
+
+/* ===== REPLACEMENT: KPI popover + mobile tap fallback (improved, fetch-on-toggle) ===== */
 (function(){
-  // small helper to render list items into a container (ul)
-  function renderListInto(container, items, emptyMessage = 'No items') {
+  function createSpinnerEl() {
+    const s = document.createElement('div');
+    s.className = 'btn-spinner';
+    s.style.width = '18px';
+    s.style.height = '18px';
+    s.style.borderWidth = '2px';
+    s.style.display = 'inline-block';
+    s.style.verticalAlign = 'middle';
+    return s;
+  }
+
+  function renderList(container, items, emptyMessage = 'No items') {
     container.innerHTML = '';
     const ul = document.createElement('ul');
     ul.style.listStyle = 'none';
     ul.style.margin = '0';
     ul.style.padding = '6px 4px';
+    ul.style.maxHeight = '38vh';
+    ul.style.overflow = 'auto';
     if (!items || items.length === 0) {
       const li = document.createElement('li');
       li.className = 'muted';
@@ -4082,15 +4095,16 @@ document.addEventListener('DOMContentLoaded', () => {
       li.textContent = emptyMessage;
       ul.appendChild(li);
     } else {
-      items.slice(0, 50).forEach(it => {
+      items.slice(0, 200).forEach(it => {
         const li = document.createElement('li');
         li.style.padding = '8px';
-        li.style.borderBottom = '1px solid rgba(0,0,0,0.04)';
+        li.style.borderRadius = '8px';
+        li.style.fontWeight = '700';
         li.style.display = 'flex';
         li.style.justifyContent = 'space-between';
-        li.style.alignItems = 'center';
         li.style.gap = '12px';
-        li.style.fontWeight = '700';
+        li.style.alignItems = 'center';
+        li.style.borderBottom = '1px solid rgba(0,0,0,0.04)';
         const left = document.createElement('div');
         left.style.overflow = 'hidden';
         left.style.textOverflow = 'ellipsis';
@@ -4107,25 +4121,27 @@ document.addEventListener('DOMContentLoaded', () => {
     container.appendChild(ul);
   }
 
-  async function fetchIngredientsAll() {
+  async function fetchIngredients() {
     try {
       const res = await fetch('/api/ingredients?limit=1000&page=1', { credentials: 'include' });
-      if (!res.ok) return null;
+      if (!res.ok) {
+        // return an object describing failure
+        return { ok: false, status: res.status, body: null };
+      }
       const json = await res.json();
-      return Array.isArray(json.items) ? json.items : [];
+      return { ok: true, status: 200, body: Array.isArray(json.items) ? json.items : (json.items || []) };
     } catch (e) {
-      console.warn('fetchIngredientsAll err', e);
-      return null;
+      return { ok: false, status: 0, body: null, error: e && e.message ? e.message : String(e) };
     }
   }
 
-  function filterForKpi(type, items) {
+  function filterFor(type, items) {
     if (!items) return [];
     const now = new Date();
-    const days = Number((window.__REPORT_EXPIRY_DAYS || 7));
+    const expiryDays = Number(window.__REPORT_EXPIRY_DAYS || 7);
     const lower = s => (s||'').toString().toLowerCase();
     if (type === 'low') return items.filter(i => Number(i.qty || 0) <= Number(i.min_qty || 0));
-    if (type === 'exp') return items.filter(i => { if (!i.expiry) return false; const e = new Date(i.expiry); const diff = (e - now) / (1000*60*60*24); return diff >= 0 && diff <= days; });
+    if (type === 'exp') return items.filter(i => { if (!i.expiry) return false; const e = new Date(i.expiry); const diff = (e - now) / (1000*60*60*24); return diff >= 0 && diff <= expiryDays; });
     if (type === 'equipment') {
       const a = items.filter(i => lower(i.type||'').includes('equip') || lower(i.type||'').includes('tool'));
       if (a.length) return a;
@@ -4135,143 +4151,761 @@ document.addEventListener('DOMContentLoaded', () => {
     return [];
   }
 
-  async function initKpiPopovers() {
-    const items = await fetchIngredientsAll(); // null => unauthorized / error
-    const KPI_MAP = {
-      'kpi-total-ing': 'total',
-      'kpi-low': 'low',
-      'kpi-exp': 'exp',
-      'kpi-equipment': 'equipment'
-    };
+  const KPI_MAP = {
+    'kpi-total-ing': 'total',
+    'kpi-low': 'low',
+    'kpi-exp': 'exp',
+    'kpi-equipment': 'equipment'
+  };
 
+  function ensurePopovers() {
     Object.keys(KPI_MAP).forEach(kid => {
-      const el = document.getElementById(kid);
-      if (!el) return;
-      const card = el.closest('.kpi-card') || el.parentElement;
+      const valEl = document.getElementById(kid);
+      if (!valEl) return;
+      const card = valEl.closest('.kpi-card') || valEl.parentElement;
       if (!card) return;
 
-      // remove any previous popovers we created (idempotent)
-      const existingDesktop = card.querySelector('.kpi-popover');
-      if (existingDesktop) existingDesktop.remove();
-      const existingMobile = card.nextElementSibling && card.nextElementSibling.classList && card.nextElementSibling.classList.contains('kpi-popover-mobile') ? card.nextElementSibling : null;
-      if (existingMobile && existingMobile._createdByScript) existingMobile.remove();
+      // remove previous popovers created by older script
+      const oldDesktop = card.querySelector('.kpi-popover');
+      if (oldDesktop) oldDesktop.remove();
+      const next = card.nextElementSibling;
+      if (next && next.classList && next.classList.contains('kpi-popover-mobile') && next._createdByScript) next.remove();
 
-      // desktop floating popover (inside card)
-      const desktopPop = document.createElement('div');
-      desktopPop.className = 'kpi-popover';
-      desktopPop.style.display = 'none';
-      desktopPop.style.position = 'absolute';
-      desktopPop.style.top = 'calc(100% + 10px)';
-      desktopPop.style.left = '8px';
-      desktopPop.style.minWidth = '220px';
-      desktopPop.style.maxWidth = '420px';
-      desktopPop.style.padding = '8px';
-      desktopPop.style.zIndex = 300;
-      desktopPop.style.boxSizing = 'border-box';
-      card.appendChild(desktopPop);
+      // desktop floating popover (kept for wide screens, but hidden on touch)
+      const desktop = document.createElement('div');
+      desktop.className = 'kpi-popover';
+      desktop.style.display = 'none';
+      desktop.style.position = 'absolute';
+      desktop.style.top = 'calc(100% + 10px)';
+      desktop.style.left = '8px';
+      desktop.style.minWidth = '220px';
+      desktop.style.maxWidth = '420px';
+      desktop.style.padding = '8px';
+      desktop.style.zIndex = '400';
+      desktop.style.boxSizing = 'border-box';
+      card.appendChild(desktop);
 
-      // mobile stacked popover — place AFTER the card so it flows naturally
-      const mobilePop = document.createElement('div');
-      mobilePop.className = 'kpi-popover-mobile';
-      mobilePop._createdByScript = true;
-      mobilePop.style.display = 'none';
-      mobilePop.style.boxSizing = 'border-box';
-      mobilePop.style.marginTop = '8px';
-      mobilePop.style.padding = '8px';
-      mobilePop.style.zIndex = 100;
-      // insert after card (flow)
-      card.insertAdjacentElement('afterend', mobilePop);
+      // mobile stacked popover (insert after card so it flows and is visible)
+      const mobile = document.createElement('div');
+      mobile.className = 'kpi-popover-mobile';
+      mobile._createdByScript = true;
+      // base mobile styles (ensures visibility)
+      mobile.style.display = 'none';
+      mobile.style.boxSizing = 'border-box';
+      mobile.style.marginTop = '8px';
+      mobile.style.padding = '8px';
+      mobile.style.zIndex = '200';
+      mobile.style.background = getComputedStyle(document.documentElement).getPropertyValue('--card') || '#fff';
+      mobile.style.border = '1px solid rgba(0,0,0,0.06)';
+      mobile.style.borderRadius = '10px';
+      mobile.style.boxShadow = '0 12px 30px rgba(19,28,38,0.08)';
+      card.insertAdjacentElement('afterend', mobile);
 
-      function populate() {
-        if (items === null) {
-          renderListInto(desktopPop, [], 'Sign in to view list');
-          renderListInto(mobilePop, [], 'Sign in to view list');
-          // show counts as dash if unauthenticated
-          el.textContent = '—';
-          return;
-        }
-        const type = KPI_MAP[kid];
-        const filtered = filterForKpi(type, items);
-        renderListInto(desktopPop, filtered, 'No items');
-        renderListInto(mobilePop, filtered, 'No items');
-        el.textContent = filtered.length;
+      // loading helper
+      function showLoading(targetEl) {
+        targetEl.innerHTML = '';
+        const wrap = document.createElement('div');
+        wrap.style.display = 'flex';
+        wrap.style.alignItems = 'center';
+        wrap.style.gap = '8px';
+        wrap.style.padding = '10px';
+        const spinner = createSpinnerEl();
+        wrap.appendChild(spinner);
+        const t = document.createElement('div');
+        t.textContent = 'Loading…';
+        t.style.fontWeight = '700';
+        wrap.appendChild(t);
+        targetEl.appendChild(wrap);
       }
 
-      populate();
+      async function loadAndRender(targetEl) {
+        showLoading(targetEl);
+        const res = await fetchIngredients();
+        if (!res.ok) {
+          if (res.status === 401) {
+            targetEl.innerHTML = '';
+            const p = document.createElement('div');
+            p.className = 'muted';
+            p.style.padding = '10px';
+            p.style.fontWeight = '700';
+            p.textContent = 'Sign in to view the items';
+            targetEl.appendChild(p);
+            return [];
+          } else {
+            targetEl.innerHTML = '';
+            const p = document.createElement('div');
+            p.className = 'muted';
+            p.style.padding = '10px';
+            p.style.fontWeight = '700';
+            p.textContent = 'Could not load items';
+            if (res.error) {
+              const e = document.createElement('div');
+              e.className = 'small muted';
+              e.style.marginTop = '6px';
+              e.textContent = res.error;
+              targetEl.appendChild(e);
+            }
+            targetEl.appendChild(p);
+            return [];
+          }
+        }
+        const items = res.body || [];
+        renderList(targetEl, items, 'No items');
+        return items;
+      }
 
-      // Desktop hover (only on non-touch / wide screens)
-      card.addEventListener('mouseenter', () => {
-        if (window.matchMedia && window.matchMedia('(max-width:900px)').matches) return;
-        desktopPop.style.display = 'block';
-      });
-      card.addEventListener('mouseleave', () => {
-        desktopPop.style.display = 'none';
-      });
-
-      // Mobile/touch: use pointerdown to detect touch and toggle mobile panel
+      // click / pointer handling
       let lastPointerWasTouch = false;
       card.addEventListener('pointerdown', (ev) => {
         lastPointerWasTouch = ev.pointerType === 'touch' || ev.pointerType === 'pen';
       }, { passive: true });
 
-      // click toggles mobile panel on small screens OR opens desktop on non-touch small screens
-      card.addEventListener('click', (ev) => {
-        // ignore clicks on controls inside card
+      card.addEventListener('click', async (ev) => {
         if (ev.target.closest('button') || ev.target.tagName === 'BUTTON' || ev.target.closest('a')) return;
-
         const isSmall = window.matchMedia && window.matchMedia('(max-width:900px)').matches;
+        const ktype = KPI_MAP[kid];
         if (isSmall || lastPointerWasTouch) {
-          // toggle mobile panel (flowing under the card)
           const expanded = card.classList.toggle('expanded');
-          mobilePop.style.display = expanded ? 'block' : 'none';
+          mobile.style.display = expanded ? 'block' : 'none';
           if (expanded) {
-            // close other expanded cards
-            document.querySelectorAll('.kpi-card.expanded').forEach(c => {
+            // close other expanded
+            document.querySelectorAll('.kpi-card.expanded').forEach(c=> {
               if (c !== card) {
                 c.classList.remove('expanded');
-                const sib = c.nextElementSibling;
-                if (sib && sib.classList && sib.classList.contains('kpi-popover-mobile')) sib.style.display = 'none';
+                const s = c.nextElementSibling;
+                if (s && s.classList && s.classList.contains('kpi-popover-mobile')) s.style.display = 'none';
               }
             });
-            // bring into view so user sees panel
-            setTimeout(()=> card.scrollIntoView({ behavior: 'smooth', block: 'center' }), 80);
+            // load contents into mobile panel (always reload so it picks up current auth state)
+            const items = await loadAndRender(mobile);
+            const filtered = filterFor(ktype, items);
+            renderList(mobile, filtered, 'No items');
+            // update the KPI count
+            valEl.textContent = filtered.length;
+            // ensure panel in view
+            setTimeout(()=> card.scrollIntoView({ behavior: 'smooth', block: 'center' }), 70);
+          } else {
+            // collapsed
+            mobile.innerHTML = '';
           }
         } else {
-          // on wide non-touch screens, a click behaves like hover: show desktop popover briefly
-          desktopPop.style.display = 'block';
-          setTimeout(()=> { desktopPop.style.display = 'none'; }, 3500);
+          // non-touch/wide: show desktop popover briefly and lazy-load content
+          if (desktop.innerHTML.trim().length === 0) {
+            const items = await loadAndRender(desktop);
+            const filtered = filterFor(ktype, items);
+            renderList(desktop, filtered, 'No items');
+            valEl.textContent = filtered.length;
+          }
+          desktop.style.display = 'block';
+          setTimeout(()=> desktop.style.display = 'none', 3500);
         }
       }, { passive: true });
 
-    });
-
-    // global click hides expanded mobile panels when clicking outside
-    document.addEventListener('click', (ev) => {
-      if (ev.target.closest && ev.target.closest('.kpi-card')) return;
-      document.querySelectorAll('.kpi-card.expanded').forEach(c => {
-        c.classList.remove('expanded');
-        const mp = c.nextElementSibling;
-        if (mp && mp.classList && mp.classList.contains('kpi-popover-mobile')) mp.style.display = 'none';
+      // hover only on non-touch wide screens
+      card.addEventListener('mouseenter', async () => {
+        if (window.matchMedia && window.matchMedia('(max-width:900px)').matches) return;
+        if (desktop.innerHTML.trim().length === 0) {
+          const items = await loadAndRender(desktop);
+          const filtered = filterFor(KPI_MAP[kid], items);
+          renderList(desktop, filtered, 'No items');
+          valEl.textContent = filtered.length;
+        }
+        desktop.style.display = 'block';
       });
-      // also hide desktop popovers
-      document.querySelectorAll('.kpi-popover').forEach(p => p.style.display = 'none');
-    });
+      card.addEventListener('mouseleave', () => {
+        desktop.style.display = 'none';
+      });
 
-    // close floating popovers when resizing to mobile
-    window.addEventListener('resize', () => {
-      if (window.matchMedia && window.matchMedia('(max-width:900px)').matches) {
-        document.querySelectorAll('.kpi-popover').forEach(p => p.style.display = 'none');
+    });
+  }
+
+  // hide panels when tapping outside
+  document.addEventListener('click', (ev) => {
+    if (ev.target.closest && ev.target.closest('.kpi-card')) return;
+    document.querySelectorAll('.kpi-card.expanded').forEach(c=>{
+      c.classList.remove('expanded');
+      const s = c.nextElementSibling;
+      if (s && s.classList && s.classList.contains('kpi-popover-mobile')) s.style.display = 'none';
+    });
+    document.querySelectorAll('.kpi-popover').forEach(p => p.style.display = 'none');
+  });
+
+  // init on ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', ensurePopovers);
+  } else {
+    ensurePopovers();
+  }
+
+  // re-run on SPA view changes / when content might be re-rendered
+  // (safe to call multiple times, function cleans previous nodes)
+  window.addEventListener('load', ensurePopovers);
+  window.addEventListener('resize', () => {
+    // hide desktop popovers when moving to small screens
+    if (window.matchMedia && window.matchMedia('(max-width:900px)').matches) {
+      document.querySelectorAll('.kpi-popover').forEach(p => p.style.display = 'none');
+    } else {
+      // hide mobile stacked panels when moving to wide screen
+      document.querySelectorAll('.kpi-popover-mobile').forEach(m => m.style.display = 'none');
+      document.querySelectorAll('.kpi-card.expanded').forEach(c => c.classList.remove('expanded'));
+    }
+  });
+
+})();
+async function showHelpStep(idx){
+  const step = (_helpState.steps || [])[idx];
+  if(!step) return;
+  _helpState.idx = idx;
+  const el = document.querySelector(step.selector);
+  const tip = _helpState.tooltip;
+  tip.innerHTML = '';
+  // populate tooltip content
+  if(step.title){
+    const h3 = document.createElement('h3');
+    h3.textContent = step.title;
+    tip.appendChild(h3);
+  }
+  if(step.content){
+    const p = document.createElement('p');
+    p.innerHTML = step.content;
+    tip.appendChild(p);
+  }
+  // add controls
+  const controls = document.createElement('div');
+  controls.className = 'help-controls';
+  const prevBtn = document.createElement('button');
+  prevBtn.type = 'button';
+  prevBtn.id = 'helpPrev';
+  prevBtn.className = 'btn small ghost';
+  prevBtn.textContent = 'Previous';
+  prevBtn.addEventListener('click', () => moveHelp(-1));
+  const nextBtn = document.createElement('button');
+  nextBtn.type = 'button';
+  nextBtn.id = 'helpNext';
+  nextBtn.className = 'btn small primary';
+  nextBtn.textContent = (idx === (_helpState.steps.length -1)) ? 'Finish' : 'Next';
+  nextBtn.addEventListener('click', () => {
+    if(idx === (_helpState.steps.length -1)){
+      cleanupHelp(true);
+    } else {
+      moveHelp(1);
+    }
+  });
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'btn small ghost';
+  closeBtn.textContent = 'Close';
+  closeBtn.addEventListener('click', () => cleanupHelp(true));
+  controls.appendChild(prevBtn);
+  controls.appendChild(nextBtn);
+  controls.appendChild(closeBtn);
+  tip.appendChild(controls);
+  // position tooltip near target element
+  const rect = el.getBoundingClientRect();
+  const left = rect.left + window.scrollX;
+  const top = rect.top + window.scrollY;
+  const width = rect.width;
+  const height = rect.height;
+  const prefer = step.position || 'bottom';
+  const estH = tip.offsetHeight || 160;
+  const tooltipMaxW = 320;
+  let tx, ty, cls;
+  if(prefer === 'bottom'){
+    tx = left + (width/2) - (tooltipMaxW/2);
+    ty = top + height + 12;
+    cls = 'bottom';
+  } else if(prefer === 'top'){
+    tx = left + (width/2) - (tooltipMaxW/2);
+    ty = top - estH - 12;
+    cls = 'top';
+  } else if(prefer === 'left'){
+    tx = left - tooltipMaxW - 12;
+    ty = top + (height/2) - (estH/2);
+    cls = 'left';
+  } else if(prefer === 'right'){
+    tx = left + width + 12;
+    ty = top + (height/2) - (estH/2);
+    cls = 'right';
+  } else {
+    // default to bottom
+    tx = left + (width/2) - (tooltipMaxW/2);
+    ty = top + height + 12;
+    cls = 'bottom';
+  }
+  // ensure within viewport
+  const vpW = document.documentElement.clientWidth;
+  if(tx < 12) tx = 12;
+  if((tx + tooltipMaxW + 12) > vpW) tx = vpW - tooltipMaxW - 12;
+  if(ty < 12) ty = 12;
+  tip.style.maxWidth = tooltipMaxW + 'px';
+  tip.style.left = tx + 'px';
+  tip.style.top = ty + 'px';
+  tip.className = 'help-tooltip ' + cls;
+  // position spotlight over target element
+  const sp = _helpState.spotlight;
+  sp.style.width = width + 'px';
+  sp.style.height = height + 'px';
+  sp.style.left = left + 'px';
+  sp.style.top = top + 'px';
+  // focus first button in tooltip for accessibility
+  try { tip.querySelector('button')?.focus(); } catch(e){}
+}
+function moveHelp(dir){
+  const newIdx = _helpState.idx + dir;
+  if(newIdx < 0 || newIdx >= (_helpState.steps || []).length) return;
+  showHelpStep(newIdx);
+}
+function cleanupHelp(saveProgress){
+  // remove overlay, tooltip, spotlight
+  if(_helpState.overlay){
+    document.body.removeChild(_helpState.overlay);
+    _helpState.overlay = null;
+  }
+  if(_helpState.tooltip){
+    document.body.removeChild(_helpState.tooltip);
+    _helpState.tooltip = null;
+  }
+  if(_helpState.spotlight){
+    document.body.removeChild(_helpState.spotlight);
+    _helpState.spotlight = null;
+  }
+  // restore body scroll
+  document.body.style.overflow = '';
+  // save progress if needed
+  if(saveProgress){
+    const viewId = _helpState.viewId || 'dashboard';
+    const key = `help-progress-${viewId}`;
+    const progress = { lastStep: _helpState.idx || 0, timestamp: Date.now() };
+    localStorage
+      .setItem(key, JSON.stringify(progress));
+  }
+  _helpState = {};
+}
+function attachHelpButtons(){
+  // find all .page-header elements
+  document.querySelectorAll('.page-header').forEach(ph => {
+    const pa = ph.querySelector('.page-actions');
+    if(!pa) return;
+    // avoid adding multiple buttons
+    if(pa.querySelector('.help-button')) return;
+    // create help button
+    const hb = document.createElement('button');
+    hb.type = 'button';
+    hb.className = 'btn small ghost help-button';
+    hb.title = 'Show help tour for this page';
+    hb.innerHTML = '<span class="icon icon-help-circle" aria-hidden="true"></span> Help';
+    hb.addEventListener('click', () => {
+      // define help steps for this page
+      const viewId = ph.getAttribute('data-view-id') || 'dashboard';
+      let steps = [];
+      if(viewId === 'dashboard'){
+        steps = [
+          { selector: '#kpi-total-ing', title: 'Total Ingredients', content: 'This shows the total number of ingredients in your inventory. Click or tap to see a list of some of them.', position: 'bottom' },
+          { selector: '#kpi-low', title: 'Low Stock Items', content: 'This indicates how many ingredients are low in stock. Click or tap to view which items need restocking soon.', position: 'bottom' },
+          { selector: '#kpi-exp', title: 'Expiring Soon', content: 'This shows the count of ingredients that are expiring soon. Click or tap to see which items are nearing their expiration date.', position: 'bottom' },
+          { selector: '#kpi-equipment', title: 'Equipment & Tools', content: 'This indicates the number of equipment and tools you have logged. Click or tap to view them.', position: 'bottom' }
+        ];
+      } else if(viewId === 'inventory'){
+        steps = [
+          { selector: '.filter-bar', title: 'Filter Ingredients', content: 'Use these filters to narrow down the list of ingredients based on various criteria like category, stock level, or expiration status.', position: 'bottom' },
+          { selector: '#ingredientTable', title: 'Ingredient List', content: 'This table displays all your ingredients along with their details. Click on an ingredient to view or edit its information.', position: 'top' }
+        ];
+      }
+      if(steps.length === 0) return;
+      // setup help state
+      _helpState = {
+        steps: steps,
+        idx: 0,
+        viewId: viewId
+      };
+      // create overlay
+      const overlay = document.createElement('div');
+      overlay.className = 'help-overlay';
+      document.body.appendChild(overlay);
+      _helpState.overlay = overlay;
+      // create tooltip
+      const tooltip = document.createElement('div');
+      tooltip.className = 'help-tooltip';
+      document.body.appendChild(tooltip);
+      _helpState.tooltip = tooltip;
+      // create spotlight
+      const spotlight = document.createElement('div');
+      spotlight.className = 'help-spotlight';
+      document.body.appendChild(spotlight);
+      _helpState.spotlight = spotlight;
+      // disable body scroll
+      document.body.style.overflow = 'hidden';
+      // check localStorage for progress
+      const key = `help-progress-${viewId}`;
+      const stored = localStorage.getItem(key);
+      if(stored){
+        try {
+          const progress = JSON.parse(stored);
+          if(progress && typeof progress.lastStep === 'number' && progress.lastStep >=0 && progress.lastStep < steps.length){
+            _helpState.idx = progress.lastStep;
+          }
+        } catch(e){}
+      }
+      // show first (or resumed) step
+      showHelpStep(_helpState.idx);
+    });
+    pa.appendChild(hb);
+  });
+}
+document.addEventListener('DOMContentLoaded', () => {
+  attachHelpButtons();
+});
+function renderKpiList(container, items){
+  container.innerHTML = '';
+  const list = document.createElement('ul');
+  list.style.listStyle = 'none';
+  list.style.margin = '0';
+  list.style.padding = '6px 4px';
+  list.style.maxHeight = '38vh';
+  list.style.overflow = 'auto';
+  if(!items || items.length === 0){
+    const li = document.createElement('li');
+    li.className = 'muted';
+    li.style.padding = '8px';
+    li.textContent = 'No items';
+    list.appendChild(li);
+  } else {
+    items.slice(0,200).forEach(it => {
+      const li = document.createElement('li');
+      li.style.padding = '8px';
+      li.style.borderRadius = '8px';
+      li.style.fontWeight = '700';
+      li.style.display = 'flex';
+      li.style.justifyContent = 'space-between';
+      li.style.gap = '12px';
+      li.style.alignItems = 'center';
+      li.style.borderBottom = '1px solid rgba(0,0,0,0.04)';
+      const left = document.createElement('div');
+      left.style.overflow = 'hidden';
+      left.style.textOverflow = 'ellipsis';
+      left.style.whiteSpace = 'nowrap';
+      left.textContent = it.name || '(unnamed)';
+      const right = document.createElement('div');
+      right.style.opacity = '0.95';
+      right.textContent = (typeof it.qty !== 'undefined' ? `${it.qty}${it.unit ? ' ' + it.unit : ''}` : '');
+      li.appendChild(left);
+      li.appendChild(right);
+      list.appendChild(li);
+    });
+  }
+  container.appendChild(list);
+}
+async function initEquipmentKpi(){
+  try {
+    const el = document.getElementById('kpi-equipment');
+    if(!el) return; 
+    const card = el.closest('.kpi-card') ||
+      el.parentElement;
+    // ensure pop containers exist
+    ensureKpiPopContainers(card);
+    // fetch equipment items
+    // try to get items of type 'equipment' from server
+    // if server doesn't support type filter, fallback to name-based filter for 'tool' or 'equipment'
+    let items = [];
+    try {
+      const res = await fetch('/api/ingredients?limit=1000&page=1', { credentials: 'include' });
+      let json = null;
+      if(res.ok){
+        json = await res.json();
+        if(Array.isArray(json.items)){
+          // try to filter for type 'equipment' first
+          items = json.items.filter(i => (i.type && String(i.type).toLowerCase() === 'equipment'));
+        }
+      }
+    } catch(e){
+      console.error('Failed to fetch equipment items:', e);
+    }
+    renderKpiList(el, items);
+    try {
+      if(items.length === 0){
+        // fallback: filter by name containing 'tool' or 'equipment'
+        const res = await fetch('/api/ingredients?limit=1000&page=1', { credentials: 'include' });
+        let json = null;
+        if(res.ok){
+          json = await res.json();
+          if(Array.isArray(json.items)){
+            items = json.items.filter(i => {
+              const name = (i.name || '').toString().toLowerCase();
+              return name.includes('tool') || name.includes('equipment');
+            });
+          }
+        }
+      }
+    } catch(e){
+      console.error('Failed to fetch equipment items (fallback):', e);
+    }
+    // update KPI value
+    el.textContent = items.length;
+    // render list in pop containers
+    renderKpiList(card.querySelector('.kpi-popover'), items);
+    renderKpiList(card.querySelector('.kpi-popover-mobile'), items);
+  } catch(e){
+    console.error('initEquipmentKpi error:', e);
+  }
+}
+document.addEventListener('DOMContentLoaded', () => {
+  initEquipmentKpi();
+  // also re-run on SPA view changes if needed
+  window.addEventListener('load', initEquipmentKpi);
+  window.addEventListener('resize', initEquipmentKpi);
+});
+(function(){
+  // utility to fetch JSON with error handling
+  async function fetchJson(url){
+    const res = await fetch(url, { credentials: 'include' });
+    if(!res.ok) throw new Error(`Fetch error: ${res.status} ${res.statusText}`);
+    return await res.json();
+  }
+  // mapping of
+  // KPI element ID
+  // to async function that fetches data and
+  const KPI_MAP = {
+    'kpi-total-ing': async (el, card) => {
+  try {
+    // fetch total count + sample it
+    const [metaJson, sampleJson] = await Promise.all([
+      fetchJson('/api/ingredients?limit=1&page=1'),        // for meta.total
+      fetchJson('/api/ingredients?limit=10&page=1')       // sample list to show
+    ]);
+    const total = metaJson && metaJson.meta && Number(metaJson.meta.total) ? Number(metaJson.meta.total) : (Array.isArray(metaJson.items) ? metaJson.items.length : 0);
+    el.textContent = '';
+    el.textContent = total;
+
+    // create two pop containers if missing to hold the detailed list
+    ensurePopContainers(card);
+    const items = Array.isArray(sampleJson.items) ? sampleJson.items : [];
+
+    // render sample list (name + qty)
+    renderKpiList(card.querySelector('.kpi-popover'), items.map(i => ({ name: i.name, qty: i.qty, unit: i.unit })));
+    renderKpiList(card.querySelector('.kpi-popover-mobile'), items.map(i => ({ name: i.name, qty: i.qty, unit: i.unit })));
+
+    // add footer indicating total vs sample count in desktop popover
+    const desktopPop = card.querySelector('.kpi-popover');    
+    if(desktopPop){
+      const footer = document.createElement('div');
+      footer.style.marginTop = '8px';
+      footer.style.paddingTop = '8px';
+      footer.style.borderTop = '1px solid rgba(0,0,0,0.04)';
+      footer.style.fontWeight = '600';
+      footer.textContent = `Showing ${items.length} of ${total} items`;
+      desktopPop.appendChild(footer);
+    }
+    // add footer indicating total vs sample count in mobile popover
+    const mobilePop = card.querySelector('.kpi-popover-mobile');  
+    if(mobilePop){
+      const footer = document.createElement('div');
+      footer.style.marginTop = '8px';
+      footer.style.paddingTop = '8px';
+      footer.style.borderTop = '1px solid rgba(0,0,0,0.04)';
+      footer.style.fontWeight = '600';
+      footer.textContent = `Showing ${items.length} of ${total} items`;
+      // remove old footer if exists
+      const old = mobilePop.querySelector('.kpi-popover-footer');
+      if(old) old.remove();
+      mobilePop.appendChild(footer);
+    }
+  } catch(e){
+    el.textContent = '—';
+  }
+    },
+    'kpi-low': async (el, card) => {
+      try { 
+        const json = await fetchJson('/api/ingredients?filter=low&limit=20');
+        const items = json.items || [];
+        el.textContent = items.length;
+        ensurePopContainers(card);
+        renderKpiList(card.querySelector('.kpi-popover'), items.map(i => ({ name: i.name, qty: i.qty, unit: i.unit })));
+        renderKpiList(card.querySelector('.kpi-popover-mobile'), items.map(i => ({ name: i.name, qty: i.qty, unit: i.unit })));
+      } catch (e) {
+        el.textContent = '—';
+      }
+    },
+    'kpi-exp': async (el, card) => {
+      try {
+        const json = await fetchJson('/api/ingredients?filter=expiring&limit=20');
+        const items = json.items || [];
+        el.textContent = items.length;
+        ensurePopContainers(card);
+        renderKpiList(card.querySelector('.kpi-popover'), items.map(i => ({ name: i.name, qty: i.qty, unit: i.unit })));
+        renderKpiList(card.querySelector('.kpi-popover-mobile'), items.map(i => ({ name: i.name, qty: i.qty, unit: i.unit })));
+      } catch (e) {
+        el.textContent = '—';
+      }
+    },
+    'kpi-equipment': async (el, card) => {
+      try {
+        const json = await fetchJson('/api/ingredients?filter=equipment&limit=20');
+        const items = json.items || [];
+        el.textContent = items.length;
+        ensurePopContainers(card);
+        renderKpiList(card.querySelector('.kpi-popover'), items.map(i => ({ name: i.name, qty: i.qty, unit: i.unit })));
+        renderKpiList(card.querySelector('.kpi-popover-mobile'), items.map(i => ({ name: i.name, qty: i.qty, unit: i.unit })));
+      } catch (e) {
+        el.textContent = '—';
+      }
+    }
+  };
+  function ensurePopContainers(card){
+    if(!card.querySelector('.kpi-popover')){
+      const dp = document.createElement('div');
+      dp.className = 'kpi-popover';
+      dp.setAttribute('aria-hidden','true');
+      card.appendChild(dp);
+    }
+    if(!card.querySelector('.kpi-popover-mobile')){
+      const mp = document.createElement('div');
+      mp.className = 'kpi-popover-mobile';
+      card.insertAdjacentElement('afterend', mp);
+    }
+  }
+  // attach hover / tap interactions to all .kpi-card elements
+  function attachInteractions(){
+    const isTouch = ('ontouchstart' in window) || (navigator.msMaxTouchPoints || 0) > 0;
+    document.querySelectorAll('.kpi-card').forEach(card => {
+      // skip if already has listeners
+      if(card._kpiInteractionsAttached) return;
+      card._kpiInteractionsAttached = true;
+      if(!isTouch){
+        // non-touch: hover shows floating panel
+        card.addEventListener('mouseenter', () => {
+          card.classList.add('hover');
+          const dp = card.querySelector('.kpi-popover');
+          if(dp) dp.setAttribute('aria-hidden','false');
+        });
+        card.addEventListener('mouseleave', () => {
+          card.classList.remove('hover');
+          const dp = card.querySelector('.kpi-popover');
+          if(dp) dp.setAttribute('aria-hidden','true');
+        });
+        // also allow focus/blur for accessibility
+        card.addEventListener('focusin', () => {
+          card.classList.add('hover');
+          const dp = card.querySelector('.kpi-popover');
+          if(dp) dp.setAttribute('aria-hidden','false');
+        });
+        card.addEventListener('focusout', () => {
+          card.classList.remove('hover');
+          const dp = card.querySelector('.kpi-popover');
+          if(dp) dp.setAttribute('aria-hidden','true');
+        });
       } else {
-        // hide all mobile panels when moving to wide screen
-        document.querySelectorAll('.kpi-popover-mobile').forEach(m => m.style.display = 'none');
-        document.querySelectorAll('.kpi-card.expanded').forEach(c => c.classList.remove('expanded'));
+        // touch: tap toggles expanded mobile panel
+        card.addEventListener('click', (e) => {
+          if(e.target.closest('button') || e.target.tagName === 'BUTTON' || e.target.closest('a')) return;
+          const expanded = card.classList.toggle('expanded');
+          const mp = card.nextElementSibling;
+          if(mp && mp.classList && mp.classList.contains('kpi-popover-mobile')){
+            mp.style.display = expanded ? 'block' : 'none';
+          }
+        });
+        // hide mobile panel when tapping outside
+        document.addEventListener('click', (e) => {
+          if(e.target.closest && e.target.closest('.kpi-card')) return;
+          document.querySelectorAll('.kpi-card.expanded').forEach(c => {
+            c.classList.remove('expanded');
+            const mp = c.nextElementSibling;
+            if(mp && mp.classList && mp.classList.contains('kpi-popover-mobile')){
+              mp.style.display = 'none';
+            }
+          });
+        });
       }
     });
   }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initKpiPopovers);
-  } else {
-    initKpiPopovers();
+  // main init function
+  function initKpiLists(){
+    attachInteractions();
+    // for each KPI element, fetch data and render into popover containers
+    Object.keys(KPI_MAP).forEach(async kid => {
+      const el = document.getElementById(kid);
+      if(!el) return;
+      const card = el.closest('.kpi-card') ||
+        el.parentElement;
+      if(!card) return;
+      const fetcher = KPI_MAP[kid];
+      if(typeof fetcher === 'function'){
+        try {
+          await fetcher(el, card);
+        } catch(e){
+          console.error(`Error initializing KPI ${kid}:`, e);
+        }
+      }
+    });
   }
+  // init on ready
+  if(document.readyState ===
+  'loading'){
+    document.addEventListener('DOMContentLoaded', () => setTimeout(initKpiLists, 40));
+  } else {
+    setTimeout(initKpiLists, 40);
+  }
+  // expose globally (user can re-run on SPA view changes / re-renders)
+  window.initKpiLists = initKpiLists;
 })();
+/* ===== KPI detailed lists on hover /tap (desktop floating + mobile stacked with expand/collapse) ===== */
+(function(){
+  function createSpinnerEl() {
+    const s = document.createElement('span');
+    s.className = 'spinner';
+    s.style.width = '18px';
+    s.style.height = '18px';
+    s.style.borderWidth = '2px';
+    s.style.marginRight = '6px';
+    s.style.display = 'inline-block';
+    return s;
+  }
+  function renderList(container, items, emptyMessage) {
+    container.innerHTML = '';
+    emptyMessage = emptyMessage || 'No items';
+    const ul = document.createElement('ul');
+    ul.style.listStyle = 'none';
+    ul.style.margin = '0';
+    ul.style.padding = '6px 4px';
+    ul.style.maxHeight = '38vh';
+    ul.style.overflow = 'auto';
+    if (!items || items.length === 0) {
+      const li = document.createElement('li');
+      li.className = 'muted';
+      li.style.padding = '8px';
+      li.textContent = emptyMessage;
+      ul.appendChild(li);
+    } else {
+      items.slice(0, 200).forEach(it => {
+        const li = document.createElement('li');
+        li.style.padding = '8px';
+        li.style.borderRadius = '8px';
+        li.style.fontWeight = '700';
+        li.style.display = 'flex';
+        li.style.justifyContent = 'space-between';
+        li.style.gap = '12px';
+        li.style.alignItems = 'center';
+        li.style.borderBottom = '1px solid rgba(0,0,0,0.04)';
+        const left = document.createElement('div');
+        left.style.overflow = 'hidden';
+        left.style.textOverflow = 'ellipsis';
+        left.style.whiteSpace = 'nowrap';
+        left.textContent = it.name || '(unnamed)';
+        const right = document.createElement('div');
+        right.style.opacity = '0.95';
+        right.textContent = (typeof it.qty !== 'undefined' ? `${it.qty}${it.unit ? ' ' + it.unit : ''}` : '');
+        li.appendChild(left);
+        li.appendChild(right);
+        ul.appendChild(li);
+      });
+    }
+    container.appendChild(ul);
+  }
+  async function fetchIngredients() {
+    try {
+      const res = await fetch('/api/ingredients?limit=1000&page=1', { credentials: 'include' });
+      if (!res.ok) {
+        return { ok: false, status: res.status, body: null, error: `HTTP ${res.status} ${res.statusText}` };
+      }
+    } catch(e) {}
+  }
+})
