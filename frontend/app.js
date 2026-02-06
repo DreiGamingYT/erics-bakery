@@ -831,35 +831,84 @@ async function fetchAllIngredientsMap() {
     return { items: fallback, map };
   }
 }
-
 async function renderActivity(limit = 6) {
-  // Update the dashboard "Recent Activity" block (#recentActivity)
   const container = q('recentActivity');
   if(!container) return;
+
+  // If not signed in, show CTA to sign in (helps debug 401s)
+  const sess = getSession();
+  if(!sess || !sess.username){
+    container.innerHTML = `
+      <li class="muted" style="padding:12px">
+        Sign in to see recent activity.
+        <div style="margin-top:8px">
+          <button id="ctaSignInForActivity" class="btn small primary" type="button">Sign in</button>
+          <button id="ctaShowLocalActivity" class="btn small ghost" type="button" style="margin-left:8px">Show local demo</button>
+        </div>
+      </li>`;
+    q('ctaSignInForActivity')?.addEventListener('click', ()=> showOverlay(true, true));
+    q('ctaShowLocalActivity')?.addEventListener('click', ()=> {
+      // fallback to local DB.activity if present
+      const items = (DB && Array.isArray(DB.activity)) ? DB.activity.slice(0, limit) : [];
+      if(!items.length) {
+        container.innerHTML = '<li class="muted">No local activity available.</li>';
+        return;
+      }
+      container.innerHTML = items.map(a => {
+        const time = a.time ? new Date(a.time).toLocaleString() : '';
+        return `<li><div>${escapeHtml(a.text||a.ingredient_name||'')}</div><div class="muted small">${escapeHtml(time)}</div></li>`;
+      }).join('');
+    });
+    return;
+  }
+
   container.innerHTML = '<li class="muted">Loading…</li>';
   try {
     const resp = await apiFetch(`/api/activity?limit=${limit}`);
     const items = (resp && resp.items) ? resp.items : [];
-    if(items.length === 0) {
+    if(!items.length){
+      // fallback to local DB if empty
+      const fallback = (DB && Array.isArray(DB.activity)) ? DB.activity.slice(0, limit) : [];
+      if(fallback.length){
+        container.innerHTML = fallback.map(a => {
+          const time = a.time ? new Date(a.time).toLocaleString() : '';
+          return `<li><div>${escapeHtml(a.text||a.ingredient_name||'')}</div><div class="muted small">${escapeHtml(time)}</div></li>`;
+        }).join('');
+        return;
+      }
       container.innerHTML = '<li class="muted">No recent activity</li>';
       return;
     }
+
     container.innerHTML = items.slice(0, limit).map(a => {
       const time = a.time ? new Date(a.time).toLocaleString() : '';
-      // show ingredient name when available
-      const left = escapeHtml(a.text || a.ingredient_name || '');
+      const left = escapeHtml(a.text || a.ingredient_name || (a.username ? `${a.username}` : ''));
       return `<li><div>${left}</div><div class="muted small">${escapeHtml(time)}</div></li>`;
     }).join('');
-  } catch (e) {
-    console.error('renderActivity err', e);
+
+  } catch (err) {
+    console.error('renderActivity error:', err);
+    // if unauthenticated, surface friendly message and fallback
+    if(err && err.status === 401){
+      container.innerHTML = '<li class="muted">You must sign in to view activity. <button class="btn small primary" id="act-signin">Sign in</button></li>';
+      q('act-signin')?.addEventListener('click', ()=> showOverlay(true, true));
+      return;
+    }
+    // fallback to local DB.activity if available
+    const fallback = (DB && Array.isArray(DB.activity)) ? DB.activity.slice(0, limit) : [];
+    if(fallback.length){
+      container.innerHTML = fallback.map(a => {
+        const time = a.time ? new Date(a.time).toLocaleString() : '';
+        return `<li><div>${escapeHtml(a.text||a.ingredient_name||'')}</div><div class="muted small">${escapeHtml(time)}</div></li>`;
+      }).join('');
+      notify('Showing local demo activity (server failed).');
+      return;
+    }
+
     container.innerHTML = '<li class="muted">Failed to load activity</li>';
   }
 }
 
-/**
- * Aggregate stock movement per day using activity entries.
- * We consider activity texts that contain "Stock in", "Stock out", or "Used" and parse the numeric qty.
- */
 function _parseQtyFromText(text){
   if(!text) return 0;
   // Find first number (int or float)
@@ -1592,29 +1641,62 @@ async function apiFetch(path, opts = {}) {
   return json;
 }
 
-// --- Render recent inventory activity in the right column ---
 async function renderInventoryActivity(limit = 20) {
   const el = q('inventoryRecentActivity');
-  if (!el) return;
+  if(!el) return;
+
+  const sess = getSession();
+  if(!sess || !sess.username){
+    el.innerHTML = `
+      <li class="muted" style="padding:12px">
+        Sign in to view inventory activity.
+        <div style="margin-top:8px"><button id="signInForInvActivity" class="btn small primary">Sign in</button>
+        <button id="showLocalInvActivity" class="btn small ghost" style="margin-left:8px">Show local demo</button></div>
+      </li>`;
+    q('signInForInvActivity')?.addEventListener('click', ()=> showOverlay(true, true));
+    q('showLocalInvActivity')?.addEventListener('click', ()=> {
+      const items = (DB && Array.isArray(DB.activity)) ? DB.activity.slice(0, limit) : [];
+      if(!items.length) el.innerHTML = '<li class="muted">No local activity</li>';
+      else el.innerHTML = items.map(it => {
+        const time = it.time ? new Date(it.time).toLocaleString() : '';
+        return `<li tabindex="0" role="listitem"><div>${escapeHtml(it.text)}</div><div class="muted small">${escapeHtml(time)}</div></li>`;
+      }).join('');
+    });
+    return;
+  }
+
   el.innerHTML = '<li class="muted">Loading…</li>';
   try {
     const resp = await apiFetch(`/api/activity?limit=${limit}`);
     const items = (resp && resp.items) ? resp.items : [];
-    if (!items.length) {
-      el.innerHTML = '<li class="muted">No recent inventory activity</li>';
-      return;
-    }
+    if(!items.length){ el.innerHTML = '<li class="muted">No recent inventory activity</li>'; return; }
     el.innerHTML = items.slice(0, limit).map(it => {
       const time = it.time ? new Date(it.time).toLocaleString() : '';
       return `<li tabindex="0" role="listitem"><div>${escapeHtml(it.text)}</div><div class="muted small">${escapeHtml(time)}</div></li>`;
     }).join('');
   } catch (err) {
-    console.error('renderInventoryActivity err', err);
+    console.error('renderInventoryActivity err:', err);
+    // 401 -> prompt sign-in
+    if(err && err.status === 401){
+      el.innerHTML = '<li class="muted">You must sign in to view activity. <button class="btn small primary" id="invact-signin">Sign in</button></li>';
+      q('invact-signin')?.addEventListener('click', ()=> showOverlay(true, true));
+      return;
+    }
+    // fallback to local
+    const fallback = (DB && Array.isArray(DB.activity)) ? DB.activity.slice(0, limit) : [];
+    if(fallback.length){
+      el.innerHTML = fallback.map(it => {
+        const time = it.time ? new Date(it.time).toLocaleString() : '';
+        return `<li tabindex="0" role="listitem"><div>${escapeHtml(it.text)}</div><div class="muted small">${escapeHtml(time)}</div></li>`;
+      }).join('');
+      notify('Showing local demo activity (server failed).');
+      return;
+    }
     el.innerHTML = '<li class="muted">Failed to load activity</li>';
   }
 }
 
-/* function renderReports(rangeStart, rangeEnd, reportFilter) {
+function renderReports(rangeStart, rangeEnd, reportFilter) {
   const startInput = rangeStart || q('reportStart')?.value || null;
   const endInput = rangeEnd || q('reportEnd')?.value || null;
   const end = endInput ? new Date(endInput) : new Date();
@@ -1723,165 +1805,6 @@ async function renderInventoryActivity(limit = 20) {
   }
 
   try { chartIngredientUsage && chartIngredientUsage.resize && chartIngredientUsage.resize(); } catch(e){}
-} */
-
-async function renderReportsInventory(){
-  // populate dates with sensible defaults
-  const start = q('invStart'); const end = q('invEnd');
-  if(start && !start.value) { const d = new Date(); d.setDate(d.getDate()-30); start.value = d.toISOString().slice(0,10); }
-  if(end && !end.value) { end.value = new Date().toISOString().slice(0,10); }
-
-  // load ingredients table and select
-  await loadInventoryTable();
-
-  // bind apply/export controls
-  q('invApplyRange').onclick = async () => {
-    await loadInventoryTable();
-    // if an ingredient selected, redraw chart
-    const sel = q('invSelectIngredient').value;
-    if(sel) await drawStockTimeseriesForIngredient(sel);
-  };
-
-  q('invExportCsv').onclick = () => {
-    // call server endpoint with same params as table
-    const from = q('invStart').value || '';
-    const to = q('invEnd').value || '';
-    // server supports search/filter via query. We'll call the CSV export endpoint (it accepts filter/type/search).
-    // We attach dates as extra params (server will ignore unknown query params, but if you add date filtering server-side, expand).
-    const url = `/api/ingredients/export/csv?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
-    window.location = url;
-  };
-
-  q('invSelectIngredient').onchange = async () => {
-    const ingId = q('invSelectIngredient').value;
-    if(ingId) await drawStockTimeseriesForIngredient(ingId);
-  };
-}
-
-async function loadInventoryTable(){
-  try {
-    const res = await apiFetch('/api/ingredients?limit=1000&page=1');
-    if(!res || !res.items) return;
-    const tbody = document.querySelector('#inventoryReportTable tbody');
-    tbody.innerHTML = '';
-    const sel = q('invSelectIngredient');
-    sel.innerHTML = '<option value="">-- Select ingredient to plot --</option>';
-    res.items.forEach(r=>{
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td style="padding:6px 8px">${escapeHtml(r.name||'')}</td><td>${escapeHtml(r.type||'')}</td><td>${escapeHtml(r.supplier||'')}</td><td style="font-weight:800;text-align:right">${Number(r.qty||0)}</td><td>${escapeHtml(r.unit||'')}</td><td style="text-align:right">${Number(r.min_qty||0)}</td><td>${r.expiry?escapeHtml((new Date(r.expiry)).toISOString().slice(0,10)):'-'}</td>`;
-      tbody.appendChild(tr);
-
-      // add option for select with id
-      const opt = document.createElement('option');
-      opt.value = String(r.id);
-      opt.textContent = `${r.name} — ${r.qty} ${r.unit || ''}`;
-      sel.appendChild(opt);
-    });
-  } catch (err) {
-    console.warn('loadInventoryTable err', err);
-  }
-}
-
-let inventoryStockChart = null;
-async function drawStockTimeseriesForIngredient(ingId){
-  try {
-    // load activity for ingredient
-    const actRes = await apiFetch(`/api/activity?limit=2000`);
-    const rows = actRes && actRes.items ? actRes.items : [];
-    // filter events for this ingredient id
-    const events = rows.filter(r => Number(r.ingredient_id) === Number(ingId));
-
-    // build daily time series between date range (invStart/invEnd)
-    const start = q('invStart').value ? new Date(q('invStart').value) : new Date(new Date().setDate(new Date().getDate()-30));
-    const end = q('invEnd').value ? new Date(q('invEnd').value) : new Date();
-    // normalize times to days
-    const days = [];
-    const dayMap = {};
-    for (let d = new Date(start); d <= end; d.setDate(d.getDate()+1)) {
-      const iso = d.toISOString().slice(0,10);
-      days.push(iso);
-      dayMap[iso] = 0;
-    }
-
-    // We will try to infer net stock changes by parsing text in activity (this is best effort).
-    // Looks like activity.text is stored as: "Stock in 2 kg — flour" or "Stock out 1 kg — sugar"
-    events.forEach(e=>{
-      const t = (e.text||'').toLowerCase();
-      const qdate = new Date(e.time).toISOString().slice(0,10);
-      if(!(qdate in dayMap)) return;
-      let qty = 0;
-      // try to extract a number from text
-      const m = t.match(/([\d\.]+)\s*(kg|pcs|g|l|ml)?/);
-      if(m) qty = Number(m[1] || 0);
-      if(t.includes('stock in')) dayMap[qdate] += qty;
-      else if(t.includes('stock out')) dayMap[qdate] -= qty;
-      else if(t.includes('initial stock')) dayMap[qdate] += qty;
-    });
-
-    // compute cumulative series
-    const cum = [];
-    let running = 0;
-    days.forEach(d=>{
-      running += Number(dayMap[d] || 0);
-      cum.push(running);
-    });
-
-    const ctx = document.getElementById('inventoryStockChart').getContext('2d');
-    if(inventoryStockChart) inventoryStockChart.destroy();
-    inventoryStockChart = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: days,
-        datasets: [{
-          label: 'Stock net change (cumulative)',
-          data: cum,
-          fill: true,
-          tension: 0.2,
-        }]
-      },
-      options: {
-        plugins: { legend: { display: true } },
-        scales: { x: { display:true }, y: { display:true } },
-        maintainAspectRatio: false
-      }
-    });
-  } catch(err){
-    console.warn('drawStockTimeseriesForIngredient err', err);
-  }
-}
-
-
-// ---------- Activity (functional) ----------
-async function renderActivityView(limit=50){
-  try {
-    const filter = document.getElementById('activityFilter') ? document.getElementById('activityFilter').value : 'all';
-    const res = await apiFetch(`/api/activity?limit=${limit}`);
-    const list = document.getElementById('activityList');
-    if(!res || !res.items) { list.innerHTML = '<li>No activity</li>'; return; }
-    const rows = res.items.filter(r => {
-      if(filter === 'all') return true;
-      if(filter === 'stock') return (r.action || '').includes('stock');
-      if(filter === 'production') return (r.action || '').includes('production');
-      return true;
-    });
-    list.innerHTML = '';
-    rows.forEach(r=>{
-      const li = document.createElement('li');
-      li.className = 'small-card';
-      li.style.marginBottom = '8px';
-      const time = new Date(r.time).toLocaleString();
-      li.innerHTML = `<div style="display:flex;justify-content:space-between;gap:8px;align-items:start">
-        <div><strong>${escapeHtml(r.ingredient_name || r.text || 'Activity')}</strong><div class="muted small">${escapeHtml(r.text||'')}</div></div>
-        <div style="text-align:right"><div class="muted small">${escapeHtml(r.username||'system')}</div><div class="muted small">${escapeHtml(time)}</div></div>
-      </div>`;
-      li.onclick = ()=> {
-        showModal(`<h3>Activity</h3><p>${escapeHtml(r.text||'')}</p><p class="muted small">By: ${escapeHtml(r.username||'system')} — ${escapeHtml(time)}</p>`);
-      };
-      list.appendChild(li);
-    });
-  } catch(err){
-    console.warn('renderActivityView err', err);
-  }
 }
 
 function printReports(rangeStartISO, rangeEndISO, filter){
@@ -2343,97 +2266,137 @@ function printInventoryTable(){
 let currentCalendarYear = (new Date()).getFullYear();
 let currentCalendarMonth = (new Date()).getMonth();
 
-function renderMonthCalendar(year, month){
-  const grid = q('calendarGrid');
-  if(!grid) return;
+async function renderCalendarForMonth(year, month) {
+  // year, month (0-indexed) -> build month grid and query events per day
+  const grid = document.getElementById('calendarGrid');
+  if (!grid) return;
   grid.innerHTML = '';
-  const firstDay = new Date(year, month, 1);
-  const startDayIndex = firstDay.getDay();
-  const daysInMonth = new Date(year, month+1, 0).getDate();
-  for(let i=0;i<startDayIndex;i++){
+  // first day of month
+  const first = new Date(year, month, 1);
+  const last = new Date(year, month + 1, 0);
+  const daysInMonth = last.getDate();
+  const startWeekday = first.getDay(); // 0..6
+
+  // build placeholder cells until we fetch per-date events
+  const totalCells = Math.ceil((startWeekday + daysInMonth) / 7) * 7;
+  const cells = [];
+  for (let i = 0; i < totalCells; i++) {
+    const dayIndex = i - startWeekday + 1;
     const cell = document.createElement('div');
     cell.className = 'calendar-cell';
-    grid.appendChild(cell);
-  }
-  for(let d=1; d<=daysInMonth; d++){
-    const cell = document.createElement('div');
-    cell.className = 'calendar-cell';
-    const dateNum = document.createElement('div');
-    dateNum.className = 'date-num';
-    dateNum.textContent = d;
-    cell.appendChild(dateNum);
-    const iso = new Date(year, month, d).toISOString().slice(0,10);
-    const events = sampleOrders.filter(o => o.date.slice(0,10) === iso);
-    events.slice(0,3).forEach(ev => {
-      const chip = document.createElement('div');
-      chip.className = 'event-chip';
-      chip.textContent = `${ev.customer} • Order #${ev.id}`;
-      cell.appendChild(chip);
-    });
-    if(events.length > 3){
-      const more = document.createElement('div');
-      more.className = 'muted small';
-      more.textContent = `+${events.length - 3} more`;
-      cell.appendChild(more);
+    if (dayIndex >= 1 && dayIndex <= daysInMonth) {
+      const date = new Date(year, month, dayIndex);
+      const iso = date.toISOString().slice(0,10);
+      cell.dataset.date = iso;
+      const dateNum = document.createElement('div');
+      dateNum.className = 'date-num';
+      dateNum.textContent = dayIndex;
+      cell.appendChild(dateNum);
+
+      const eventListWrap = document.createElement('div');
+      eventListWrap.className = 'calendar-events';
+      eventListWrap.style.display = 'flex';
+      eventListWrap.style.flexDirection = 'column';
+      eventListWrap.style.gap = '6px';
+      eventListWrap.style.marginTop = '6px';
+      cell.appendChild(eventListWrap);
+    } else {
+      cell.style.visibility = 'hidden';
     }
     grid.appendChild(cell);
+    cells.push(cell);
   }
+
+  // fetch events by day. (the API already has /api/events?date=YYYY-MM-DD)
+  // We'll fetch events for days that are inside this month.
+  const dayCells = Array.from(grid.querySelectorAll('.calendar-cell[data-date]'));
+  await Promise.all(dayCells.map(async (cell) => {
+    const d = cell.dataset.date;
+    try {
+      const res = await (typeof apiFetch === 'function'
+        ? apiFetch(`/api/events?date=${d}`)
+        : fetch(`/api/events?date=${d}`, { credentials: 'include' }).then(r => r.json()));
+      const items = (res && res.items) ? res.items : [];
+      const listWrap = cell.querySelector('.calendar-events');
+      // show up to 3 event chips
+      items.slice(0, 4).forEach(ev => {
+        // derive type from text
+        const type = (/stock in/i.test(ev.text) ? 'Stock in'
+          : (/stock out/i.test(ev.text) ? 'Stock out'
+            : (/initial stock|add|created/i.test(ev.text) ? 'Add' : 'Other')));
+        const chip = document.createElement('div');
+        chip.className = 'event-chip';
+        chip.style.cursor = 'pointer';
+        chip.textContent = `${type} ${ev.ingredient_name ? '— ' + ev.ingredient_name : ''}`;
+        chip.title = ev.text;
+        chip.addEventListener('click', (e) => {
+          e.stopPropagation();
+          // augment ev with username if available (some endpoints /api/activity contain username)
+          openEventModal(ev);
+        });
+        listWrap.appendChild(chip);
+      });
+
+      if (items.length > 4 && listWrap) {
+        const more = document.createElement('div');
+        more.className = 'muted small';
+        more.textContent = `+${items.length - 4} more`;
+        listWrap.appendChild(more);
+      }
+    } catch (err) {
+      console.warn('calendar fetch day err', d, err);
+    }
+  }));
 }
 
-async function renderCalendar(dateISO){
-  // dateISO = 'YYYY-MM-DD' for the current calendar cell or month
-  try {
-    // build grid for current month (or render single date if passed)
-    const grid = document.getElementById('calendarGrid');
-    if(!dateISO){
-      // default: current date
-      dateISO = new Date().toISOString().slice(0,10);
-    }
-    // If you want a full month calendar: you can compute month start/end and query each date.
-    // Simpler approach: render next 30 days
-    const start = new Date(dateISO);
-    start.setDate(1);
-    const year = start.getFullYear(), month = start.getMonth();
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month+1, 0);
-    grid.innerHTML = '';
+(function wireCalendarButtons(){
+  const prev = document.getElementById('calendarPrev');
+  const next = document.getElementById('calendarNext');
+  const today = document.getElementById('calendarToday');
 
-    for(let d = new Date(firstDay); d <= lastDay; d.setDate(d.getDate()+1)){
-      const iso = d.toISOString().slice(0,10);
-      const cell = document.createElement('div');
-      cell.className = 'calendar-cell';
-      cell.innerHTML = `<div class="date-num">${d.getDate()}</div><div class="events" data-date="${iso}"></div>`;
-      grid.appendChild(cell);
-
-      // fetch events for each date (server /api/events?date=YYYY-MM-DD)
-      (async (isoLocal, eventsWrap)=>{
-        try {
-          const ev = await apiFetch(`/api/events?date=${isoLocal}`);
-          if(ev && Array.isArray(ev.items)){
-            ev.items.slice(0,6).forEach(e=>{
-              const chip = document.createElement('div');
-              const text = escapeHtml(e.text || e.ingredient_name || '');
-              const who = escapeHtml(e.username || 'system');
-              // attempt to classify stock in/out/add from text
-              const lower = (e.text||'').toLowerCase();
-              let label = 'Event';
-              if(lower.includes('stock in')) label = 'Stock in';
-              else if(lower.includes('stock out')) label = 'Stock out';
-              else if(lower.includes('initial stock') || lower.includes('added')) label = 'Added';
-              chip.className = 'event-chip';
-              chip.title = `${label} — ${who}`;
-              chip.textContent = `${label} — ${text} (${who})`;
-              eventsWrap.appendChild(chip);
-            });
-          }
-        } catch(err){
-          // ignore per-cell errors
-        }
-      })(iso, cell.querySelector('.events'));
-    }
-  } catch(err){
-    console.warn('renderCalendar err', err);
+  let focusDate = new Date();
+  async function refresh() {
+    await renderCalendarForMonth(focusDate.getFullYear(), focusDate.getMonth());
   }
+  if (prev) prev.addEventListener('click', () => { focusDate.setMonth(focusDate.getMonth() - 1); refresh(); });
+  if (next) next.addEventListener('click', () => { focusDate.setMonth(focusDate.getMonth() + 1); refresh(); });
+  if (today) today.addEventListener('click', () => { focusDate = new Date(); refresh(); });
+  // initial render
+  setTimeout(refresh, 250);
+})();
+
+function buildCsvWithBom(rows, headerRow) {
+  // rows = array of arrays, headerRow = array
+  const lines = [];
+  if (headerRow) lines.push(headerRow.map(h => `"${String(h).replace(/"/g,'""')}"`).join('\t'));
+  rows.forEach(r => {
+    lines.push(r.map(c => `"${String(c==null?'':c).replace(/"/g,'""')}"`).join('\t'));
+  });
+  // Use tab-separated to reduce Excel weirdness; BOM helps encoding
+  return '\uFEFF' + lines.join('\r\n');
+}
+
+function setCurrentUser(user) {
+  window.currentUser = user || null;
+  // update topbar display if you use #userBadgeText or similar
+  const userBadgeText = document.getElementById('userBadgeText');
+  if (userBadgeText) userBadgeText.textContent = user ? (user.name || user.username) : '';
+}
+
+/* Expose main functions for manual calls from console or boot code */
+window.renderActivity = renderActivity;
+window.openEventModal = openEventModal;
+window.setCurrentUser = setCurrentUser;
+window.buildCsvWithBom = buildCsvWithBom;
+
+
+
+function renderCalendar(){
+  const header = q('view-calendar')?.querySelector('.page-header h2');
+  if(header && q('calendarGrid')){
+    header.textContent = `Calendar — ${new Date(currentCalendarYear, currentCalendarMonth,1).toLocaleString([], {month:'long', year:'numeric'})}`;
+  }
+  renderCalendarForMonth(currentCalendarYear, currentCalendarMonth);
 }
 
 function destroyAllCharts(){
@@ -3336,153 +3299,6 @@ async function populateProfile(){
   if(q('newPassword')) q('newPassword').value = '';
   if(q('confirmPassword')) q('confirmPassword').value = '';
 }
-
-async function populateProfile(){
-  try {
-    const res = await apiFetch('/api/auth/me');
-    if(!res || !res.user) return;
-    const u = res.user;
-    if(q('profileName')) q('profileName').value = u.name || '';
-    if(q('profileRole')) q('profileRole').value = u.role || '';
-    if(q('profileUsername')) q('profileUsername').value = u.username || '';
-    if(q('profileEmail')) q('profileEmail').value = u.email || '';
-    if(q('profilePhone')) q('profilePhone').value = u.phone || '';
-    // show username in topbar
-    if(q('userBadgeText')) q('userBadgeText').textContent = `${u.name || u.username}`;
-  } catch(err){
-    console.warn('populateProfile err', err);
-  }
-}
-
-async function saveProfile(){
-  const name = q('profileName').value;
-  const email = q('profileEmail').value;
-  const phone = q('profilePhone').value;
-  const payload = { name, email, phone };
-  try {
-    const res = await apiFetch('/api/users/me', { method:'PUT', body: JSON.stringify(payload), headers:{'Content-Type':'application/json'} });
-    if(res && res.user){
-      notify('Profile saved');
-      await populateProfile();
-    } else {
-      notify('Profile save failed');
-    }
-  } catch(err){
-    console.warn('saveProfile err', err);
-    notify('Profile save error');
-  }
-}
-
-function bindSettingsControls(){
-  // theme toggle
-  const themeToggle = document.getElementById('themeToggle');
-  if(themeToggle){
-    // on load, read
-    const saved = localStorage.getItem('theme') || (document.body.classList.contains('theme-dark') ? 'dark' : 'light');
-    themeToggle.checked = saved === 'dark';
-    themeToggle.onchange = () => {
-      if(themeToggle.checked) { document.body.classList.add('theme-dark'); localStorage.setItem('theme','dark'); }
-      else { document.body.classList.remove('theme-dark'); localStorage.setItem('theme','light'); }
-    };
-    // ensure body reflects choice on load
-    if(saved === 'dark') document.body.classList.add('theme-dark');
-  }
-
-  // cursor choices (simple: default or custom pointer)
-  // we'll provide a select that you can add to settings UI; if not present, create one in runtime
-  if(!document.getElementById('cursorSelect')){
-    const wrap = document.createElement('div');
-    wrap.style.marginTop = '8px';
-    wrap.innerHTML = `<label class="field"><span class="field-label">Cursor style</span>
-      <select id="cursorSelect"><option value="default">Default</option><option value="crosshair">Crosshair</option><option value="pointer">Pointer</option></select></label>`;
-    const settingsAside = document.querySelector('#view-settings aside');
-    if(settingsAside) settingsAside.prepend(wrap);
-  }
-  const cursorSelect = document.getElementById('cursorSelect');
-  if(cursorSelect){
-    const savedCursor = localStorage.getItem('cursorStyle') || 'default';
-    cursorSelect.value = savedCursor;
-    applyCursorStyle(savedCursor);
-    cursorSelect.onchange = () => {
-      const v = cursorSelect.value;
-      localStorage.setItem('cursorStyle', v);
-      applyCursorStyle(v);
-    };
-  }
-
-  // notification toggles (radio style)
-  // create UI if not present
-  if(!document.getElementById('notifRadioWrap')){
-    const wrap = document.createElement('div');
-    wrap.style.marginTop = '12px';
-    wrap.innerHTML = `<div><strong>Notifications</strong></div>
-      <div id="notifRadioWrap" class="radio-group" style="margin-top:8px">
-        <label class="radio-btn" data-val="off"><input type="radio" name="notif" value="off"> Off</label>
-        <label class="radio-btn" data-val="inapp"><input type="radio" name="notif" value="inapp"> In-app</label>
-        <label class="radio-btn" data-val="email"><input type="radio" name="notif" value="email"> Email + in-app</label>
-      </div>
-      <div id="notifNote" class="muted small" style="margin-top:8px">Toggle notifications (browser permission required for in-app).</div>`;
-    const settingsAside = document.querySelector('#view-settings aside');
-    if(settingsAside) settingsAside.appendChild(wrap);
-  }
-
-  // wire up radio buttons
-  const radioWrap = document.getElementById('notifRadioWrap');
-  if(radioWrap){
-    const saved = localStorage.getItem('notifMode') || 'off';
-    radioWrap.querySelectorAll('.radio-btn').forEach(lbl=>{
-      lbl.classList.toggle('active', lbl.dataset.val === saved);
-      lbl.onclick = async () => {
-        // set UI state
-        radioWrap.querySelectorAll('.radio-btn').forEach(l=>l.classList.remove('active'));
-        lbl.classList.add('active');
-        localStorage.setItem('notifMode', lbl.dataset.val);
-        if(lbl.dataset.val === 'inapp' || lbl.dataset.val === 'email'){
-          // ask permission for Notifications
-          if('Notification' in window && Notification.permission !== 'granted'){
-            try {
-              await Notification.requestPermission();
-            } catch(e){}
-          }
-        }
-        notify('Notification mode updated');
-      };
-    });
-  }
-}
-
-function applyCursorStyle(name){
-  if(name === 'default') {
-    document.body.style.cursor = 'auto';
-  } else {
-    document.body.style.cursor = name;
-  }
-}
-
-// ---------- small helpers ----------
-function showModal(html){
-  const modal = q('modal');
-  const container = q('modalContent');
-  container.innerHTML = html;
-  modal.classList.remove('hidden');
-  modal.setAttribute('aria-hidden', 'false');
-}
-q('modalClose').onclick = ()=> { q('modal').classList.add('hidden'); q('modal').setAttribute('aria-hidden','true'); q('modalContent').innerHTML=''; };
-
-// ---------- initialization - call these where your app init runs ----------
-(async function initExtraUI(){
-  try {
-    await initKpiPopovers();                      // KPI popovers (desktop + mobile)
-    await renderReportsInventory();               // Reports inventory controls and table
-    await renderActivityView();                   // Activity list
-    await renderCalendar();                       // Calendar events
-    await populateProfile();                      // Profile populate
-    bindSettingsControls();                       // settings wiring
-    // re-run KPI popovers on auth change or inventory updates
-  } catch(e){
-    console.warn('initExtraUI err', e);
-  }
-})();
 
 function renderRecentLogins(){
   // store recent login list in localStorage.recent_logins as [{username, time}]
@@ -5252,3 +5068,712 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   
 })
+
+(function(){
+  // safe apiFetch wrapper: use app's apiFetch if exists, otherwise fallback to fetch with credentials
+  async function apiFetchSafe(url, opts = {}) {
+    if (typeof window.apiFetch === 'function') {
+      return window.apiFetch(url, opts);
+    }
+    const res = await fetch(url, Object.assign({ credentials: 'include', headers: { 'Content-Type': 'application/json' } }, opts));
+    if (!res.ok) {
+      const txt = await res.text().catch(()=>'');
+      throw new Error(`HTTP ${res.status}: ${txt}`);
+    }
+    try { return await res.json(); } catch (e) { return null; }
+  }
+
+  // DOM references used by this module (these IDs exist in your index.html)
+  const listWrap = document.getElementById('inventoryReportList');
+  const searchInput = document.getElementById('reportItemSearch');
+  const exportInventoryBtn = document.getElementById('exportInventoryCSV');
+  const exportStockBtn = document.getElementById('exportStockCSV');
+  const selectedNameEl = document.getElementById('selectedIngredientName');
+  const stockCanvas = document.getElementById('inventoryStockChart');
+
+  let ingredientsCache = [];
+  let activityCache = [];
+  let selectedIngredient = null;
+  let inventoryChart = null;
+
+  // Utility: parse numeric qty from activity row
+  function extractQtyFromActivityRow(r){
+    // Prefer numeric fields if present
+    if (r == null) return 0;
+    if (typeof r.qty === 'number' && !Number.isNaN(r.qty)) return Number(r.qty);
+    if (typeof r.delta === 'number' && !Number.isNaN(r.delta)) return Number(Math.abs(r.delta));
+    // otherwise search first numeric token in text
+    const txt = String(r.text || '');
+    const m = txt.match(/-?[\d,.]+(?:\.\d+)?/);
+    if (!m) return 0;
+    return Number(m[0].replace(/,/g,''));
+  }
+
+  function detectDeltaSign(r){
+    // return +1 for stock_in, -1 for stock_out, 0 unknown
+    if (!r) return 0;
+    const action = (r.action || '').toString().toLowerCase();
+    const txt = (r.text || '').toString().toLowerCase();
+    if (action.includes('in') || /stock in/i.test(txt) || /stock_in/i.test(action) || /stock in/i.test(action)) return +1;
+    if (action.includes('out') || /stock out/i.test(txt) || /stock_out/i.test(action) || /stock out/i.test(action)) return -1;
+    // unknown: try keywords
+    if (txt.includes('in')) return +1;
+    if (txt.includes('out')) return -1;
+    return 0;
+  }
+
+  // Build delta (signed) from activity row
+  function getSignedDelta(r){
+    const q = extractQtyFromActivityRow(r);
+    const sign = detectDeltaSign(r);
+    if (sign === 0) return 0; // ambiguous -> ignore
+    return sign * q;
+  }
+
+  // Load ingredients (large limit for convenience)
+  async function loadIngredients(){
+    try {
+      const data = await apiFetchSafe('/api/ingredients?limit=2000&page=1');
+      ingredientsCache = (data && data.items) ? data.items : [];
+    } catch (e) {
+      console.error('[reports] loadIngredients err', e);
+      ingredientsCache = [];
+    }
+  }
+
+  // Load activity (large limit; adjust if needed)
+  async function loadActivity(){
+    try {
+      const data = await apiFetchSafe('/api/activity?limit=2000&page=1');
+      activityCache = (data && data.items) ? data.items : [];
+    } catch (e) {
+      console.error('[reports] loadActivity err', e);
+      activityCache = [];
+    }
+  }
+
+  // Render ingredient list
+  function renderList(filter = ''){
+    if (!listWrap) return;
+    const q = (filter || '').toString().trim().toLowerCase();
+    const items = ingredientsCache.filter(it => {
+      if (!q) return true;
+      return (it.name || '').toString().toLowerCase().includes(q) ||
+             (it.supplier || '').toString().toLowerCase().includes(q) ||
+             (String(it.id || '')).includes(q);
+    });
+    if (items.length === 0) {
+      listWrap.innerHTML = '<div class="muted small" style="padding:12px">No ingredients found.</div>';
+      return;
+    }
+    const cont = document.createElement('div');
+    cont.style.display = 'grid';
+    cont.style.gap = '8px';
+    items.forEach(it => {
+      const row = document.createElement('div');
+      row.className = 'small-card';
+      row.style.display = 'flex';
+      row.style.justifyContent = 'space-between';
+      row.style.alignItems = 'center';
+      row.style.padding = '8px';
+      const left = document.createElement('div');
+      left.style.display = 'flex';
+      left.style.flexDirection = 'column';
+      left.style.gap = '4px';
+      const title = document.createElement('div');
+      title.style.fontWeight = '800';
+      title.textContent = `${it.name}${it.unit ? ' · ' + it.unit : ''}`;
+      const meta = document.createElement('div');
+      meta.className = 'muted small';
+      meta.textContent = `Qty: ${it.qty} · Min: ${it.min_qty || 0} · Supplier: ${it.supplier || '—'}`;
+      left.appendChild(title);
+      left.appendChild(meta);
+
+      const actions = document.createElement('div');
+      actions.style.display = 'flex';
+      actions.style.gap = '8px';
+      const viewBtn = document.createElement('button');
+      viewBtn.className = 'btn small';
+      viewBtn.type = 'button';
+      viewBtn.textContent = 'View stock';
+      viewBtn.addEventListener('click', () => selectIngredient(it));
+      const csvBtn = document.createElement('button');
+      csvBtn.className = 'btn ghost small';
+      csvBtn.type = 'button';
+      csvBtn.textContent = 'Export';
+      csvBtn.addEventListener('click', () => exportStockCSVForIngredient(it.id, it.name));
+      actions.appendChild(viewBtn);
+      actions.appendChild(csvBtn);
+
+      row.appendChild(left);
+      row.appendChild(actions);
+      cont.appendChild(row);
+    });
+    listWrap.innerHTML = '';
+    listWrap.appendChild(cont);
+  }
+
+  // Parse report date inputs or fallback to preset
+  function parseDateInputs(){
+    const startVal = document.getElementById('reportStart')?.value;
+    const endVal = document.getElementById('reportEnd')?.value;
+    if (!startVal || !endVal) {
+      const preset = Number(document.getElementById('reportPreset')?.value || 30);
+      const endDate = new Date();
+      const startDate = new Date(Date.now() - preset * 24*60*60*1000);
+      return { start: startDate.toISOString().slice(0,10), end: endDate.toISOString().slice(0,10) };
+    }
+    return { start: startVal, end: endVal };
+  }
+
+  // Filter activityCache for ingredient with optional bounds
+  function filterActivitiesForIngredientUpTo(id, endIso){
+    if (!activityCache || !Array.isArray(activityCache)) return [];
+    const endT = endIso ? new Date(endIso + 'T23:59:59') : null;
+    return activityCache.filter(a => {
+      if (!a) return false;
+      if (Number(a.ingredient_id) !== Number(id)) return false;
+      if (a.time && endT && new Date(a.time) > endT) return false;
+      return true;
+    }).sort((a,b) => new Date(a.time) - new Date(b.time));
+  }
+
+  function filterActivitiesForIngredientInRange(id, startIso, endIso){
+    if (!activityCache || !Array.isArray(activityCache)) return [];
+    const s = startIso ? new Date(startIso + 'T00:00:00') : null;
+    const e = endIso ? new Date(endIso + 'T23:59:59') : null;
+    return activityCache.filter(a => {
+      if (!a) return false;
+      if (Number(a.ingredient_id) !== Number(id)) return false;
+      if (a.time) {
+        const t = new Date(a.time);
+        if (s && t < s) return false;
+        if (e && t > e) return false;
+      }
+      return true;
+    }).sort((a,b) => new Date(a.time) - new Date(b.time));
+  }
+
+  // Build absolute quantity series from activities up to end date using current qty as anchor
+  function buildAbsoluteSeries(ingredient, activitiesUpToEnd, rangeStartIso, rangeEndIso){
+    // activitiesUpToEnd MUST be sorted ascending and contain events from earliest -> end
+    // compute signed deltas for each row
+    const deltas = activitiesUpToEnd.map(r => ({ row: r, delta: getSignedDelta(r) }));
+
+    // total delta up to end
+    const totalDelta = deltas.reduce((acc, x) => acc + (Number(x.delta) || 0), 0);
+
+    // current qty from ingredient row (uses server's current qty)
+    const currentQty = Number(ingredient.qty || 0);
+
+    // derive initial quantity at earliest event: initial + totalDelta = currentQty -> initial = currentQty - totalDelta
+    const initialQty = currentQty - totalDelta;
+
+    // now walk forward accumulating
+    const points = []; // {time, qty}
+    let running = initialQty;
+    // include a baseline point just before first activity (if there are activities)
+    if (deltas.length > 0) {
+      const firstTime = new Date(deltas[0].row.time);
+      // baseline at firstTime - 1ms
+      points.push({ time: new Date(firstTime.getTime() - 1), qty: running });
+    } else {
+      // no activities: show current point only
+      points.push({ time: new Date(), qty: currentQty });
+    }
+
+    deltas.forEach(d => {
+      running += Number(d.delta || 0);
+      const t = d.row.time ? new Date(d.row.time) : new Date();
+      points.push({ time: t, qty: running });
+    });
+
+    // optionally include final point at end date (if beyond last event) to show straight line to end
+    const { start: sIso, end: eIso } = parseDateInputs();
+    const eDate = eIso ? new Date(eIso + 'T23:59:59') : null;
+    if (eDate && points.length > 0) {
+      const last = points[points.length - 1];
+      if (last.time < eDate) {
+        points.push({ time: eDate, qty: points[points.length - 1].qty });
+      }
+    }
+
+    // filter to rangeStart..rangeEnd for display
+    const start = rangeStartIso ? new Date(rangeStartIso + 'T00:00:00') : null;
+    const end = rangeEndIso ? new Date(rangeEndIso + 'T23:59:59') : null;
+    const filtered = points.filter(p => {
+      if (start && p.time < start) return false;
+      if (end && p.time > end) return false;
+      return true;
+    });
+
+    // map labels/values: labels are readable times
+    const labels = filtered.map(p => p.time.toLocaleString());
+    const values = filtered.map(p => Number(p.qty));
+
+    return { labels, values };
+  }
+
+  // Chart utilities
+  function ensureChart(){
+    if (!stockCanvas) return;
+    if (inventoryChart) {
+      try { inventoryChart.destroy(); } catch(e) { /* ignore */ }
+      inventoryChart = null;
+    }
+    const ctx = stockCanvas.getContext('2d');
+    inventoryChart = new Chart(ctx, {
+      type: 'line',
+      data: { labels: [], datasets: [{ label: 'Inventory level', data: [], tension: 0.25, fill: true }] },
+      options: {
+        maintainAspectRatio: false,
+        responsive: true,
+        plugins: {
+          legend: { display: true }
+        },
+        scales: {
+          x: { display: true, title: { display: false } },
+          y: { display: true, beginAtZero: true }
+        }
+      }
+    });
+  }
+
+  function renderStockChart(labels, values){
+    if (!stockCanvas) return;
+    if (!inventoryChart) ensureChart();
+    if (!inventoryChart) return;
+    inventoryChart.data.labels = labels;
+    inventoryChart.data.datasets[0].data = values;
+    inventoryChart.update();
+  }
+
+  // Select ingredient: update UI and render its stock series
+  async function selectIngredient(it){
+    selectedIngredient = it;
+    if (selectedNameEl) selectedNameEl.textContent = it.name;
+    await renderStockForSelected();
+  }
+
+  // Main rendering logic for selected ingredient
+  async function renderStockForSelected(){
+    if (!selectedIngredient) return;
+    // ensure caches loaded
+    if (!ingredientsCache || ingredientsCache.length === 0) await loadIngredients();
+    if (!activityCache || activityCache.length === 0) await loadActivity();
+
+    const { start, end } = parseDateInputs();
+
+    // activities up to end needed to compute initialQty and series
+    const activitiesUpToEnd = filterActivitiesForIngredientUpTo(selectedIngredient.id, end);
+
+    // build absolute series using all activities up to end and then filter to start..end
+    const series = buildAbsoluteSeries(selectedIngredient, activitiesUpToEnd, start, end);
+
+    if (series.labels.length === 0) {
+      // fallback: show single current qty point
+      renderStockChart([new Date().toLocaleString()], [Number(selectedIngredient.qty || 0)]);
+    } else {
+      renderStockChart(series.labels, series.values);
+    }
+  }
+
+  // CSV exports
+  function downloadCSV(rows, filename){
+    const csv = rows.map(r => r.map(cell => {
+      if (cell == null) return '';
+      const s = String(cell);
+      if (s.includes(',') || s.includes('"') || s.includes('\n')) return `"${s.replace(/"/g,'""')}"`;
+      return s;
+    }).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 1500);
+  }
+
+  function exportIngredientsCSV(){
+    const headers = ['id','name','type','supplier','qty','unit','min_qty','max_qty','expiry'];
+    const rows = ingredientsCache.map(r => [r.id, r.name, r.type, r.supplier, r.qty, r.unit, r.min_qty || '', r.max_qty || '', r.expiry || '']);
+    downloadCSV([headers].concat(rows), `inventory_${(new Date()).toISOString().slice(0,10)}.csv`);
+  }
+
+  function exportStockCSVForIngredient(id, name){
+    if (!id) { alert('No ingredient selected'); return; }
+    const { start, end } = parseDateInputs();
+    const rows = filterActivitiesForIngredientInRange(id, start, end);
+    const csvRows = [['time','action','text','delta']];
+    rows.forEach(r => {
+      csvRows.push([r.time || '', r.action || '', (r.text || '').replace(/\r?\n/g,' '), getSignedDelta(r)]);
+    });
+    const safeName = (name || `ing_${id}`).replace(/\s+/g,'_');
+    downloadCSV(csvRows, `${safeName}_stock_${start}_to_${end}.csv`);
+  }
+
+  // UI wiring
+  function attachUI(){
+    if (searchInput) searchInput.addEventListener('input', () => renderList(searchInput.value));
+    if (exportInventoryBtn) exportInventoryBtn.addEventListener('click', exportIngredientsCSV);
+    if (exportStockBtn) exportStockBtn.addEventListener('click', () => {
+      if (!selectedIngredient) return alert('Select an ingredient first');
+      exportStockCSVForIngredient(selectedIngredient.id, selectedIngredient.name);
+    });
+
+    const applyBtn = document.getElementById('applyReportRange');
+    if (applyBtn) applyBtn.addEventListener('click', () => renderStockForSelected());
+    const presetEl = document.getElementById('reportPreset');
+    if (presetEl) presetEl.addEventListener('change', () => renderStockForSelected());
+  }
+
+  // Initialization
+  async function init(){
+    // only run on Reports view
+    const reportsSection = document.getElementById('view-reports');
+    if (!reportsSection) return;
+    attachUI();
+    await loadIngredients();
+    await loadActivity();
+    renderList();
+    ensureChart();
+    // if any ingredient exists, pre-select first for convenience
+    if (ingredientsCache && ingredientsCache.length > 0) {
+      // prefer a non-zero qty item for demo
+      const pick = ingredientsCache.find(x => Number(x.qty) !== 0) || ingredientsCache[0];
+      selectIngredient(pick);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+
+})();
+
+// === Reports: CSV fix (BOM + CRLF) + sync page actions -> reportSummary ===
+(function(){
+  // Small helper to safely fetch JSON with cookies/credentials
+  async function fetchJSON(url, opts = {}) {
+    const res = await fetch(url, Object.assign({ credentials: 'include', headers: { 'Accept': 'application/json' } }, opts));
+    if (!res.ok) {
+      const txt = await res.text().catch(()=>'');
+      const err = new Error(`HTTP ${res.status}: ${txt}`);
+      err.status = res.status;
+      throw err;
+    }
+    return res.json().catch(()=>{ return null; });
+  }
+
+  // Build CSV string safely (escape quotes) and download with BOM + CRLF
+  function downloadCSV(rows, filename) {
+    // rows: array of arrays
+    const csvLines = rows.map(r => r.map(cell => {
+      if (cell === null || typeof cell === 'undefined') return '';
+      const s = String(cell);
+      // escape quotes
+      const needsQuote = s.includes(',') || s.includes('"') || s.includes('\n') || s.includes('\r');
+      return needsQuote ? `"${s.replace(/"/g,'""')}"` : s;
+    }).join(','));
+    // Prepend BOM so Excel recognizes UTF-8 properly
+    const csvWithBom = '\uFEFF' + csvLines.join('\r\n'); // CRLF line endings for Windows/Excel compatibility
+    const blob = new Blob([csvWithBom], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 1000);
+  }
+
+  // Get DOM elements
+  const startEl = document.getElementById('reportStart');
+  const endEl = document.getElementById('reportEnd');
+  const presetEl = document.getElementById('reportPreset');
+  const applyBtn = document.getElementById('applyReportRange');
+  const exportReportsBtn = document.getElementById('exportReportsBtn'); // exports full inventory
+  // Optional controls from the augment we added before:
+  const exportInventoryBtn = document.getElementById('exportInventoryCSV');
+  const exportStockBtn = document.getElementById('exportStockCSV');
+  const selectedNameEl = document.getElementById('selectedIngredientName'); // may not exist; if you have it, used in filenames
+  const reportSummaryEl = document.getElementById('reportSummary');
+
+  // Helper: get date range (ISO yyyy-mm-dd) from inputs or preset
+  function getDateRange() {
+    const start = (startEl && startEl.value) ? startEl.value : '';
+    const end = (endEl && endEl.value) ? endEl.value : '';
+    if (start && end) return { start, end };
+    // fallback to preset if inputs empty
+    const days = Number((presetEl && presetEl.value) || 30);
+    const e = new Date();
+    const s = new Date(Date.now() - days * 24*60*60*1000);
+    return { start: s.toISOString().slice(0,10), end: e.toISOString().slice(0,10) };
+  }
+
+  // Compute summary text & statistics
+  async function updateReportSummary() {
+    if (!reportSummaryEl) return;
+    // show loading indicator
+    reportSummaryEl.textContent = 'Loading summary…';
+
+    const { start, end } = getDateRange();
+    try {
+      // fetch ingredients and activity (large limit)
+      const ingResp = await fetchJSON(`/api/ingredients?limit=2000&page=1`);
+      const activityResp = await fetchJSON(`/api/activity?limit=2000&page=1`);
+      const ingredients = (ingResp && ingResp.items) ? ingResp.items : [];
+      const activities = (activityResp && activityResp.items) ? activityResp.items : [];
+
+      const totalIngredients = ingredients.length;
+      const lowStockCount = ingredients.filter(i => {
+        const qty = Number(i.qty || 0);
+        const minq = Number(i.min_qty || 0);
+        return qty <= minq;
+      }).length;
+
+      // Filter activities within date range
+      const s = new Date(start + 'T00:00:00');
+      const e = new Date(end + 'T23:59:59');
+
+      let stockInCount = 0, stockOutCount = 0, netChange = 0;
+      for (const a of activities) {
+        if (!a.time) continue;
+        const t = new Date(a.time);
+        if (t < s || t > e) continue;
+        // determine signed delta
+        // prefer numeric fields if present, else parse text
+        let qty = 0;
+        if (typeof a.qty === 'number' && !Number.isNaN(a.qty)) qty = Number(a.qty);
+        else {
+          const m = String(a.text || '').match(/-?[\d,.]+(?:\.\d+)?/);
+          if (m) qty = Number(m[0].replace(/,/g,''));
+        }
+        const action = (a.action || '').toString().toLowerCase();
+        const txt = (a.text || '').toString().toLowerCase();
+        let sign = 0;
+        if (action.includes('in') || txt.includes('stock in')) sign = +1;
+        else if (action.includes('out') || txt.includes('stock out')) sign = -1;
+        else {
+          // best-effort keyword detection
+          if (txt.includes('in')) sign = +1;
+          else if (txt.includes('out')) sign = -1;
+        }
+
+        if (sign > 0) {
+          stockInCount++;
+          netChange += qty;
+        } else if (sign < 0) {
+          stockOutCount++;
+          netChange -= qty;
+        }
+      }
+
+      // Build summary text (concise)
+      const niceStart = new Date(start).toLocaleDateString();
+      const niceEnd = new Date(end).toLocaleDateString();
+      const netSign = netChange >= 0 ? '+' : '';
+      reportSummaryEl.textContent =
+        `Range: ${niceStart} — ${niceEnd} · Ingredients: ${totalIngredients} · Low stock: ${lowStockCount} · Stock in: ${stockInCount} · Stock out: ${stockOutCount} · Net change: ${netSign}${Number(netChange).toFixed(3)}`;
+    } catch (err) {
+      console.error('updateReportSummary err', err);
+      if (err && err.status === 401) {
+        reportSummaryEl.textContent = 'Not authenticated — please sign in to view the report summary.';
+      } else {
+        reportSummaryEl.textContent = 'Could not load summary (server error).';
+      }
+    }
+  }
+
+  // Export inventory CSV (full list)
+  async function exportInventoryCSV() {
+    try {
+      const resp = await fetchJSON(`/api/ingredients?limit=2000&page=1`);
+      const items = (resp && resp.items) ? resp.items : [];
+      const header = ['id','name','type','supplier','qty','unit','min_qty','max_qty','expiry'];
+      const rows = [header];
+      for (const r of items) {
+        rows.push([r.id, r.name, r.type, r.supplier || '', r.qty, r.unit || '', r.min_qty || '', r.max_qty || '', r.expiry || '']);
+      }
+      downloadCSV(rows, `inventory_${(new Date()).toISOString().slice(0,10)}.csv`);
+    } catch (err) {
+      console.error('exportInventoryCSV err', err);
+      alert('Failed to export inventory CSV. Check console for details.');
+    }
+  }
+
+  // Export stock CSV for a selected ingredient (by id) within date range
+  async function exportStockCSVForIngredientId(ingId, ingName) {
+    if (!ingId) { alert('No ingredient selected'); return; }
+    const { start, end } = getDateRange();
+    try {
+      const resp = await fetchJSON(`/api/activity?limit=2000&page=1`);
+      const items = (resp && resp.items) ? resp.items.filter(x => Number(x.ingredient_id) === Number(ingId)) : [];
+      // filter by date range
+      const s = new Date(start + 'T00:00:00');
+      const e = new Date(end + 'T23:59:59');
+      const rows = [['time','action','text','delta']];
+      items.forEach(r => {
+        const t = r.time ? new Date(r.time) : null;
+        if (t && (t < s || t > e)) return;
+        // determine signed delta
+        let qty = 0;
+        if (typeof r.qty === 'number' && !Number.isNaN(r.qty)) qty = Number(r.qty);
+        else {
+          const m = String(r.text || '').match(/-?[\d,.]+(?:\.\d+)?/);
+          if (m) qty = Number(m[0].replace(/,/g,''));
+        }
+        const action = r.action || '';
+        let sign = 0;
+        const txt = (r.text || '').toString().toLowerCase();
+        if ((action+'').toLowerCase().includes('in') || txt.includes('stock in')) sign = +1;
+        else if ((action+'').toLowerCase().includes('out') || txt.includes('stock out')) sign = -1;
+        else {
+          if (txt.includes('in')) sign = +1;
+          else if (txt.includes('out')) sign = -1;
+        }
+        const delta = sign === 0 ? '' : (sign * qty);
+        rows.push([r.time || '', action || '', (r.text || '').replace(/\r?\n/g,' '), delta]);
+      });
+      const safeName = (ingName || `ingredient_${ingId}`).replace(/\s+/g,'_').replace(/[^\w\-_.]/g,'');
+      downloadCSV(rows, `${safeName}_stock_${start}_to_${end}.csv`);
+    } catch (err) {
+      console.error('exportStockCSVForIngredientId err', err);
+      alert('Failed to export stock CSV. Check console for details.');
+    }
+  }
+
+  // Wire UI events
+  function attachControls() {
+    if (startEl) startEl.addEventListener('change', updateReportSummary);
+    if (endEl) endEl.addEventListener('change', updateReportSummary);
+    if (presetEl) presetEl.addEventListener('change', () => {
+      // if user changed preset, update the inputs (optional)
+      const days = Number(presetEl.value || 30);
+      const e = new Date();
+      const s = new Date(Date.now() - days * 24*60*60*1000);
+      if (startEl) startEl.value = s.toISOString().slice(0,10);
+      if (endEl) endEl.value = e.toISOString().slice(0,10);
+      updateReportSummary();
+    });
+    if (applyBtn) applyBtn.addEventListener('click', updateReportSummary);
+    if (exportReportsBtn) exportReportsBtn.addEventListener('click', exportInventoryCSV);
+    if (exportInventoryBtn) exportInventoryBtn.addEventListener('click', exportInventoryCSV);
+    if (exportStockBtn) exportStockBtn.addEventListener('click', () => {
+      // If you have a UI element that stores selected ingredient id (e.g. selectedIngredient global), attempt to use it,
+      // otherwise prompt user for id. Try common global name 'selectedIngredient'
+      let id = null, name = null;
+      try {
+        if (window.selectedIngredient && window.selectedIngredient.id) { id = window.selectedIngredient.id; name = window.selectedIngredient.name; }
+        else if (window._selectedIngredient && window._selectedIngredient.id) { id = window._selectedIngredient.id; name = window._selectedIngredient.name; }
+      } catch(e){}
+      if (!id) {
+        // attempt to find selected ingredient in DOM (if the reports module rendered a #selectedIngredientId)
+        const sel = document.getElementById('selectedIngredientId');
+        if (sel && sel.value) id = sel.value;
+      }
+      if (!id) {
+        const answer = prompt('Enter ingredient id to export stock CSV (or cancel):');
+        if (!answer) return;
+        id = answer.trim();
+      }
+      exportStockCSVForIngredientId(id, name || '');
+    });
+
+    // also update summary on initial load (if on Reports view)
+    updateReportSummary();
+  }
+
+  // auto-run when DOM ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', attachControls);
+  } else {
+    attachControls();
+  }
+
+})();
+
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function frontendHasRole(roles=[]) {
+  if (!window.currentUser || !window.currentUser.role) return false;
+  const my = String(window.currentUser.role || '').toLowerCase();
+  return roles.map(r => String(r).toLowerCase()).includes(my);
+}
+
+function openEventModal(row) {
+  try {
+    const modal = document.getElementById('modal');
+    const content = document.getElementById('modalContent');
+    const time = row.time ? new Date(row.time).toLocaleString() : '—';
+    const username = row.username || (row.user_id ? ('User #' + row.user_id) : 'Unknown');
+    const ingredient = row.ingredient_name || (row.ingredient_id ? ('#' + row.ingredient_id) : '');
+    const action = (/stock in/i.test(row.text) ? 'Stock in'
+      : (/stock out/i.test(row.text) ? 'Stock out'
+        : (/initial stock|add|created/i.test(row.text) ? 'Add / Created' : 'Activity')));
+
+    content.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div>
+            <strong style="font-size:16px">${escapeHtml(action)}</strong>
+            <div class="muted small">${escapeHtml(ingredient)}</div>
+          </div>
+          <div class="muted small">${escapeHtml(time)}</div>
+        </div>
+
+        <div><strong>By:</strong> ${escapeHtml(username)}</div>
+
+        <div style="white-space:pre-wrap;color:var(--text);">${escapeHtml(row.text)}</div>
+
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+          <button class="btn ghost small" id="modalCloseBtnInline">Close</button>
+          ${frontendHasRole(['Owner','Admin','Baker']) ? '<button class="btn small primary" id="modalGotoItem">Go to item</button>' : ''}
+        </div>
+      </div>
+    `;
+
+    // wire modal controls
+    modal.classList.remove('hidden');
+    modal.setAttribute('aria-hidden', 'false');
+
+    // inline close button
+    const closeInline = document.getElementById('modalCloseBtnInline');
+    if (closeInline) closeInline.addEventListener('click', () => {
+      modal.classList.add('hidden'); modal.setAttribute('aria-hidden','true');
+    });
+
+    // goto item if present
+    const goto = document.getElementById('modalGotoItem');
+    if (goto) {
+      goto.addEventListener('click', () => {
+        modal.classList.add('hidden'); modal.setAttribute('aria-hidden','true');
+        // If your app has a function to navigate to inventory item, call it here:
+        // e.g. showInventoryItem(row.ingredient_id) — adapt to your app.
+        if (typeof showInventoryItem === 'function' && row.ingredient_id) {
+          showInventoryItem(row.ingredient_id);
+        } else {
+          // fallback: open inventory view and show search for ingredient name
+          openView && openView('inventory');
+          const s = document.getElementById('searchIng');
+          if (s && row.ingredient_name) { s.value = row.ingredient_name; triggerIngredientSearch && triggerIngredientSearch(); }
+        }
+      });
+    }
+
+  } catch (err) {
+    console.error('openEventModal err', err);
+  }
+}

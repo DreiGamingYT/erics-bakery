@@ -491,6 +491,7 @@ body{
 .card > h3 { margin:0; font-size:16px; }
 
 .grid-2{display:grid;grid-template-columns:1fr 360px;gap:16px;margin-bottom:16px;min-height:220px;}
+.grid-3{display:grid;grid-template-columns:1fr;gap:16px;margin-bottom:16px;min-height:220px;}
 
 .cards-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(238px, 1fr));gap:12px}
 .product-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}
@@ -827,7 +828,7 @@ body{
 @media (max-width:900px) {
   .grid-2 { grid-template-columns: 1fr; }
   .chart-container { height: 240px; }
-  #view-reports .grid-2 { grid-template-columns: 1fr; }
+  #view-reports .grid-3 { grid-template-columns: 1fr; }
   #view-reports .chart-container { height: 240px; }
   #view-reports .card h3 { font-size: 15px; }
 
@@ -1724,11 +1725,8 @@ button:disabled,
 .kpi-card { position: relative; } /* ensure popover anchors */
 .kpi-popover-mobile { right: auto; left: 12px; } /* mobile variant */
 
-/* Radio-like toggle (for settings notification options) */
-.radio-group { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-.radio-btn {
-  display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border-radius:999px; border:1px solid rgba(0,0,0,0.06);
-  cursor:pointer; font-weight:700; background:var(--card);
+.modal-card { max-height: 86vh; overflow: auto; box-sizing: border-box; }
+@media (max-width:600px){
+  .modal-card { width: 92vw; padding: 14px; }
 }
-.radio-btn input { display:none; }
-.radio-btn.active { background: var(--chip-active-bg); color: var(--chip-active-color); border-color: transparent; }
+

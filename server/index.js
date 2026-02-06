@@ -281,32 +281,6 @@ app.post('/api/auth/logout', (req, res) => {
     });
 });
 
-// POST /api/auth/change-password { currentPassword, newPassword }
-app.post('/api/auth/change-password', authMiddleware, async (req, res) => {
-  try {
-    const uid = Number(req.user && req.user.id);
-    if(!uid) return res.status(401).json({ error: 'Not authenticated' });
-
-    const current = (req.body && req.body.currentPassword || '').toString();
-    const npw = (req.body && req.body.newPassword || '').toString();
-
-    if(!current || !npw || npw.length < 6) return res.status(400).json({ error: 'Invalid password input' });
-
-    const [rows] = await pool.query('SELECT password_hash FROM users WHERE id = ? LIMIT 1', [uid]);
-    if(!rows || !rows[0]) return res.status(404).json({ error: 'User not found' });
-
-    const ok = await bcrypt.compare(current, rows[0].password_hash);
-    if(!ok) return res.status(401).json({ error: 'Current password incorrect' });
-
-    const newHash = await bcrypt.hash(npw, 10);
-    await pool.query('UPDATE users SET password_hash = ? WHERE id = ?', [newHash, uid]);
-    return res.json({ ok: true, message: 'Password changed' });
-  } catch(err){
-    console.error('change-password err', err);
-    return res.status(500).json({ error: 'Server error' });
-  }
-});
-
 app.get('/api/ingredients', authMiddleware, async (req, res) => {
     try {
         const page = Math.max(1, parseInt(req.query.page || '1'));
