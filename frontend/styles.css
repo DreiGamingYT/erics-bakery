@@ -1723,3 +1723,12 @@ button:disabled,
 }
 .kpi-card { position: relative; } /* ensure popover anchors */
 .kpi-popover-mobile { right: auto; left: 12px; } /* mobile variant */
+
+/* Radio-like toggle (for settings notification options) */
+.radio-group { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.radio-btn {
+  display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border-radius:999px; border:1px solid rgba(0,0,0,0.06);
+  cursor:pointer; font-weight:700; background:var(--card);
+}
+.radio-btn input { display:none; }
+.radio-btn.active { background: var(--chip-active-bg); color: var(--chip-active-color); border-color: transparent; }

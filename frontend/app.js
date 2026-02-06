@@ -1614,7 +1614,7 @@ async function renderInventoryActivity(limit = 20) {
   }
 }
 
-function renderReports(rangeStart, rangeEnd, reportFilter) {
+/* function renderReports(rangeStart, rangeEnd, reportFilter) {
   const startInput = rangeStart || q('reportStart')?.value || null;
   const endInput = rangeEnd || q('reportEnd')?.value || null;
   const end = endInput ? new Date(endInput) : new Date();
@@ -1723,12 +1723,167 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
   }
 
   try { chartIngredientUsage && chartIngredientUsage.resize && chartIngredientUsage.resize(); } catch(e){}
+} */
+
+async function renderReportsInventory(){
+  // populate dates with sensible defaults
+  const start = q('invStart'); const end = q('invEnd');
+  if(start && !start.value) { const d = new Date(); d.setDate(d.getDate()-30); start.value = d.toISOString().slice(0,10); }
+  if(end && !end.value) { end.value = new Date().toISOString().slice(0,10); }
+
+  // load ingredients table and select
+  await loadInventoryTable();
+
+  // bind apply/export controls
+  q('invApplyRange').onclick = async () => {
+    await loadInventoryTable();
+    // if an ingredient selected, redraw chart
+    const sel = q('invSelectIngredient').value;
+    if(sel) await drawStockTimeseriesForIngredient(sel);
+  };
+
+  q('invExportCsv').onclick = () => {
+    // call server endpoint with same params as table
+    const from = q('invStart').value || '';
+    const to = q('invEnd').value || '';
+    // server supports search/filter via query. We'll call the CSV export endpoint (it accepts filter/type/search).
+    // We attach dates as extra params (server will ignore unknown query params, but if you add date filtering server-side, expand).
+    const url = `/api/ingredients/export/csv?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+    window.location = url;
+  };
+
+  q('invSelectIngredient').onchange = async () => {
+    const ingId = q('invSelectIngredient').value;
+    if(ingId) await drawStockTimeseriesForIngredient(ingId);
+  };
 }
 
-// Chrome-optimized printReports(rangeStartISO, rangeEndISO, filter)
-// If range/filter aren't provided, it uses reportStart/reportEnd and reportFilter controls.
-// It prints a table of ingredient usage/current stock filtered by the chosen filter.
-// Uses hidden iframe in Chrome for reliable page breaks; falls back to in-page print root otherwise.
+async function loadInventoryTable(){
+  try {
+    const res = await apiFetch('/api/ingredients?limit=1000&page=1');
+    if(!res || !res.items) return;
+    const tbody = document.querySelector('#inventoryReportTable tbody');
+    tbody.innerHTML = '';
+    const sel = q('invSelectIngredient');
+    sel.innerHTML = '<option value="">-- Select ingredient to plot --</option>';
+    res.items.forEach(r=>{
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td style="padding:6px 8px">${escapeHtml(r.name||'')}</td><td>${escapeHtml(r.type||'')}</td><td>${escapeHtml(r.supplier||'')}</td><td style="font-weight:800;text-align:right">${Number(r.qty||0)}</td><td>${escapeHtml(r.unit||'')}</td><td style="text-align:right">${Number(r.min_qty||0)}</td><td>${r.expiry?escapeHtml((new Date(r.expiry)).toISOString().slice(0,10)):'-'}</td>`;
+      tbody.appendChild(tr);
+
+      // add option for select with id
+      const opt = document.createElement('option');
+      opt.value = String(r.id);
+      opt.textContent = `${r.name} — ${r.qty} ${r.unit || ''}`;
+      sel.appendChild(opt);
+    });
+  } catch (err) {
+    console.warn('loadInventoryTable err', err);
+  }
+}
+
+let inventoryStockChart = null;
+async function drawStockTimeseriesForIngredient(ingId){
+  try {
+    // load activity for ingredient
+    const actRes = await apiFetch(`/api/activity?limit=2000`);
+    const rows = actRes && actRes.items ? actRes.items : [];
+    // filter events for this ingredient id
+    const events = rows.filter(r => Number(r.ingredient_id) === Number(ingId));
+
+    // build daily time series between date range (invStart/invEnd)
+    const start = q('invStart').value ? new Date(q('invStart').value) : new Date(new Date().setDate(new Date().getDate()-30));
+    const end = q('invEnd').value ? new Date(q('invEnd').value) : new Date();
+    // normalize times to days
+    const days = [];
+    const dayMap = {};
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate()+1)) {
+      const iso = d.toISOString().slice(0,10);
+      days.push(iso);
+      dayMap[iso] = 0;
+    }
+
+    // We will try to infer net stock changes by parsing text in activity (this is best effort).
+    // Looks like activity.text is stored as: "Stock in 2 kg — flour" or "Stock out 1 kg — sugar"
+    events.forEach(e=>{
+      const t = (e.text||'').toLowerCase();
+      const qdate = new Date(e.time).toISOString().slice(0,10);
+      if(!(qdate in dayMap)) return;
+      let qty = 0;
+      // try to extract a number from text
+      const m = t.match(/([\d\.]+)\s*(kg|pcs|g|l|ml)?/);
+      if(m) qty = Number(m[1] || 0);
+      if(t.includes('stock in')) dayMap[qdate] += qty;
+      else if(t.includes('stock out')) dayMap[qdate] -= qty;
+      else if(t.includes('initial stock')) dayMap[qdate] += qty;
+    });
+
+    // compute cumulative series
+    const cum = [];
+    let running = 0;
+    days.forEach(d=>{
+      running += Number(dayMap[d] || 0);
+      cum.push(running);
+    });
+
+    const ctx = document.getElementById('inventoryStockChart').getContext('2d');
+    if(inventoryStockChart) inventoryStockChart.destroy();
+    inventoryStockChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: days,
+        datasets: [{
+          label: 'Stock net change (cumulative)',
+          data: cum,
+          fill: true,
+          tension: 0.2,
+        }]
+      },
+      options: {
+        plugins: { legend: { display: true } },
+        scales: { x: { display:true }, y: { display:true } },
+        maintainAspectRatio: false
+      }
+    });
+  } catch(err){
+    console.warn('drawStockTimeseriesForIngredient err', err);
+  }
+}
+
+
+// ---------- Activity (functional) ----------
+async function renderActivityView(limit=50){
+  try {
+    const filter = document.getElementById('activityFilter') ? document.getElementById('activityFilter').value : 'all';
+    const res = await apiFetch(`/api/activity?limit=${limit}`);
+    const list = document.getElementById('activityList');
+    if(!res || !res.items) { list.innerHTML = '<li>No activity</li>'; return; }
+    const rows = res.items.filter(r => {
+      if(filter === 'all') return true;
+      if(filter === 'stock') return (r.action || '').includes('stock');
+      if(filter === 'production') return (r.action || '').includes('production');
+      return true;
+    });
+    list.innerHTML = '';
+    rows.forEach(r=>{
+      const li = document.createElement('li');
+      li.className = 'small-card';
+      li.style.marginBottom = '8px';
+      const time = new Date(r.time).toLocaleString();
+      li.innerHTML = `<div style="display:flex;justify-content:space-between;gap:8px;align-items:start">
+        <div><strong>${escapeHtml(r.ingredient_name || r.text || 'Activity')}</strong><div class="muted small">${escapeHtml(r.text||'')}</div></div>
+        <div style="text-align:right"><div class="muted small">${escapeHtml(r.username||'system')}</div><div class="muted small">${escapeHtml(time)}</div></div>
+      </div>`;
+      li.onclick = ()=> {
+        showModal(`<h3>Activity</h3><p>${escapeHtml(r.text||'')}</p><p class="muted small">By: ${escapeHtml(r.username||'system')} — ${escapeHtml(time)}</p>`);
+      };
+      list.appendChild(li);
+    });
+  } catch(err){
+    console.warn('renderActivityView err', err);
+  }
+}
+
 function printReports(rangeStartISO, rangeEndISO, filter){
   try {
     // resolve filter and range (prefer args, then controls, then defaults)
@@ -2225,12 +2380,60 @@ function renderMonthCalendar(year, month){
   }
 }
 
-function renderCalendar(){
-  const header = q('view-calendar')?.querySelector('.page-header h2');
-  if(header && q('calendarGrid')){
-    header.textContent = `Calendar — ${new Date(currentCalendarYear, currentCalendarMonth,1).toLocaleString([], {month:'long', year:'numeric'})}`;
+async function renderCalendar(dateISO){
+  // dateISO = 'YYYY-MM-DD' for the current calendar cell or month
+  try {
+    // build grid for current month (or render single date if passed)
+    const grid = document.getElementById('calendarGrid');
+    if(!dateISO){
+      // default: current date
+      dateISO = new Date().toISOString().slice(0,10);
+    }
+    // If you want a full month calendar: you can compute month start/end and query each date.
+    // Simpler approach: render next 30 days
+    const start = new Date(dateISO);
+    start.setDate(1);
+    const year = start.getFullYear(), month = start.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month+1, 0);
+    grid.innerHTML = '';
+
+    for(let d = new Date(firstDay); d <= lastDay; d.setDate(d.getDate()+1)){
+      const iso = d.toISOString().slice(0,10);
+      const cell = document.createElement('div');
+      cell.className = 'calendar-cell';
+      cell.innerHTML = `<div class="date-num">${d.getDate()}</div><div class="events" data-date="${iso}"></div>`;
+      grid.appendChild(cell);
+
+      // fetch events for each date (server /api/events?date=YYYY-MM-DD)
+      (async (isoLocal, eventsWrap)=>{
+        try {
+          const ev = await apiFetch(`/api/events?date=${isoLocal}`);
+          if(ev && Array.isArray(ev.items)){
+            ev.items.slice(0,6).forEach(e=>{
+              const chip = document.createElement('div');
+              const text = escapeHtml(e.text || e.ingredient_name || '');
+              const who = escapeHtml(e.username || 'system');
+              // attempt to classify stock in/out/add from text
+              const lower = (e.text||'').toLowerCase();
+              let label = 'Event';
+              if(lower.includes('stock in')) label = 'Stock in';
+              else if(lower.includes('stock out')) label = 'Stock out';
+              else if(lower.includes('initial stock') || lower.includes('added')) label = 'Added';
+              chip.className = 'event-chip';
+              chip.title = `${label} — ${who}`;
+              chip.textContent = `${label} — ${text} (${who})`;
+              eventsWrap.appendChild(chip);
+            });
+          }
+        } catch(err){
+          // ignore per-cell errors
+        }
+      })(iso, cell.querySelector('.events'));
+    }
+  } catch(err){
+    console.warn('renderCalendar err', err);
   }
-  renderMonthCalendar(currentCalendarYear, currentCalendarMonth);
 }
 
 function destroyAllCharts(){
@@ -3133,6 +3336,153 @@ async function populateProfile(){
   if(q('newPassword')) q('newPassword').value = '';
   if(q('confirmPassword')) q('confirmPassword').value = '';
 }
+
+async function populateProfile(){
+  try {
+    const res = await apiFetch('/api/auth/me');
+    if(!res || !res.user) return;
+    const u = res.user;
+    if(q('profileName')) q('profileName').value = u.name || '';
+    if(q('profileRole')) q('profileRole').value = u.role || '';
+    if(q('profileUsername')) q('profileUsername').value = u.username || '';
+    if(q('profileEmail')) q('profileEmail').value = u.email || '';
+    if(q('profilePhone')) q('profilePhone').value = u.phone || '';
+    // show username in topbar
+    if(q('userBadgeText')) q('userBadgeText').textContent = `${u.name || u.username}`;
+  } catch(err){
+    console.warn('populateProfile err', err);
+  }
+}
+
+async function saveProfile(){
+  const name = q('profileName').value;
+  const email = q('profileEmail').value;
+  const phone = q('profilePhone').value;
+  const payload = { name, email, phone };
+  try {
+    const res = await apiFetch('/api/users/me', { method:'PUT', body: JSON.stringify(payload), headers:{'Content-Type':'application/json'} });
+    if(res && res.user){
+      notify('Profile saved');
+      await populateProfile();
+    } else {
+      notify('Profile save failed');
+    }
+  } catch(err){
+    console.warn('saveProfile err', err);
+    notify('Profile save error');
+  }
+}
+
+function bindSettingsControls(){
+  // theme toggle
+  const themeToggle = document.getElementById('themeToggle');
+  if(themeToggle){
+    // on load, read
+    const saved = localStorage.getItem('theme') || (document.body.classList.contains('theme-dark') ? 'dark' : 'light');
+    themeToggle.checked = saved === 'dark';
+    themeToggle.onchange = () => {
+      if(themeToggle.checked) { document.body.classList.add('theme-dark'); localStorage.setItem('theme','dark'); }
+      else { document.body.classList.remove('theme-dark'); localStorage.setItem('theme','light'); }
+    };
+    // ensure body reflects choice on load
+    if(saved === 'dark') document.body.classList.add('theme-dark');
+  }
+
+  // cursor choices (simple: default or custom pointer)
+  // we'll provide a select that you can add to settings UI; if not present, create one in runtime
+  if(!document.getElementById('cursorSelect')){
+    const wrap = document.createElement('div');
+    wrap.style.marginTop = '8px';
+    wrap.innerHTML = `<label class="field"><span class="field-label">Cursor style</span>
+      <select id="cursorSelect"><option value="default">Default</option><option value="crosshair">Crosshair</option><option value="pointer">Pointer</option></select></label>`;
+    const settingsAside = document.querySelector('#view-settings aside');
+    if(settingsAside) settingsAside.prepend(wrap);
+  }
+  const cursorSelect = document.getElementById('cursorSelect');
+  if(cursorSelect){
+    const savedCursor = localStorage.getItem('cursorStyle') || 'default';
+    cursorSelect.value = savedCursor;
+    applyCursorStyle(savedCursor);
+    cursorSelect.onchange = () => {
+      const v = cursorSelect.value;
+      localStorage.setItem('cursorStyle', v);
+      applyCursorStyle(v);
+    };
+  }
+
+  // notification toggles (radio style)
+  // create UI if not present
+  if(!document.getElementById('notifRadioWrap')){
+    const wrap = document.createElement('div');
+    wrap.style.marginTop = '12px';
+    wrap.innerHTML = `<div><strong>Notifications</strong></div>
+      <div id="notifRadioWrap" class="radio-group" style="margin-top:8px">
+        <label class="radio-btn" data-val="off"><input type="radio" name="notif" value="off"> Off</label>
+        <label class="radio-btn" data-val="inapp"><input type="radio" name="notif" value="inapp"> In-app</label>
+        <label class="radio-btn" data-val="email"><input type="radio" name="notif" value="email"> Email + in-app</label>
+      </div>
+      <div id="notifNote" class="muted small" style="margin-top:8px">Toggle notifications (browser permission required for in-app).</div>`;
+    const settingsAside = document.querySelector('#view-settings aside');
+    if(settingsAside) settingsAside.appendChild(wrap);
+  }
+
+  // wire up radio buttons
+  const radioWrap = document.getElementById('notifRadioWrap');
+  if(radioWrap){
+    const saved = localStorage.getItem('notifMode') || 'off';
+    radioWrap.querySelectorAll('.radio-btn').forEach(lbl=>{
+      lbl.classList.toggle('active', lbl.dataset.val === saved);
+      lbl.onclick = async () => {
+        // set UI state
+        radioWrap.querySelectorAll('.radio-btn').forEach(l=>l.classList.remove('active'));
+        lbl.classList.add('active');
+        localStorage.setItem('notifMode', lbl.dataset.val);
+        if(lbl.dataset.val === 'inapp' || lbl.dataset.val === 'email'){
+          // ask permission for Notifications
+          if('Notification' in window && Notification.permission !== 'granted'){
+            try {
+              await Notification.requestPermission();
+            } catch(e){}
+          }
+        }
+        notify('Notification mode updated');
+      };
+    });
+  }
+}
+
+function applyCursorStyle(name){
+  if(name === 'default') {
+    document.body.style.cursor = 'auto';
+  } else {
+    document.body.style.cursor = name;
+  }
+}
+
+// ---------- small helpers ----------
+function showModal(html){
+  const modal = q('modal');
+  const container = q('modalContent');
+  container.innerHTML = html;
+  modal.classList.remove('hidden');
+  modal.setAttribute('aria-hidden', 'false');
+}
+q('modalClose').onclick = ()=> { q('modal').classList.add('hidden'); q('modal').setAttribute('aria-hidden','true'); q('modalContent').innerHTML=''; };
+
+// ---------- initialization - call these where your app init runs ----------
+(async function initExtraUI(){
+  try {
+    await initKpiPopovers();                      // KPI popovers (desktop + mobile)
+    await renderReportsInventory();               // Reports inventory controls and table
+    await renderActivityView();                   // Activity list
+    await renderCalendar();                       // Calendar events
+    await populateProfile();                      // Profile populate
+    bindSettingsControls();                       // settings wiring
+    // re-run KPI popovers on auth change or inventory updates
+  } catch(e){
+    console.warn('initExtraUI err', e);
+  }
+})();
 
 function renderRecentLogins(){
   // store recent login list in localStorage.recent_logins as [{username, time}]

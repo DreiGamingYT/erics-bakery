@@ -271,10 +271,45 @@
               <div class="chart-container"><canvas id="salesTimelineChart" width="600" height="260"></canvas></div>
             </div>
 
-            <div class="card">
-              <h3>Ingredient usage (top)</h3>
-              <div class="chart-container"><canvas id="ingredientUsageChart" width="400" height="260"></canvas></div>
-            </div>
+                <div class="card">
+      <h3>Inventory list & stock graph</h3>
+
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:6px">
+          <span class="small muted">From</span>
+          <input id="invStart" type="date" />
+        </label>
+        <label style="display:flex;align-items:center;gap:6px">
+          <span class="small muted">To</span>
+          <input id="invEnd" type="date" />
+        </label>
+
+        <select id="invSelectIngredient" style="min-width:180px">
+          <option value="">-- Select ingredient to plot --</option>
+        </select>
+
+        <button id="invApplyRange" class="btn small" type="button">Apply</button>
+        <button id="invExportCsv" class="btn small" type="button">Export CSV</button>
+      </div>
+
+      <div style="display:flex;gap:12px;flex-direction:column">
+        <div id="inventoryTableWrapper" style="width:100%;overflow:auto;max-height:36vh;padding:6px;border-radius:10px;background:var(--card);border:1px solid rgba(0,0,0,0.04)">
+          <table id="inventoryReportTable" style="width:100%;border-collapse:collapse">
+            <thead>
+              <tr>
+                <th>Name</th><th>Type</th><th>Supplier</th><th>Qty</th><th>Unit</th><th>Min</th><th>Expiry</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <div class="chart-container" style="height:240px;margin-top:12px">
+          <canvas id="inventoryStockChart"></canvas>
+        </div>
+      </div>
+    </div>
+
           </div>
 
           <div class="card" style="margin-top:12px">
