@@ -156,11 +156,7 @@ const sampleIngredients = [
   { id:43, name:'Trash bags', unit:'roll', qty:50, min:12, max:150, expiry:null, supplier:'Protego Inc.', icon:'fa-trash', type:'maintenance', attrs:{} },
 ];
 
-const sampleProducts = [
-  { id:1, name:'Pandesal (6pcs)', category:'Bread', price:30, stock:50, image:'', recipe:[ {ingredient_id:1, qty_per_unit:0.2}, {ingredient_id:2, qty_per_unit:1} ]},
-  { id:2, name:'Ensaymada (1pc)', category:'Pastry', price:45, stock:30, image:'', recipe:[ {ingredient_id:1, qty_per_unit:0.15}, {ingredient_id:4, qty_per_unit:0.02} ]},
-  { id:3, name:'Brownie (1pc)', category:'Pastry', price:60, stock:15, image:'', recipe:[ {ingredient_id:1, qty_per_unit:0.12}, {ingredient_id:3, qty_per_unit:0.05} ]}
-];
+const sampleProducts = [];
 
 let DB = {
   ingredients: structuredClone(sampleIngredients),
@@ -168,13 +164,7 @@ let DB = {
   activity: []
 };
 
-const sampleOrders = [
-  { id: 1001, date: offsetDateISO(-1), items:[ {product_id:1, qty:12}, {product_id:2, qty:3} ], customer:'Local Cafe', total: 12*30 + 3*45 },
-  { id: 1002, date: offsetDateISO(-2), items:[ {product_id:1, qty:15} ], customer:'Walk-in', total: 15*30 },
-  { id: 1003, date: offsetDateISO(-5), items:[ {product_id:2, qty:6}, {product_id:3, qty:2} ], customer:'Online', total: 6*45 + 2*60 },
-  { id: 1004, date: offsetDateISO(-8), items:[ {product_id:1, qty:8}, {product_id:3, qty:4} ], customer:'Wholesale', total: 8*30 + 4*60 },
-  { id: 1005, date: offsetDateISO(-15), items:[ {product_id:2, qty:10} ], customer:'Event', total: 10*45 }
-];
+const sampleOrders = [];
 
 let chartStock = null;
 let chartBestSeller = null;
@@ -3604,8 +3594,34 @@ document.addEventListener('DOMContentLoaded', ()=> {
   const accounts = loadAccounts(); if(Object.keys(accounts).length === 0){ accounts['admin'] = { password:'admin', role:'Owner', name:'Admin' }; saveAccounts(accounts); }
 
   const splash=q('splash'), overlay=q('landingOverlay'), loginPanel=q('overlayLogin'), signupPanel=q('overlaySignup');
-  const splashDuration=5200; if(splash) splash.classList.remove('hidden');
-  setTimeout(()=>{ if(splash) splash.classList.add('hidden'); setTimeout(()=>{ const pers=getPersistentSession(); if(pers && pers.username){ setSession(pers, true); startApp(); applyTheme(localStorage.getItem(THEME_KEY) || 'light'); } else { showOverlay(true,true); } }, 260); }, splashDuration);
+  const splashDuration=5200;
+  if (splash) {
+    // ensure opaque white background and smooth fade transition
+    splash.style.background = splash.style.background || '#fff';
+    splash.style.transition = splash.style.transition || 'opacity 700ms ease, visibility 700ms ease';
+    splash.style.opacity = '1';
+    splash.style.visibility = 'visible';
+    splash.classList.remove('hidden');
+  }
+
+  setTimeout(()=>{
+    if (splash) {
+      // fade out
+      splash.style.opacity = '0';
+      // after transition hide it and continue boot
+      setTimeout(()=>{
+        try { splash.classList.add('hidden'); splash.style.visibility = 'hidden'; } catch(e){ /* ignore */ }
+        const pers=getPersistentSession();
+        if(pers && pers.username){ setSession(pers, true); startApp(); applyTheme(localStorage.getItem(THEME_KEY) || 'light'); }
+        else { showOverlay(true,true); }
+      }, 760); // slightly longer than CSS transition to ensure complete
+      return;
+    }
+    // fallback if no splash element
+    const pers=getPersistentSession();
+    if(pers && pers.username){ setSession(pers, true); startApp(); applyTheme(localStorage.getItem(THEME_KEY) || 'light'); }
+    else { showOverlay(true,true); }
+  }, splashDuration);
 
   on('overlayToSignup','click', ()=> { overlay && overlay.classList.add('signup-mode'); loginPanel && loginPanel.classList.add('hidden'); signupPanel && signupPanel.classList.remove('hidden'); setTimeout(()=> q('overlay-su-username')?.focus(), 240); });
   on('overlayBackToLogin','click', ()=> { overlay && overlay.classList.remove('signup-mode'); signupPanel && signupPanel.classList.add('hidden'); loginPanel && loginPanel.classList.remove('hidden'); setTimeout(()=> q('overlay-username')?.focus(), 160); });
@@ -6460,3 +6476,4 @@ async function logClientActivity({ ingredient_id = null, action = '', text = '' 
     console.warn('logClientActivity failed', e);
   }
 }
+
