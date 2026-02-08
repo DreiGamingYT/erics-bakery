@@ -4,7 +4,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Eric's Bakery — Inventory</title>
+    <title>Eric's Bakery</title>
 
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
@@ -185,7 +185,6 @@
                     <button class="nav-item" data-view="dashboard" type="button"><i class="fa fa-chart-pie"></i><span>Dashboard</span></button>
                     <button class="nav-item" data-view="inventory" type="button"><i class="fa fa-boxes-stacked"></i><span>Inventory</span></button>
                     <button class="nav-item" data-view="reports" type="button"><i class="fa fa-chart-bar"></i><span>Reports</span></button>
-                    <button class="nav-item" data-view="activity" type="button"><i class="fa fa-clock-rotate-left"></i><span>Activity</span></button>
                     <button class="nav-item" data-view="calendar" type="button"><i class="fa fa-calendar"></i><span>Calendar</span></button>
                     <button class="nav-item" data-view="profile" type="button"><i class="fa fa-user"></i><span>Profile</span></button>
                     <button class="nav-item" data-view="settings" type="button"><i class="fa fa-gear"></i><span>Settings</span></button>
@@ -246,7 +245,7 @@
                     </div>
 
                     <div class="card">
-                        <h3>Recent Activity</h3>
+                        <h3>Recent History</h3>
                         <ul id="recentActivity" class="timeline"></ul>
                     </div>
                 </section>
@@ -270,9 +269,9 @@
 
                         <aside id="inventoryActivity" class="inv-right" aria-label="Recent inventory activity">
                             <div class="card">
-                                <h3>Recent Inventory Activity</h3>
+                                <h3>Recent Inventory History</h3>
                                 <ul id="inventoryRecentActivity" class="timeline" aria-live="polite" aria-atomic="true" style="margin-top:8px;max-height:56vh;overflow:auto;padding-right:6px"></ul>
-                                <div class="muted small" style="margin-top:8px">Shows latest stock in / stock out and edits. Tap an item to view details in Activity.</div>
+                                <div class="muted small" style="margin-top:8px">Shows latest stock in / stock out and edits. Tap an item to view details in History.</div>
                             </div>
                         </aside>
                     </div>
@@ -471,23 +470,6 @@
 
                     <div class="card settings-grid" style="display:grid;grid-template-columns:1fr 360px;gap:16px">
                         <div>
-                            <div class="card" style="margin-bottom:12px">
-                                <h3>Bakery Profile</h3>
-                                <form id="bakeryProfileForm" class="form">
-                                    <label class="field"><span class="field-label">Bakery name</span>
-                                        <input id="bakeryName" />
-                                    </label>
-                                    <label class="field"><span class="field-label">Address</span>
-                                        <input id="bakeryAddress" />
-                                    </label>
-                                    <label class="field"><span class="field-label">Default unit</span>
-                                        <input id="bakeryUnit" placeholder="kg, pcs, etc." />
-                                    </label>
-                                    <div style="margin-top:12px">
-                                        <button class="btn primary" id="saveBakery" type="button">Save</button>
-                                    </div>
-                                </form>
-                            </div>
 
                             <div class="card" style="margin-bottom:12px">
                                 <h3>Notifications</h3>

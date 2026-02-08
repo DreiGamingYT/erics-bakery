@@ -264,6 +264,16 @@ app.put('/api/users/me', authMiddleware, async (req, res) => {
       console.warn('Could not reissue token after profile update', e && e.message ? e.message : e);
     }
 
+    (async () => {
+      try {
+        const text = `Profile updated — ${user.name || user.username}`;
+        await pool.query('INSERT INTO activity (user_id, action, text) VALUES (?, ?, ?)', [user.id, 'profile_update', text]);
+        console.info('[activity] profile update logged for user', user.id);
+      } catch (actErr) {
+        console.warn('[activity] failed to log profile update (non-blocking):', actErr && actErr.message ? actErr.message : actErr);
+      }
+    })();
+
     return res.json({ user });
   } catch (err) {
     console.error('PUT /api/users/me err', err && err.stack ? err.stack : err);
@@ -585,6 +595,26 @@ app.get('/api/activity', authMiddleware, async (req, res) => {
         });
     }
 });
+
+app.post('/api/activity', authMiddleware, async (req, res) => {
+  try {
+    const uid = (req.user && req.user.id) ? Number(req.user.id) : null;
+    const { ingredient_id = null, action = null, text = '' } = req.body || {};
+
+    if (!text && !action) return res.status(400).json({ error: 'action or text required' });
+
+    await pool.query(
+      'INSERT INTO activity (ingredient_id, user_id, action, text) VALUES (?, ?, ?, ?)',
+      [ingredient_id || null, uid, action || null, text]
+    );
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('POST /api/activity err', err && err.stack ? err.stack : err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
 app.get('/api/ingredients/export/csv', authMiddleware, async (req, res) => {
     try {
         const type = (req.query.type || 'all');
@@ -850,6 +880,34 @@ async function hasColumn(tableName, columnName){
   }
 }
 
+// POST /api/auth/change-password
+app.post('/api/auth/change-password', authMiddleware, async (req, res) => {
+  try {
+    const uid = req.user && req.user.id;
+    if (!uid) return res.status(401).json({ error: 'Not authenticated' });
+
+    const { currentPassword, newPassword } = req.body || {};
+    if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Current and new password required' });
+    if (typeof newPassword !== 'string' || newPassword.length < 6) return res.status(400).json({ error: 'New password too short' });
+
+    // fetch user hashed password
+    const [rows] = await pool.query('SELECT password_hash FROM users WHERE id = ? LIMIT 1', [uid]);
+    if (!rows || rows.length === 0) return res.status(404).json({ error: 'User not found' });
+
+    const hash = rows[0].password_hash;
+    const ok = await bcrypt.compare(currentPassword, hash);
+    if (!ok) return res.status(400).json({ error: 'Current password is incorrect' });
+
+    const newHash = await bcrypt.hash(newPassword, 10);
+    await pool.query('UPDATE users SET password_hash = ? WHERE id = ?', [newHash, uid]);
+
+    return res.json({ ok: true, message: 'Password updated' });
+  } catch (err) {
+    console.error('POST /api/auth/change-password err', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Replace existing sendResetEmail with this block
 async function sendResetEmail(toEmail, code) {
   try {
@@ -942,11 +1000,34 @@ app.get('/api/events', authMiddleware, async (req,res)=>{
   const date = (req.query.date || '').slice(0,10);
   try {
     if(!date) return res.json({ items: [] });
-    // use activity rows as events for calendar
-    const [rows] = await pool.query('SELECT a.id, a.text, a.time, a.ingredient_id, i.name as ingredient_name FROM activity a LEFT JOIN ingredients i ON i.id = a.ingredient_id WHERE DATE(a.time) = ? ORDER BY a.time DESC', [date]);
+
+    // include user info (name/username) so calendar can show "By: <user>"
+    const [rows] = await pool.query(
+      `SELECT
+         a.id,
+         a.text,
+         a.time,
+         a.ingredient_id,
+         a.action,
+         i.name AS ingredient_name,
+         u.id AS user_id,
+         COALESCE(u.name, u.username, 'unknown') AS username
+       FROM activity a
+       LEFT JOIN ingredients i ON i.id = a.ingredient_id
+       LEFT JOIN users u ON u.id = a.user_id
+       WHERE DATE(a.time) = ?
+       ORDER BY a.time DESC`,
+      [date]
+    );
+
+    // rows now contain username and user_id
     res.json({ items: rows });
-  } catch(e){ console.error(e); res.status(500).json({ error: 'Server error' }); }
+  } catch(e){ 
+    console.error('GET /api/events err', e);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
+
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log('API + static server listening on', PORT));

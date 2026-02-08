@@ -203,12 +203,66 @@ function isLoggedIn(){ return !!getSession(); }
 
 function daysUntil(dateStr){ if(!dateStr) return Infinity; const t=new Date(); t.setHours(0,0,0,0); const d=new Date(dateStr); d.setHours(0,0,0,0); return Math.ceil((d - t)/(1000*60*60*24)); }
 
-function notify(msg){ try{ if(typeof Toast !== 'undefined') Toast.show(msg); else alert(msg); }catch(e){ alert(msg); } }
+document.querySelectorAll('.app-toast, .toast, .notification').forEach(t => {
+  // remove or fade out existing toasts so they don't stack
+  t.remove();
+});
+
+function notify(msg, opts = {}) {
+  try {
+    const timeout = Number(opts.timeout) || 3000;
+    let wrap = document.getElementById('app-toast-wrap');
+    if (!wrap) {
+      wrap = document.createElement('div');
+      wrap.id = 'app-toast-wrap';
+      wrap.style.position = 'fixed';
+      wrap.style.right = '18px';
+      wrap.style.bottom = '20px';
+      wrap.style.zIndex = '16000';
+      wrap.style.display = 'flex';
+      wrap.style.flexDirection = 'column';
+      wrap.style.gap = '8px';
+      document.body.appendChild(wrap);
+    }
+
+    const t = document.createElement('div');
+    t.className = 'app-toast';
+    t.setAttribute('role', 'status');
+    t.setAttribute('aria-live', 'polite');
+    t.textContent = String(msg || '');
+    // Minimal inline styles so it works even if CSS not yet loaded
+    t.style.background = 'var(--card, #fff)';
+    t.style.color = 'var(--text, #12202f)';
+    t.style.padding = '10px 12px';
+    t.style.borderRadius = '10px';
+    t.style.boxShadow = '0 12px 30px rgba(19,28,38,0.08)';
+    t.style.border = '1px solid rgba(0,0,0,0.06)';
+    t.style.fontWeight = '700';
+    t.style.minWidth = '160px';
+    t.style.maxWidth = '320px';
+    t.style.opacity = '0';
+    t.style.transform = 'translateY(8px)';
+    t.style.transition = 'all .28s ease';
+
+    wrap.appendChild(t);
+    // animate in
+    setTimeout(() => { t.style.opacity = '1'; t.style.transform = 'translateY(0)'; }, 20);
+
+    // auto remove
+    setTimeout(() => {
+      t.style.opacity = '0';
+      t.style.transform = 'translateY(8px)';
+      setTimeout(() => { try { t.remove(); } catch (e) { /* ignore */ } }, 260);
+    }, timeout);
+  } catch (e) {
+    try { console.warn('notify failed, fallback to console', msg); } catch (_) {}
+  }
+}
 
 const PERMISSIONS = {
-  Owner: { help: true, dashboard: true, calendar: true, profile: true, activity: true, inventory: true, reports: true, settings: true },
-  Baker: { help: false, dashboard: true, calendar: true, profile: false, activity: true, inventory: true, reports: true, settings: false },
-  Assistant: { help: false, dashboard: true, calendar: true, profile: false, activity: true, inventory: true, reports: false, settings: false },
+  Owner: { help: true, dashboard: true, calendar: true, profile: true, inventory: true, reports: true, settings: true },
+  Baker: { help: false, dashboard: true, calendar: true, profile: false, inventory: true, reports: true, settings: false },
+  Assistant: { help: false, dashboard: true, calendar: true, profile: false, inventory: true, reports: false, settings: false },
 };
 
 function getCurrentRole(){
@@ -807,7 +861,7 @@ function showView(name){
   if(name === 'dashboard'){ renderStockChart(); renderBestSellerChart(); renderDashboard(); }
   if(name === 'reports'){ renderReports(); }
   if(name === 'orders'){ renderOrders(); }
-  if(name === 'calendar'){ renderCalendar(); renderMonthCalendar(currentCalendarYear, currentCalendarMonth); }
+  if(name === 'calendar'){ renderCalendar(); renderCalendarForMonth(currentCalendarYear, currentCalendarMonth); }
   if(name === 'profile'){ populateProfile(); bindProfileControls(); }
 }
 
@@ -2262,7 +2316,6 @@ function printInventoryTable(){
     notify('Unable to prepare print preview');
   }
 }
-
 let currentCalendarYear = (new Date()).getFullYear();
 let currentCalendarMonth = (new Date()).getMonth();
 
@@ -2277,6 +2330,9 @@ async function renderCalendarForMonth(year, month) {
   const daysInMonth = last.getDate();
   const startWeekday = first.getDay(); // 0..6
 
+  // helper to build local YYYY-MM-DD (avoid toISOString which uses UTC)
+  const pad = n => String(n).padStart(2, '0');
+
   // build placeholder cells until we fetch per-date events
   const totalCells = Math.ceil((startWeekday + daysInMonth) / 7) * 7;
   const cells = [];
@@ -2286,7 +2342,8 @@ async function renderCalendarForMonth(year, month) {
     cell.className = 'calendar-cell';
     if (dayIndex >= 1 && dayIndex <= daysInMonth) {
       const date = new Date(year, month, dayIndex);
-      const iso = date.toISOString().slice(0,10);
+      // use local date components to avoid timezone shifts
+      const iso = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
       cell.dataset.date = iso;
       const dateNum = document.createElement('div');
       dateNum.className = 'date-num';
@@ -2324,14 +2381,15 @@ async function renderCalendarForMonth(year, month) {
         const type = (/stock in/i.test(ev.text) ? 'Stock in'
           : (/stock out/i.test(ev.text) ? 'Stock out'
             : (/initial stock|add|created/i.test(ev.text) ? 'Add' : 'Other')));
+
         const chip = document.createElement('div');
         chip.className = 'event-chip';
         chip.style.cursor = 'pointer';
         chip.textContent = `${type} ${ev.ingredient_name ? '— ' + ev.ingredient_name : ''}`;
         chip.title = ev.text;
+        // clicking a chip shows the single event (keep this behavior)
         chip.addEventListener('click', (e) => {
           e.stopPropagation();
-          // augment ev with username if available (some endpoints /api/activity contain username)
           openEventModal(ev);
         });
         listWrap.appendChild(chip);
@@ -2343,6 +2401,35 @@ async function renderCalendarForMonth(year, month) {
         more.textContent = `+${items.length - 4} more`;
         listWrap.appendChild(more);
       }
+
+      // clicking the day cell (outside chips) should open a modal showing ALL events for that day
+      cell.addEventListener('click', (e) => {
+        // if there are no events, show a simple message
+        let html = `<h3>Events — ${new Date(d).toLocaleDateString()}</h3>`;
+        if (!items || items.length === 0) {
+          html += `<div class="muted small" style="padding:12px">No events for ${d}</div>`;
+        } else {
+          html += `<div style="max-height:60vh;overflow:auto;margin-top:8px">`;
+          html += items.map(it => {
+            const time = it.time ? new Date(it.time).toLocaleString() : '';
+            const who = it.username ? escapeHtml(it.username) : (it.user_id ? `User ${escapeHtml(String(it.user_id))}` : 'system');
+            const ing = it.ingredient_name ? `<div><strong>Ingredient:</strong> ${escapeHtml(it.ingredient_name)}</div>` : '';
+            const action = it.action ? `<div><strong>Action:</strong> ${escapeHtml(it.action)}</div>` : '';
+            return `<div style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06);margin-bottom:6px">
+                      <div style="font-weight:800">${escapeHtml(it.text || '').slice(0,120)}</div>
+                      ${ing}
+                      ${action}
+                      <div class="muted small" style="margin-top:6px">By: ${who} • ${escapeHtml(time)}</div>
+                    </div>`;
+          }).join('');
+          html += `</div>`;
+        }
+        html += `<div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end"><button class="btn ghost" id="closeDayEvents" type="button">Close</button></div>`;
+        openModalHTML(html);
+        // wire close button
+        q('closeDayEvents')?.addEventListener('click', closeModal, { once: true });
+      });
+
     } catch (err) {
       console.warn('calendar fetch day err', d, err);
     }
@@ -2356,11 +2443,36 @@ async function renderCalendarForMonth(year, month) {
 
   let focusDate = new Date();
   async function refresh() {
-    await renderCalendarForMonth(focusDate.getFullYear(), focusDate.getMonth());
+    // keep shared globals in sync so other parts (header etc.) reflect the visible month
+    currentCalendarYear = focusDate.getFullYear();
+    currentCalendarMonth = focusDate.getMonth();
+    // update header if present
+    const header = q('view-calendar')?.querySelector('.page-header h2');
+    if (header) {
+      header.textContent = `Calendar — ${new Date(currentCalendarYear, currentCalendarMonth).toLocaleString([], { month:'long', year:'numeric' })}`;
+    }
+    await renderCalendarForMonth(currentCalendarYear, currentCalendarMonth);
   }
-  if (prev) prev.addEventListener('click', () => { focusDate.setMonth(focusDate.getMonth() - 1); refresh(); });
-  if (next) next.addEventListener('click', () => { focusDate.setMonth(focusDate.getMonth() + 1); refresh(); });
-  if (today) today.addEventListener('click', () => { focusDate = new Date(); refresh(); });
+
+  // Use capture-phase handlers and stopImmediatePropagation so other (duplicate) listeners do not also run
+  if (prev) prev.addEventListener('click', (e) => {
+    e.stopImmediatePropagation();
+    focusDate.setMonth(focusDate.getMonth() - 1);
+    refresh();
+  }, { capture: true });
+
+  if (next) next.addEventListener('click', (e) => {
+    e.stopImmediatePropagation();
+    focusDate.setMonth(focusDate.getMonth() + 1);
+    refresh();
+  }, { capture: true });
+
+  if (today) today.addEventListener('click', (e) => {
+    e.stopImmediatePropagation();
+    focusDate = new Date();
+    refresh();
+  }, { capture: true });
+
   // initial render
   setTimeout(refresh, 250);
 })();
@@ -2390,14 +2502,298 @@ window.setCurrentUser = setCurrentUser;
 window.buildCsvWithBom = buildCsvWithBom;
 
 
-
 function renderCalendar(){
   const header = q('view-calendar')?.querySelector('.page-header h2');
   if(header && q('calendarGrid')){
-    header.textContent = `Calendar — ${new Date(currentCalendarYear, currentCalendarMonth,1).toLocaleString([], {month:'long', year:'numeric'})}`;
+    header.textContent = `Calendar — ${new Date(currentCalendarYear, currentCalendarMonth).toLocaleString([], {month:'long', year:'numeric'})}`;
   }
   renderCalendarForMonth(currentCalendarYear, currentCalendarMonth);
 }
+
+// ---------- Calendar: robust implementation (replace existing calendar logic) ----------
+(function(){
+  const timeZone = 'Asia/Manila'; // force Manila as requested
+  const calendarGrid = document.getElementById('calendarGrid');
+  const prevBtn = document.getElementById('calendarPrev');
+  const nextBtn = document.getElementById('calendarNext');
+  const todayBtn = document.getElementById('calendarToday');
+  const dateText = document.getElementById('dateText');
+
+  if (!calendarGrid) {
+    console.warn('Calendar element not found (#calendarGrid)');
+    return;
+  }
+
+  // state stores a Date set to the 1st of the visible month
+  const state = {
+    viewDate: null
+  };
+
+  function nowInTZ(tz) {
+    // create a Date using the local representation for the target tz
+    // ensures "today" in Manila regardless of client timezone
+    const s = new Date().toLocaleString('en-US', { timeZone: tz });
+    return new Date(s);
+  }
+
+  function startOfMonth(date) {
+    return new Date(date.getFullYear(), date.getMonth(), 1);
+  }
+
+  function formatMonthYear(date) {
+    return date.toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone });
+  }
+
+  function pad(n){ return String(n).padStart(2,'0'); }
+  function toYYYYMMDD(d){
+    // use local Y/M/D of the date object (we assume d is already local-manipulated)
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  }
+
+  function renderEmptyGrid() {
+    calendarGrid.innerHTML = '';
+  }
+
+  function renderCalendarFor(viewDate) {
+    renderEmptyGrid();
+    const year = viewDate.getFullYear();
+    const month = viewDate.getMonth();
+
+    // first day of month (0 = Sunday)
+    const firstDayWeekday = new Date(year, month, 1).getDay();
+    // number of days in month
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+    // compute previous month tail days for leading blanks (if you want them visible)
+    const prevMonthDays = new Date(year, month, 0).getDate(); // last day of prev month
+
+    // Title
+    if (dateText) dateText.textContent = formatMonthYear(viewDate);
+
+    // create a 6x7 grid (42 cells) to keep layout stable
+    const totalCells = 42;
+    for (let i = 0; i < totalCells; i++) {
+      const cell = document.createElement('div');
+      cell.className = 'calendar-cell';
+      // compute day number and whether it's in current month
+      const cellIndex = i;
+      const dayOffset = cellIndex - firstDayWeekday + 1; // day number of current month if between 1..daysInMonth
+
+      let cellDate;
+      let isCurrentMonth = true;
+      if (dayOffset < 1) {
+        // previous month day
+        isCurrentMonth = false;
+        const d = prevMonthDays + dayOffset;
+        const prev = new Date(year, month - 1, d);
+        cellDate = prev;
+      } else if (dayOffset > daysInMonth) {
+        // next month day
+        isCurrentMonth = false;
+        const d = dayOffset - daysInMonth;
+        const next = new Date(year, month + 1, d);
+        cellDate = next;
+      } else {
+        cellDate = new Date(year, month, dayOffset);
+      }
+
+      const dayNum = document.createElement('div');
+      dayNum.className = 'date-num';
+      dayNum.textContent = String(cellDate.getDate());
+      cell.appendChild(dayNum);
+
+      // placeholder for event chips
+      const eventsCont = document.createElement('div');
+      eventsCont.className = 'day-events';
+      eventsCont.style.marginTop = '6px';
+      eventsCont.style.display = 'flex';
+      eventsCont.style.flexDirection = 'column';
+      eventsCont.style.gap = '4px';
+      eventsCont.style.overflow = 'hidden';
+      eventsCont.style.maxHeight = '4.6rem';
+      cell.appendChild(eventsCont);
+
+      // dim non-current-month cells
+      if (!isCurrentMonth) {
+        cell.style.opacity = '0.42';
+      }
+
+      // click handler: open events modal for this date
+      cell.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const dStr = toYYYYMMDD(cellDate);
+        openDayEvents(dStr, cellDate);
+      });
+
+      // attach data-date attribute for debugging
+      cell.setAttribute('data-date', toYYYYMMDD(cellDate));
+      calendarGrid.appendChild(cell);
+    }
+
+    // lazy-load event summaries for visible month days (fetch for each visible cell)
+    // We'll fetch server-side events per day when clicked; but also prefetch a day's top 2 events to show chips.
+    prefetchMonthEvents(year, month);
+  }
+
+  async function prefetchMonthEvents(year, month) {
+    // For performance we fetch only event counts for each day: but your API supports /api/events?date=YYYY-MM-DD
+    // We'll fetch for each day in the visible month (reasonable for small-month). If you prefer one batched endpoint, replace with that.
+    const days = new Date(year, month + 1, 0).getDate();
+    for (let d = 1; d <= days; d++) {
+      const dateObj = new Date(year, month, d);
+      const dateStr = toYYYYMMDD(dateObj);
+      // fetch events for the date (non-blocking)
+      fetch(`/api/events?date=${dateStr}`, { credentials: 'include' })
+        .then(r => r.json())
+        .then(payload => {
+          if (!payload || !Array.isArray(payload.items)) return;
+          const items = payload.items.slice(0,2); // show up to 2 chips
+          // find cell with data-date
+          const cell = calendarGrid.querySelector(`[data-date="${dateStr}"]`);
+          if (!cell) return;
+          const eventsCont = cell.querySelector('.day-events');
+          eventsCont.innerHTML = '';
+          for (const it of items) {
+            const chip = document.createElement('div');
+            chip.className = 'event-chip';
+            const who = it.username || (it.user_id ? `user:${it.user_id}` : 'unknown');
+            // short text: action or first 28 chars
+            const txt = it.action ? `${it.action}` : (it.text || '');
+            chip.textContent = `${txt}`.slice(0,40);
+            eventsCont.appendChild(chip);
+          }
+        })
+        .catch(()=>{/* ignore prefetch errors */});
+    }
+  }
+
+  async function openDayEvents(dateStr, dateObj) {
+    // fetch full events for that date and open modal
+    try {
+      const res = await fetch(`/api/events?date=${dateStr}`, { credentials: 'include' });
+      if (!res.ok) {
+        const text = await res.text().catch(()=> 'Server error');
+        return showModal(`Could not load events: ${text}`);
+      }
+      const data = await res.json();
+      const items = data.items || [];
+      // Build modal content
+      const content = document.createElement('div');
+      content.style.padding = '12px';
+      const h = document.createElement('h3');
+      h.textContent = `Events — ${dateObj.toLocaleDateString('en-US', { timeZone })}`;
+      h.style.margin = '0 0 8px 0';
+      content.appendChild(h);
+
+      if (items.length === 0) {
+        const p = document.createElement('div');
+        p.className = 'muted small';
+        p.textContent = 'No events';
+        content.appendChild(p);
+      } else {
+        for (const it of items) {
+          const wrap = document.createElement('div');
+          wrap.style.padding = '8px';
+          wrap.style.borderBottom = '1px solid rgba(0,0,0,0.06)';
+          const titleLine = document.createElement('div');
+          titleLine.style.fontWeight = '800';
+          titleLine.style.marginBottom = '6px';
+          const who = (it.username && it.username !== 'unknown') ? it.username : (it.user_id ? `User ${it.user_id}` : 'unknown');
+          titleLine.textContent = `${it.action ? it.action : 'Activity'} — By: ${who}`;
+          wrap.appendChild(titleLine);
+
+          if (it.ingredient_name) {
+            const ing = document.createElement('div');
+            ing.innerHTML = `<strong>Ingredient:</strong> ${escapeHtml(it.ingredient_name)}`;
+            wrap.appendChild(ing);
+          }
+          if (it.time) {
+            const when = document.createElement('div');
+            const dt = new Date(it.time);
+            when.className = 'muted small';
+            when.textContent = `${dt.toLocaleString('en-US', { timeZone })}`;
+            wrap.appendChild(when);
+          }
+          const text = document.createElement('div');
+          text.style.marginTop = '6px';
+          text.textContent = it.text || '';
+          wrap.appendChild(text);
+
+          content.appendChild(wrap);
+        }
+      }
+
+      showModalElement(content);
+    } catch (err) {
+      console.error('openDayEvents err', err);
+      showModal('Failed to load events');
+    }
+  }
+
+  // show modal using existing openEventModal if present else a simple modal util
+  function showModalElement(node) {
+    if (typeof openEventModal === 'function') {
+      // openEventModal expects a single event item; fall back to simple method:
+      const modal = document.getElementById('modal');
+      const modalContent = document.getElementById('modalContent');
+      modalContent.innerHTML = '';
+      modalContent.appendChild(node);
+      modal.classList.remove('hidden');
+      modal.setAttribute('aria-hidden','false');
+    } else {
+      showModal(node.innerHTML || String(node));
+    }
+  }
+
+  function showModal(htmlOrText) {
+    const modal = document.getElementById('modal');
+    const modalContent = document.getElementById('modalContent');
+    if (!modal || !modalContent) {
+      alert(typeof htmlOrText === 'string' ? htmlOrText : 'Modal missing');
+      return;
+    }
+    modalContent.innerHTML = (typeof htmlOrText === 'string') ? htmlOrText : '';
+    modal.classList.remove('hidden');
+    modal.setAttribute('aria-hidden','false');
+  }
+
+  // basic HTML escape helper
+  function escapeHtml(s){
+    if (!s && s !== 0) return '';
+    return String(s)
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;')
+      .replace(/'/g,'&#39;');
+  }
+
+  // navigation helpers
+  function changeMonth(delta) {
+    // setMonth handles year rollover automatically
+    const v = state.viewDate;
+    v.setMonth(v.getMonth() + delta);
+    state.viewDate = startOfMonth(v);
+    renderCalendarFor(state.viewDate);
+  }
+
+  function goToday() {
+    const manilaNow = nowInTZ(timeZone);
+    state.viewDate = startOfMonth(manilaNow);
+    renderCalendarFor(state.viewDate);
+  }
+
+  // attach buttons
+  if (prevBtn) prevBtn.addEventListener('click', ()=> changeMonth(-1));
+  if (nextBtn) nextBtn.addEventListener('click', ()=> changeMonth(1));
+  if (todayBtn) todayBtn.addEventListener('click', ()=> goToday());
+
+  // Init: use Manila "today"
+  const manila = nowInTZ(timeZone);
+  state.viewDate = startOfMonth(manila);
+  renderCalendarFor(state.viewDate);
+
+})();
 
 function destroyAllCharts(){
   [chartStock, chartBestSeller, chartSalesTimeline, chartIngredientUsage].forEach(c=> { try{ c && c.destroy(); } catch(e){} });
@@ -2788,26 +3184,188 @@ function openBakeModal(productId){
 }
 
 function populateSettings(){
-  const list=q('usersList'); if(list){
-    const acc=loadAccounts(); const curr=getSession()?.username;
-    const rows=Object.keys(acc||{}).map(u=>{ const role=acc[u].role||''; return `<div class="user-row" style="display:flex;justify-content:space-between;align-items:center;padding:8px;border-radius:8px;background:var(--card);border:1px solid rgba(0,0,0,0.04)"><div><strong>${u}</strong><div class="muted small">${role}</div></div><div>${u!==curr?`<button class="btn small" data-del="${u}" type="button">Delete</button>`:`<span class="muted small">Signed in</span>`}</div></div>`}).join('');
+  // users list
+  const list = q('usersList');
+  if(list){
+    const acc = loadAccounts();
+    const curr = getSession()?.username;
+    const rows = Object.keys(acc||{}).map(u=>{
+      const role = acc[u].role||'';
+      return `<div class="user-row" style="display:flex;justify-content:space-between;align-items:center;padding:8px;border-radius:8px;background:var(--card);border:1px solid rgba(0,0,0,0.04)">
+        <div><strong>${escapeHtml(u)}</strong><div class="muted small">${escapeHtml(role)}</div></div>
+        <div>${u!==curr?`<button class="btn small" data-del="${escapeHtml(u)}" type="button">Delete</button>`:`<span class="muted small">Signed in</span>`}</div>
+      </div>`;
+    }).join('');
     list.innerHTML = rows || '<div class="muted small">No users</div>';
-    list.querySelectorAll('button[data-del]').forEach(b=> b.addEventListener('click', ()=> { const u=b.dataset.del; if(confirm(`Delete user ${u}?`)){ const ac=loadAccounts(); delete ac[u]; saveAccounts(ac); populateSettings(); notify('User deleted'); } }));
+    list.querySelectorAll('button[data-del]').forEach(b=> b.addEventListener('click', ()=> {
+      const u = b.dataset.del;
+      if(!u) return;
+      if(confirm(`Delete user ${u}?`)){
+        const ac = loadAccounts();
+        delete ac[u];
+        saveAccounts(ac);
+        populateSettings();
+        notify('User deleted');
+      }
+    }));
   }
-  const theme = localStorage.getItem(THEME_KEY) || 'light';
-  if(q('themeToggle')) q('themeToggle').checked = theme === 'dark';
-  const bakery = JSON.parse(localStorage.getItem('bakery_profile') || '{}');
-  if(q('bakeryName')) q('bakeryName').value = bakery.name || '';
-  if(q('bakeryAddress')) q('bakeryAddress').value = bakery.address || '';
-  if(q('bakeryUnit')) q('bakeryUnit').value = bakery.unit || '';
 
-  // save bakery
-  q('saveBakery')?.addEventListener('click', (e)=> { e.preventDefault(); const o={name:q('bakeryName')?.value||'', address:q('bakeryAddress')?.value||'', unit:q('bakeryUnit')?.value||''}; localStorage.setItem('bakery_profile', JSON.stringify(o)); });
+  // Inject CSS for toggle switches, toast and custom cursor (idempotent)
+  if(!document.getElementById('settings-toggle-style')){
+    const st = document.createElement('style');
+    st.id = 'settings-toggle-style';
+    st.textContent = `
+      /* simple switch control */
+      .switch { display:inline-flex; align-items:center; gap:8px; cursor:pointer; user-select:none; }
+      .switch input { display:none; }
+      .switch .slider { width:44px; height:24px; background:#ddd; border-radius:24px; position:relative; transition:background .18s ease; box-shadow: inset 0 1px 0 rgba(255,255,255,0.5); }
+      .switch .slider::after { content:''; position:absolute; left:4px; top:4px; width:16px; height:16px; background:#fff; border-radius:50%; transition: transform .18s ease; box-shadow:0 1px 2px rgba(0,0,0,0.12); }
+      .switch input:checked + .slider { background: #1b85ec; }
+      .switch input:checked + .slider::after { transform: translateX(20px); }
 
-  q('themeToggle')?.addEventListener('change', ()=> {
-    const isDark = q('themeToggle')?.checked;
-    setTheme(isDark ? 'dark' : 'light');
-  });
+      /* toast notifications */
+      #app-toast-wrap { position:fixed; right:18px; bottom:20px; z-index:16000; display:flex; flex-direction:column; gap:8px; pointer-events:none; }
+      .app-toast { pointer-events:auto; background:var(--card); color:var(--text); padding:10px 12px; border-radius:10px; box-shadow:0 12px 30px rgba(19,28,38,0.08); font-weight:700; min-width:180px; max-width:320px; border:1px solid rgba(0,0,0,0.06); opacity:0; transform:translateY(8px); transition:all .28s ease; }
+      .app-toast.show { opacity:1; transform:translateY(0); }
+
+      /* custom cursor using shipped image (use hotspot 14,14). Avoid forcing replacement on interactive controls. */
+      .custom-cursor, .custom-cursor * { cursor: url("./default.png") 14 14, auto !important; }
+      /* allow normal cursors on interactive elements so pointer/text cursors work as expected */
+      .custom-cursor a,
+      .custom-cursor button,
+      .custom-cursor input,
+      .custom-cursor textarea,
+      .custom-cursor select,
+      .custom-cursor label,
+      .custom-cursor [role="button"],
+      .custom-cursor .btn { cursor: auto !important; }
+    `;
+    document.head.appendChild(st);
+  }
+
+  // Make notify function "functional" (override global)
+  if(typeof window.notify !== 'function' || !window.notify._overrideBySettings){
+    window.notify = function(message, opts){
+      try{
+        const timeout = (opts && Number(opts.timeout)) ? Number(opts.timeout) : 3000;
+        const maxToasts = (opts && Number(opts.max)) ? Number(opts.max) : 4;
+
+        let wrap = document.getElementById('app-toast-wrap');
+        if(!wrap){
+          wrap = document.createElement('div');
+          wrap.id = 'app-toast-wrap';
+          document.body.appendChild(wrap);
+        }
+
+        // If too many toasts, remove oldest gracefully
+        while(wrap.children.length >= maxToasts){
+          const oldest = wrap.firstElementChild;
+          if(!oldest) break;
+          oldest.classList.remove('show');
+          // schedule actual removal after hide transition
+          setTimeout(()=> { try{ oldest.remove(); }catch(e){} }, 260);
+        }
+
+        const t = document.createElement('div');
+        t.className = 'app-toast';
+        t.setAttribute('role','status');
+        t.setAttribute('aria-live','polite');
+        t.textContent = String(message || '');
+        wrap.appendChild(t);
+
+        // animate in
+        setTimeout(()=> t.classList.add('show'), 20);
+
+        // auto-remove after timeout
+        setTimeout(()=> {
+          t.classList.remove('show');
+          setTimeout(()=> { try{ t.remove(); }catch(e){} }, 260);
+        }, Math.max(1200, timeout));
+      }catch(e){
+        try{ alert(message); }catch(_){}
+      }
+    };
+    window.notify._overrideBySettings = true;
+  }
+
+  // Replace existing theme checkbox with switch markup (preserve id 'themeToggle')
+  const currentTheme = localStorage.getItem(THEME_KEY) || 'light';
+  const oldThemeEl = document.getElementById('themeToggle');
+
+  if (oldThemeEl) {
+    // If already wrapped in a .switch, do nothing to avoid duplicates
+    if (!oldThemeEl.closest || !oldThemeEl.closest('.switch')) {
+      const wrap = document.createElement('label');
+      wrap.className = 'switch';
+      wrap.innerHTML = `<input id="themeToggle" type="checkbox" ${currentTheme === 'dark' ? 'checked': ''} /><span class="slider" aria-hidden="true"></span><span class="switch-label"></span>`;
+      try {
+        oldThemeEl.parentNode.replaceChild(wrap, oldThemeEl);
+      } catch (e) {
+        // fallback: insert and remove
+        if (oldThemeEl.parentNode) {
+          oldThemeEl.parentNode.insertBefore(wrap, oldThemeEl);
+          oldThemeEl.remove();
+        }
+      }
+    }
+  } else {
+    // if not present, optionally append to settings area (only if not already present)
+    const container = q('settingsControls') || q('usersList')?.parentElement;
+    if (container && !container.querySelector('.switch #themeToggle') && !document.getElementById('themeToggle')) {
+      const wrap = document.createElement('div');
+      wrap.style.marginBottom = '10px';
+      wrap.innerHTML = `<label class="switch"><input id="themeToggle" type="checkbox" ${currentTheme === 'dark' ? 'checked': ''} /><span class="slider" aria-hidden="true"></span><span class="switch-label">Dark theme</span></label>`;
+      container.insertBefore(wrap, container.firstChild);
+    }
+  }
+
+  // Custom cursor toggle UI (insert near usersList if not present)
+  if(!document.getElementById('customCursorToggle')){
+    const container = q('settingsControls') || q('usersList')?.parentElement;
+    if(container){
+      const row = document.createElement('div');
+      row.style.margin = '8px 0';
+      row.innerHTML = `<label class="switch"><input id="customCursorToggle" type="checkbox" ${(localStorage.getItem('bakery_custom_cursor') === 'true') ? 'checked':''} /><span class="slider" aria-hidden="true"></span><span class="switch-label"> Custom cursor</span></label>`;
+      container.insertBefore(row, container.firstChild);
+    }
+  }
+
+  // Wire theme toggle to use applyTheme
+  const themeToggleEl = document.getElementById('themeToggle');
+  if(themeToggleEl){
+    themeToggleEl.addEventListener('change', (e)=> {
+      const isDark = !!e.target.checked;
+      try { applyTheme(isDark ? 'dark' : 'light'); } catch(err){
+        // fallback: simple class toggle
+        if(isDark) document.documentElement.classList.add('theme-dark'); else document.documentElement.classList.remove('theme-dark');
+        localStorage.setItem(THEME_KEY, isDark ? 'dark' : 'light');
+      }
+      notify(`Theme set to ${isDark ? 'dark' : 'light'}`);
+    });
+  }
+
+  // Wire custom cursor toggle
+  const curToggle = document.getElementById('customCursorToggle');
+  if(curToggle){
+    const apply = (flag) => {
+      if(flag) document.documentElement.classList.add('custom-cursor');
+      else document.documentElement.classList.remove('custom-cursor');
+      localStorage.setItem('bakery_custom_cursor', flag ? 'true' : 'false');
+    };
+    // initial apply
+    apply(localStorage.getItem('bakery_custom_cursor') === 'true');
+    curToggle.addEventListener('change', (e) => {
+      apply(!!e.target.checked);
+      notify('Custom cursor ' + (e.target.checked ? 'enabled' : 'disabled'));
+    });
+  }
+
+  // remove references to bakery profile controls (we intentionally don't touch bakeryName, bakeryAddress etc.)
+  // ensure any old saveBakery handler is not duplicated: remove if exists
+  const oldSave = q('saveBakery');
+  if(oldSave){
+    try { oldSave.replaceWith(oldSave.cloneNode(true)); } catch(e){} // cheap way to remove listeners
+  }
 }
 
 // --- Fetch ingredients from backend and hydrate local DB ---
@@ -3395,28 +3953,82 @@ function saveProfile(){
   notify('Profile saved');
 }
 
-
-function changePassword(){
+// Replace existing changePassword() with this
+async function changePassword(){
   const s = getSession();
   if(!s){ notify('Not signed in'); return; }
-  const cur = q('curPassword')?.value || '';
-  const nw = q('newPassword')?.value || '';
-  const cnf = q('confirmPassword')?.value || '';
+
+  const cur = (q('curPassword')?.value || '').toString();
+  const nw  = (q('newPassword')?.value || '').toString();
+  const cnf = (q('confirmPassword')?.value || '').toString();
 
   if(!cur || !nw || !cnf){ notify('Fill all password fields'); return; }
   if(nw.length < 6){ notify('New password should be at least 6 characters'); return; }
   if(nw !== cnf){ notify('New password and confirmation do not match'); return; }
 
-  const acc = loadAccounts();
-  if(!acc[s.username]){ notify('Account not found'); return; }
-  if(acc[s.username].password !== cur){ notify('Current password is incorrect'); return; }
+  // If session looks server-backed (has numeric id or token), try server endpoint first
+  // Adjust condition if your session object shape is different.
+  if (s.id || s.username && s.username.includes('@')) {
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword: cur, newPassword: nw })
+      });
+      const body = await res.json().catch(()=>null);
+      if (res.ok) {
+        q('curPassword').value = q('newPassword').value = q('confirmPassword').value = '';
+        if(q('changePassStatus')) q('changePassStatus').textContent = 'Password updated';
+        notify('Password changed');
+      } else {
+        notify((body && (body.error || body.message)) || 'Password change failed');
+      }
+    } catch (e) {
+      console.error('changePassword (server) error', e);
+      notify('Server error while changing password');
+    }
+    return;
+  }
 
-  acc[s.username].password = nw;
+  // Fallback: local/demo account handling
+  const acc = loadAccounts() || {};
+  const lookup = (s.username || '').toString().toLowerCase();
+
+  // find account key where username or email matches (case-insensitive)
+  const key = Object.keys(acc).find(k => {
+    const a = acc[k] || {};
+    if (!k) return false;
+    if (k.toLowerCase() === lookup) return true;
+    if ((a.username || '').toString().toLowerCase() === lookup) return true;
+    if ((a.email || '').toString().toLowerCase() === lookup) return true;
+    return false;
+  });
+
+  if (!key) { notify('Account not found'); return; }
+
+  // compare stored password (demo apps usually store plain text here)
+  const account = acc[key];
+  if (typeof account.password === 'undefined') {
+    notify('Account does not have a local password (use server login).');
+    return;
+  }
+
+  if (account.password !== cur) {
+    notify('Current password is incorrect');
+    return;
+  }
+
+  // update local demo password
+  account.password = nw;
+  acc[key] = account;
   saveAccounts(acc);
-  q('curPassword').value = ''; q('newPassword').value = ''; q('confirmPassword').value = '';
+
+  q('curPassword').value = q('newPassword').value = q('confirmPassword').value = '';
   if(q('changePassStatus')) q('changePassStatus').textContent = 'Password updated';
   notify('Password changed');
 }
+
 
 function deleteAccountDemo(){
   const s = getSession(); if(!s) return;
@@ -3442,7 +4054,7 @@ function bindProfileControls(){
       const wrap = q('profileAvatarPreview');
       if(wrap){ wrap.innerHTML=''; const img=document.createElement('img'); img.src=dataURL; wrap.appendChild(img); }
       localStorage.setItem(avatarKeyFor(s.username), dataURL);
-      notify('Avatar updated');
+      notify('Avatar updated', 1);
     };
     reader.readAsDataURL(file);
   });
@@ -3452,7 +4064,7 @@ function bindProfileControls(){
     localStorage.removeItem(avatarKeyFor(s.username));
     const wrap = q('profileAvatarPreview');
     if(wrap){ wrap.innerHTML = '<i class="fa fa-user fa-2x"></i>'; }
-    notify('Avatar removed');
+    notify('Avatar removed', 1);
   });
 
   q('profileSaveServer')?.addEventListener('click', async ()=> {
@@ -3462,7 +4074,7 @@ function bindProfileControls(){
     const payload = { name: q('profileName')?.value || s.name, phone: q('profilePhone')?.value||'', email: q('profileEmail')?.value||'' };
     try {
       const res = await fetch('/api/users/me', { method:'PUT', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify(payload) });
-      if(res.ok){ notify('Profile updated on server'); const data = await res.json(); if(data && data.user){ setSession(data.user, !!getPersistentSession()); populateProfile(); } }
+      if(res.ok){ notify('Profile updated on server', 1); const data = await res.json(); if(data && data.user){ setSession(data.user, !!getPersistentSession()); populateProfile(); } }
       else { const text = await res.text().catch(()=>null); notify('Server update failed'); console.debug('profileSaveServer failed', res.status, text); }
     } catch(e){ notify('Server update failed'); console.debug('profileSaveServer error', e && e.message ? e.message : e); }
   });
@@ -5713,67 +6325,138 @@ function frontendHasRole(roles=[]) {
   return roles.map(r => String(r).toLowerCase()).includes(my);
 }
 
-function openEventModal(row) {
+// Example: inside your calendar click -> open modal logic
+// assume `eventItem` is the object returned from /api/events (has text, time, ingredient_name, username, user_id, action)
+
+function openEventModal(eventItem) {
+  const modal = document.getElementById('modal');
+  const modalContent = document.getElementById('modalContent');
+
+  const who = (eventItem.username && eventItem.username !== 'unknown') ? escapeHtml(eventItem.username) : 'unknown';
+  const when = eventItem.time ? (new Date(eventItem.time)).toLocaleString() : '—';
+  const ingredient = eventItem.ingredient_name ? `<div><strong>Ingredient:</strong> ${escapeHtml(eventItem.ingredient_name)}</div>` : '';
+  const action = eventItem.action ? `<div><strong>Action:</strong> ${escapeHtml(eventItem.action)}</div>` : '';
+
+  modalContent.innerHTML = `
+    <div style="padding:8px;">
+      <h3 style="margin:0 0 8px 0;">Event</h3>
+      <div class="muted small" style="margin-bottom:8px">By: <strong>${who}</strong></div>
+      <div class="muted small" style="margin-bottom:8px">When: ${escapeHtml(when)}</div>
+      ${ingredient}
+      ${action}
+      <div style="margin-top:8px;color:var(--text)">${escapeHtml(eventItem.text || '')}</div>
+    </div>
+  `;
+
+  modal.classList.remove('hidden');
+  modal.setAttribute('aria-hidden','false');
+}
+
+
+async function fetchHistory(limit = 200, page = 1) {
   try {
-    const modal = document.getElementById('modal');
-    const content = document.getElementById('modalContent');
-    const time = row.time ? new Date(row.time).toLocaleString() : '—';
-    const username = row.username || (row.user_id ? ('User #' + row.user_id) : 'Unknown');
-    const ingredient = row.ingredient_name || (row.ingredient_id ? ('#' + row.ingredient_id) : '');
-    const action = (/stock in/i.test(row.text) ? 'Stock in'
-      : (/stock out/i.test(row.text) ? 'Stock out'
-        : (/initial stock|add|created/i.test(row.text) ? 'Add / Created' : 'Activity')));
-
-    content.innerHTML = `
-      <div style="display:flex;flex-direction:column;gap:10px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;">
-          <div>
-            <strong style="font-size:16px">${escapeHtml(action)}</strong>
-            <div class="muted small">${escapeHtml(ingredient)}</div>
-          </div>
-          <div class="muted small">${escapeHtml(time)}</div>
-        </div>
-
-        <div><strong>By:</strong> ${escapeHtml(username)}</div>
-
-        <div style="white-space:pre-wrap;color:var(--text);">${escapeHtml(row.text)}</div>
-
-        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
-          <button class="btn ghost small" id="modalCloseBtnInline">Close</button>
-          ${frontendHasRole(['Owner','Admin','Baker']) ? '<button class="btn small primary" id="modalGotoItem">Go to item</button>' : ''}
-        </div>
-      </div>
-    `;
-
-    // wire modal controls
-    modal.classList.remove('hidden');
-    modal.setAttribute('aria-hidden', 'false');
-
-    // inline close button
-    const closeInline = document.getElementById('modalCloseBtnInline');
-    if (closeInline) closeInline.addEventListener('click', () => {
-      modal.classList.add('hidden'); modal.setAttribute('aria-hidden','true');
-    });
-
-    // goto item if present
-    const goto = document.getElementById('modalGotoItem');
-    if (goto) {
-      goto.addEventListener('click', () => {
-        modal.classList.add('hidden'); modal.setAttribute('aria-hidden','true');
-        // If your app has a function to navigate to inventory item, call it here:
-        // e.g. showInventoryItem(row.ingredient_id) — adapt to your app.
-        if (typeof showInventoryItem === 'function' && row.ingredient_id) {
-          showInventoryItem(row.ingredient_id);
-        } else {
-          // fallback: open inventory view and show search for ingredient name
-          openView && openView('inventory');
-          const s = document.getElementById('searchIng');
-          if (s && row.ingredient_name) { s.value = row.ingredient_name; triggerIngredientSearch && triggerIngredientSearch(); }
-        }
-      });
-    }
-
+    // use apiFetch so cookies/JWT are included
+    const res = await apiFetch(`/api/activity?limit=${encodeURIComponent(limit)}&page=${encodeURIComponent(page)}`);
+    // apiFetch returns object or throws; adapt if your apiFetch returns raw fetch response
+    return res;
   } catch (err) {
-    console.error('openEventModal err', err);
+    console.warn('fetchHistory err', err);
+    return { items: [], meta: { total: 0, page: 1, limit: 0 } };
+  }
+}
+
+function formatTime(ts) {
+  try {
+    const d = new Date(ts);
+    // short ISO or human friendly; adjust to your locale if required
+    return d.toISOString();
+  } catch (e) {
+    return String(ts || '');
+  }
+}
+
+function makeHistoryItemHtml(it) {
+  // it: { id, ingredient_id, user_id, text, time, username, ingredient_name, action }
+  const who = it.username ? `<strong>${escapeHtml(it.username)}</strong>` : '<em>system</em>';
+  const what = it.ingredient_name ? `<strong>${escapeHtml(it.ingredient_name)}</strong>` : '';
+  const action = it.action ? escapeHtml(it.action) : '';
+  const text = escapeHtml(it.text || '');
+  const time = formatTime(it.time);
+  return `
+    <li style="padding:10px;border-radius:8px;margin-bottom:8px;background:var(--card);border:1px solid rgba(0,0,0,0.04);box-shadow:var(--shadow);">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+        <div style="min-width:0;flex:1">
+          <div style="font-weight:800">${who} ${action ? `• ${action}` : ''} ${what}</div>
+          <div class="muted small" style="margin-top:6px">${text}</div>
+        </div>
+        <div class="muted small" style="white-space:nowrap;margin-left:8px">${time}</div>
+      </div>
+    </li>
+  `;
+}
+
+// small HTML-escape helper
+function escapeHtml(s) {
+  if (!s && s !== 0) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+async function renderHistory(opts = {}) {
+  const limit = opts.limit || 200;
+  const page = opts.page || 1;
+  const wrapper = document.getElementById('activityList'); // your History UL
+  if (!wrapper) return;
+
+  wrapper.innerHTML = '<li class="muted small" style="padding:10px">Loading history…</li>';
+  const resp = await fetchHistory(limit, page);
+  const items = resp && resp.items ? resp.items : [];
+  if (!items || items.length === 0) {
+    wrapper.innerHTML = '<li class="muted small" style="padding:10px">No history yet.</li>';
+    return;
+  }
+  const html = items.map(it => makeHistoryItemHtml(it)).join('\n');
+  wrapper.innerHTML = html;
+}
+
+// call renderHistory when History view is shown
+document.addEventListener('DOMContentLoaded', () => {
+  // nav button wired to data-view earlier. If you have a click handler that switches views, hook into that.
+  document.querySelectorAll('.nav-item').forEach(btn => {
+    btn.addEventListener('click', (ev) => {
+      const view = btn.getAttribute('data-view');
+      if (view === 'activity' || view === 'history') {
+        // small timeout to wait until view is visible
+        setTimeout(() => renderHistory({ limit: 200 }), 40);
+      }
+    });
+  });
+
+  // also call on initial app show if the History view is active
+  if (!document.getElementById('app').classList.contains('hidden')) {
+    // if History view is open by default, render
+    const activeNav = document.querySelector('.nav-item.active');
+    if (activeNav && (activeNav.dataset.view === 'activity' || activeNav.dataset.view === 'history')) {
+      renderHistory({ limit: 200 });
+    }
+  }
+});
+
+// Optional helper for client-only events (use sparingly to avoid double logs)
+async function logClientActivity({ ingredient_id = null, action = '', text = '' }) {
+  try {
+    // do not throw on error — non-blocking
+    await apiFetch('/api/activity', { method: 'POST', body: { ingredient_id, action, text }});
+    // refresh history if visible
+    const activeNav = document.querySelector('.nav-item.active');
+    if (activeNav && (activeNav.dataset.view === 'activity' || activeNav.dataset.view === 'history')) {
+      renderHistory({ limit: 200 });
+    }
+  } catch (e) {
+    console.warn('logClientActivity failed', e);
   }
 }
