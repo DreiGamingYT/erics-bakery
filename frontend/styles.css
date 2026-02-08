@@ -832,26 +832,50 @@ body{
   #view-reports .card h3 { font-size: 15px; }
 
   #ingredientList {
-    padding: 6px 4px 0 4px;
+    max-height: calc(100vh - 220px); /* adjust if your topbar / header height differ */
+    overflow: auto;
+    -webkit-overflow-scrolling: touch; /* smooth inertia scrolling on iOS */
+    padding-right: 8px; /* room for scrollbar / comfortable padding */
   }
+
   #ingredientList .inv-table {
     display: block;
     width: 100%;
+    min-width: 640px; /* allows horizontal scroll for wide tables; lower if you prefer */
     overflow-x: auto;
+    overflow-y: visible;
     -webkit-overflow-scrolling: touch;
-    border-radius: 10px;
   }
-  #ingredientList .inv-table thead {
-    display: table-header-group;
+
+  #ingredientList .inv-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--card);
   }
-  #ingredientList .inv-table thead th { padding: 10px 8px; font-size:12px; }
-  #ingredientList .inv-table td { padding: 8px; font-size:13px; }
-  #ingredientList .inv-table .in-input,
-  #ingredientList .inv-table .out-input,
-  #ingredientList .inv-table .min-input { width: 76px; }
+
+  #ingredientList .inv-table tbody tr {
+    display: table-row;
+  }
+
+  @media (max-width:560px) {
+    #ingredientList {
+      max-height: calc(100vh - 180px);
+    }
+    #ingredientList .inv-table {
+      min-width: 100%;
+      display: block;
+      overflow-x: auto;
+    }
+    /* keep reflow rows (grid card style) inside the scrollable container */
+    #ingredientList .inv-table tbody tr {
+      display: grid;
+      grid-template-columns: 1fr auto;
+    }
+  }
 }
 
-@media (max-width:560px) {
+/* @media (max-width:560px) {
   #ingredientList { border-radius: 10px; padding: 6px; }
   #ingredientList .inv-table { border-radius: 8px; }
   #ingredientList .inv-table thead { display: none; } 
@@ -883,7 +907,7 @@ body{
   #ingredientList .inv-table td:nth-child(9) { display:flex; gap:8px; justify-self:end; align-items:center; }
   #ingredientList .inv-table .qty-value { font-weight:900; font-size:15px; }
   #ingredientList .inv-table input { width: 100%; min-width: 0; }
-}
+} */
 
 .theme-dark #ingredientList .inv-table tbody tr {
   background: var(--card);
