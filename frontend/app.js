@@ -307,10 +307,14 @@ function nextOrderId(){
 }
 
 const PROGRAMMED_CONSUMPTION = {
-  'flour (hard & soft)': { dailyAmount: 62.5, unit: 'kg' },
-  'sugar (white & brown)': { dailyAmount: 8, unit: 'kg' }, 
-  'butter / margarine / oil / shortening': { dailyAmount: 10, unit: 'kg' },
-  'eggs': { dailyAmount: 200, unit: 'pcs' }, 
+  // name-based keys (lowercased to match computeThresholdForIngredient's normalization)
+  'flour': { dailyAmount: 62.5, unit: 'kg' },
+  'sugar': { dailyAmount: 8, unit: 'kg' },
+  'butter': { dailyAmount: 10, unit: 'kg' },
+  'margarine': { dailyAmount: 10, unit: 'kg' },
+  'oil': { dailyAmount: 10, unit: 'kg' },
+  'shortening': { dailyAmount: 10, unit: 'kg' },
+  'eggs': { dailyAmount: 200, unit: 'pcs' },
   'milk / cream': { dailyAmount: 15, unit: 'L' },
   'yeast': { dailyAmount: 2, unit: 'kg' },
   'baking powder': { dailyAmount: 1, unit: 'kg' },
@@ -319,7 +323,25 @@ const PROGRAMMED_CONSUMPTION = {
   'vanilla': { dailyAmount: 0.1, unit: 'L' },
   'sesame seeds': { dailyAmount: 1, unit: 'kg' },
   'food coloring': { dailyAmount: 50, unit: 'mL' },
-  'dobrim': { dailyAmount: 2, unit: 'kg' }
+  'dobrim': { dailyAmount: 2, unit: 'kg' },
+
+  // numeric id fallbacks (string keys since object keys are strings) matching sampleIngredients ids
+  '1': { dailyAmount: 62.5, unit: 'kg' },  // Flour
+  '2': { dailyAmount: 8, unit: 'kg' },     // Sugar
+  '3': { dailyAmount: 2, unit: 'kg' },     // Yeast
+  '4': { dailyAmount: 1, unit: 'kg' },     // Baking powder
+  '5': { dailyAmount: 2, unit: 'kg' },     // Salt
+  '6': { dailyAmount: 200, unit: 'pcs' },  // Eggs
+  '7': { dailyAmount: 15, unit: 'L' },     // Milk / Cream
+  '8': { dailyAmount: 10, unit: 'kg' },    // Butter
+  '9': { dailyAmount: 10, unit: 'kg' },    // Margarine
+  '10': { dailyAmount: 10, unit: 'kg' },   // Oil
+  '11': { dailyAmount: 10, unit: 'kg' },   // Shortening
+  '12': { dailyAmount: 1, unit: 'kg' },    // Cocoa powder
+  '13': { dailyAmount: 0.1, unit: 'L' },   // Vanilla
+  '14': { dailyAmount: 1, unit: 'kg' },    // Sesame seeds
+  '15': { dailyAmount: 50, unit: 'mL' },   // Food coloring
+  '16': { dailyAmount: 2, unit: 'kg' }     // Dobrim
 };
 
 function computeThresholdForIngredient(ing, options = {}) {
@@ -2309,35 +2331,59 @@ function printInventoryTable(){
 let currentCalendarYear = (new Date()).getFullYear();
 let currentCalendarMonth = (new Date()).getMonth();
 
+function isAgendaMode() {
+  return window.matchMedia('(max-width: 640px)').matches;
+}
+
 async function renderCalendarForMonth(year, month) {
   // year, month (0-indexed) -> build month grid and query events per day
   const grid = document.getElementById('calendarGrid');
   if (!grid) return;
   grid.innerHTML = '';
+
+  // responsiveness: switch column layout on small screens
+  const isMobile = window.matchMedia && window.matchMedia('(max-width:640px)').matches;
+  
+
   // first day of month
   const first = new Date(year, month, 1);
   const last = new Date(year, month + 1, 0);
   const daysInMonth = last.getDate();
   const startWeekday = first.getDay(); // 0..6
 
-  // helper to build local YYYY-MM-DD (avoid toISOString which uses UTC)
   const pad = n => String(n).padStart(2, '0');
 
-  // build placeholder cells until we fetch per-date events
-  const totalCells = Math.ceil((startWeekday + daysInMonth) / 7) * 7;
+  // build placeholder cells (keep 42 cells to maintain consistent layout)
+  const totalCells = isAgendaMode() ? daysInMonth : 42;
+
   const cells = [];
   for (let i = 0; i < totalCells; i++) {
     const dayIndex = i - startWeekday + 1;
     const cell = document.createElement('div');
     cell.className = 'calendar-cell';
+    cell.style.minHeight = '72px';
+    cell.style.padding = '8px';
+    cell.style.boxSizing = 'border-box';
+    cell.style.borderRadius = '8px';
+    cell.style.background = 'var(--card, #fff)';
+    cell.style.border = '1px solid rgba(0,0,0,0.04)';
+    cell.style.cursor = 'pointer';
+    cell.style.display = 'flex';
+    cell.style.flexDirection = 'column';
+    cell.style.justifyContent = 'flex-start';
+    cell.style.alignItems = 'flex-start';
+    cell.style.overflow = 'hidden';
+
     if (dayIndex >= 1 && dayIndex <= daysInMonth) {
       const date = new Date(year, month, dayIndex);
-      // use local date components to avoid timezone shifts
       const iso = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
       cell.dataset.date = iso;
+
       const dateNum = document.createElement('div');
       dateNum.className = 'date-num';
       dateNum.textContent = dayIndex;
+      dateNum.style.fontWeight = '800';
+      dateNum.style.marginBottom = '6px';
       cell.appendChild(dateNum);
 
       const eventListWrap = document.createElement('div');
@@ -2345,17 +2391,94 @@ async function renderCalendarForMonth(year, month) {
       eventListWrap.style.display = 'flex';
       eventListWrap.style.flexDirection = 'column';
       eventListWrap.style.gap = '6px';
-      eventListWrap.style.marginTop = '6px';
+      eventListWrap.style.marginTop = '4px';
+      eventListWrap.style.width = '100%';
+      eventListWrap.style.flex = '1 1 auto';
+      eventListWrap.style.overflow = 'hidden';
       cell.appendChild(eventListWrap);
     } else {
       cell.style.visibility = 'hidden';
+      cell.style.pointerEvents = 'none';
     }
     grid.appendChild(cell);
     cells.push(cell);
   }
 
-  // fetch events by day. (the API already has /api/events?date=YYYY-MM-DD)
-  // We'll fetch events for days that are inside this month.
+  // helper: open day modal; if bottom true apply bottom-sheet style
+  function showDayEventsModal(dateIso, items, bottom = false) {
+    let html = `<h3>Events — ${new Date(dateIso).toLocaleDateString()}</h3>`;
+    if (!items || items.length === 0) {
+      html += `<div class="muted small" style="padding:12px">No events for ${dateIso}</div>`;
+    } else {
+      html += `<div style="max-height:60vh;overflow:auto;margin-top:8px">`;
+      html += items.map(it => {
+        const time = it.time ? new Date(it.time).toLocaleString() : '';
+        const who = it.username ? escapeHtml(it.username) : (it.user_id ? `User ${escapeHtml(String(it.user_id))}` : 'system');
+        const ing = it.ingredient_name ? `<div><strong>Ingredient:</strong> ${escapeHtml(it.ingredient_name)}</div>` : '';
+        const action = it.action ? `<div><strong>Action:</strong> ${escapeHtml(it.action)}</div>` : '';
+        return `<div style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06);margin-bottom:6px">
+                  <div style="font-weight:800">${escapeHtml(it.text || '').slice(0,120)}</div>
+                  ${ing}
+                  ${action}
+                  <div class="muted small" style="margin-top:6px">By: ${who} • ${escapeHtml(time)}</div>
+                </div>`;
+      }).join('');
+      html += `</div>`;
+    }
+    html += `<div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end"><button class="btn ghost" id="closeDayEvents" type="button">Close</button></div>`;
+
+    openModalHTML(html);
+
+    // apply bottom-sheet styling for mobile if requested
+    setTimeout(() => {
+      const modalCard = document.querySelector('.modal-card');
+      if (!modalCard) return;
+      if (bottom) {
+        modalCard.classList.add('modal-bottom-sheet');
+        // inline styles to ensure consistent bottom-sheet behaviour if CSS absent
+        modalCard.style.position = 'fixed';
+        modalCard.style.left = '8px';
+        modalCard.style.right = '8px';
+        modalCard.style.bottom = '12px';
+        modalCard.style.top = 'auto';
+        modalCard.style.maxHeight = '72vh';
+        modalCard.style.borderRadius = '12px';
+        modalCard.style.overflow = 'auto';
+        modalCard.style.boxShadow = '0 20px 60px rgba(0,0,0,0.20)';
+      } else {
+        // ensure standard modal layout for desktop
+        modalCard.style.position = modalCard.style.position || '';
+        modalCard.style.left = modalCard.style.left || '';
+        modalCard.style.right = modalCard.style.right || '';
+        modalCard.style.bottom = modalCard.style.bottom || '';
+        modalCard.style.top = modalCard.style.top || '';
+        modalCard.style.maxHeight = modalCard.style.maxHeight || '';
+        modalCard.style.borderRadius = modalCard.style.borderRadius || '';
+        modalCard.style.overflow = modalCard.style.overflow || '';
+        modalCard.style.boxShadow = modalCard.style.boxShadow || '';
+        modalCard.classList.remove('modal-bottom-sheet');
+      }
+    }, 10);
+
+    q('closeDayEvents')?.addEventListener('click', () => {
+      // remove bottom-sheet class when closed
+      const modalCard = document.querySelector('.modal-card');
+      if (modalCard) {
+        modalCard.classList.remove('modal-bottom-sheet');
+        modalCard.style.position = '';
+        modalCard.style.left = '';
+        modalCard.style.right = '';
+        modalCard.style.bottom = '';
+        modalCard.style.top = '';
+        modalCard.style.maxHeight = '';
+        modalCard.style.borderRadius = '';
+        modalCard.style.overflow = '';
+        modalCard.style.boxShadow = '';
+      }
+      closeModal();
+    }, { once: true });
+  }
+
   const dayCells = Array.from(grid.querySelectorAll('.calendar-cell[data-date]'));
   await Promise.all(dayCells.map(async (cell) => {
     const d = cell.dataset.date;
@@ -2363,61 +2486,31 @@ async function renderCalendarForMonth(year, month) {
       const res = await (typeof apiFetch === 'function'
         ? apiFetch(`/api/events?date=${d}`)
         : fetch(`/api/events?date=${d}`, { credentials: 'include' }).then(r => r.json()));
-      const items = (res && res.items) ? res.items : [];
+      // Accept either { items: [...] } or an array response directly
+      const items = Array.isArray(res) ? res : ((res && res.items) ? res.items : []);
       const listWrap = cell.querySelector('.calendar-events');
-      // show up to 3 event chips
-      items.slice(0, 4).forEach(ev => {
-        // derive type from text
-        const type = (/stock in/i.test(ev.text) ? 'Stock in'
-          : (/stock out/i.test(ev.text) ? 'Stock out'
-            : (/initial stock|add|created/i.test(ev.text) ? 'Add' : 'Other')));
 
-        const chip = document.createElement('div');
-        chip.className = 'event-chip';
-        chip.style.cursor = 'pointer';
-        chip.textContent = `${type} ${ev.ingredient_name ? '— ' + ev.ingredient_name : ''}`;
-        chip.title = ev.text;
-        // clicking a chip shows the single event (keep this behavior)
-        chip.addEventListener('click', (e) => {
+      // Render a single Expand button for days with events (desktop and mobile)
+      if (items.length > 0 && listWrap) {
+        const btn = document.createElement('button');
+        btn.className = 'btn small';
+        btn.type = 'button';
+        btn.style.width = '100%';
+        btn.setAttribute('aria-expanded', 'false');
+        btn.textContent = `Expand (${items.length})`;
+        btn.addEventListener('click', (e) => {
           e.stopPropagation();
-          openEventModal(ev);
+          // show bottom sheet modal on narrow screens, otherwise normal modal
+          showDayEventsModal(d, items, isMobile);
+          btn.setAttribute('aria-expanded', 'true');
         });
-        listWrap.appendChild(chip);
-      });
-
-      if (items.length > 4 && listWrap) {
-        const more = document.createElement('div');
-        more.className = 'muted small';
-        more.textContent = `+${items.length - 4} more`;
-        listWrap.appendChild(more);
+        listWrap.appendChild(btn);
       }
 
-      // clicking the day cell (outside chips) should open a modal showing ALL events for that day
+      // clicking the day cell opens the same modal (convenience)
       cell.addEventListener('click', (e) => {
-        // if there are no events, show a simple message
-        let html = `<h3>Events — ${new Date(d).toLocaleDateString()}</h3>`;
-        if (!items || items.length === 0) {
-          html += `<div class="muted small" style="padding:12px">No events for ${d}</div>`;
-        } else {
-          html += `<div style="max-height:60vh;overflow:auto;margin-top:8px">`;
-          html += items.map(it => {
-            const time = it.time ? new Date(it.time).toLocaleString() : '';
-            const who = it.username ? escapeHtml(it.username) : (it.user_id ? `User ${escapeHtml(String(it.user_id))}` : 'system');
-            const ing = it.ingredient_name ? `<div><strong>Ingredient:</strong> ${escapeHtml(it.ingredient_name)}</div>` : '';
-            const action = it.action ? `<div><strong>Action:</strong> ${escapeHtml(it.action)}</div>` : '';
-            return `<div style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06);margin-bottom:6px">
-                      <div style="font-weight:800">${escapeHtml(it.text || '').slice(0,120)}</div>
-                      ${ing}
-                      ${action}
-                      <div class="muted small" style="margin-top:6px">By: ${who} • ${escapeHtml(time)}</div>
-                    </div>`;
-          }).join('');
-          html += `</div>`;
-        }
-        html += `<div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end"><button class="btn ghost" id="closeDayEvents" type="button">Close</button></div>`;
-        openModalHTML(html);
-        // wire close button
-        q('closeDayEvents')?.addEventListener('click', closeModal, { once: true });
+        e.stopPropagation();
+        showDayEventsModal(d, items, isMobile);
       });
 
     } catch (err) {
@@ -3966,7 +4059,7 @@ function saveProfile(){
     localStorage.setItem('recent_logins', JSON.stringify(arr.slice(-12)));
   } catch(e){}
 
-  notify('Profile saved');
+  notify('Profile saved', 1);
 }
 
 // Replace existing changePassword() with this
@@ -4056,52 +4149,102 @@ function deleteAccountDemo(){
   performLogout();
 }
 
+// idempotent binding for profile controls — prevents duplicate notifications
 function bindProfileControls(){
-  // avatar upload
+  // guard: don't bind more than once
+  if (bindProfileControls._bound) return;
+  bindProfileControls._bound = true;
+
+  // helper selector
   const input = q('profileAvatarInput');
-  if(input) input.addEventListener('change', (e) => {
+
+  // --- handlers (named so you can remove later if needed) ---
+  const onAvatarChange = (e) => {
     const file = input.files && input.files[0];
     if(!file) return;
-    if(file.size > 1_800_000){ notify('Avatar too large (max ~1.8MB)'); return; }
+    if(file.size > 1_800_000){
+      notify('Avatar too large (max ~1.8MB)');
+      return;
+    }
     const reader = new FileReader();
     reader.onload = (ev) => {
       const s = getSession(); if(!s) return;
       const dataURL = ev.target.result;
       const wrap = q('profileAvatarPreview');
-      if(wrap){ wrap.innerHTML=''; const img=document.createElement('img'); img.src=dataURL; wrap.appendChild(img); }
+      if(wrap){
+        wrap.innerHTML = '';
+        const img = document.createElement('img');
+        img.src = dataURL;
+        wrap.appendChild(img);
+      }
       localStorage.setItem(avatarKeyFor(s.username), dataURL);
       notify('Avatar updated', 1);
     };
     reader.readAsDataURL(file);
-  });
+  };
 
-  q('removeAvatar')?.addEventListener('click', ()=> {
+  const onRemoveAvatar = () => {
     const s = getSession(); if(!s) return;
     localStorage.removeItem(avatarKeyFor(s.username));
     const wrap = q('profileAvatarPreview');
     if(wrap){ wrap.innerHTML = '<i class="fa fa-user fa-2x"></i>'; }
     notify('Avatar removed', 1);
-  });
+  };
 
-  q('profileSaveServer')?.addEventListener('click', async ()=> {
-    // try to call server to update user's public profile data if endpoint exists
+  const onSaveServer = async () => {
     const s = getSession();
     if(!s) { notify('Sign in first'); return; }
-    const payload = { name: q('profileName')?.value || s.name, phone: q('profilePhone')?.value||'', email: q('profileEmail')?.value||'' };
+    const payload = {
+      name: q('profileName')?.value || s.name,
+      phone: q('profilePhone')?.value || '',
+      email: q('profileEmail')?.value || ''
+    };
     try {
-      const res = await fetch('/api/users/me', { method:'PUT', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify(payload) });
-      if(res.ok){ notify('Profile updated on server', 1); const data = await res.json(); if(data && data.user){ setSession(data.user, !!getPersistentSession()); populateProfile(); } }
-      else { const text = await res.text().catch(()=>null); notify('Server update failed'); console.debug('profileSaveServer failed', res.status, text); }
-    } catch(e){ notify('Server update failed'); console.debug('profileSaveServer error', e && e.message ? e.message : e); }
-  });
+      const res = await fetch('/api/users/me', {
+        method:'PUT',
+        headers:{'Content-Type':'application/json'},
+        credentials:'include',
+        body: JSON.stringify(payload)
+      });
+      if(res.ok){
+        notify('Profile updated on server', 1);
+        const data = await res.json().catch(()=>null);
+        if(data && data.user){ setSession(data.user, !!getPersistentSession()); populateProfile(); }
+      } else {
+        const text = await res.text().catch(()=>null);
+        notify('Server update failed');
+        console.debug('profileSaveServer failed', res.status, text);
+      }
+    } catch(e){
+      notify('Server update failed');
+      console.debug('profileSaveServer error', e && e.message ? e.message : e);
+    }
+  };
 
-  // save / cancel binding
+  // --- attach listeners once ---
+  if(input){
+    input.addEventListener('change', onAvatarChange);
+  }
+
+  const removeBtn = q('removeAvatar');
+  if(removeBtn){
+    removeBtn.addEventListener('click', onRemoveAvatar);
+  }
+
+  const profileSaveServerBtn = q('profileSaveServer');
+  if(profileSaveServerBtn){
+    profileSaveServerBtn.addEventListener('click', onSaveServer);
+  }
+
+  // save / cancel binding (these use onclick assignment in your original code — safe to keep)
   const saveBtn = q('saveProfile');
   if(saveBtn){
     saveBtn.onclick = (e)=>{ e.preventDefault(); saveProfile(); populateProfile(); };
   }
   const cancelBtn = q('profileCancel');
-  if(cancelBtn) cancelBtn.onclick = (e)=>{ e.preventDefault(); populateProfile(); notify('Changes reverted'); };
+  if(cancelBtn){
+    cancelBtn.onclick = (e)=>{ e.preventDefault(); populateProfile(); notify('Changes reverted'); };
+  }
 
   const cpb = q('changePassBtn');
   if(cpb) cpb.onclick = (e)=>{ e.preventDefault(); changePassword(); };
@@ -4112,10 +4255,13 @@ function bindProfileControls(){
   const delBtn = q('deleteAccountBtn');
   if(delBtn) delBtn.onclick = (e)=>{ e.preventDefault(); deleteAccountDemo(); };
 
-  // wire preference auto-save
+  // wire preference auto-save (attach once)
   ['prefEmailNotif','prefPushNotif','profileTimezone','profileEmail','profilePhone'].forEach(id=>{
     const el = q(id);
-    if(el) el.addEventListener('change', ()=> {
+    if(!el) return;
+    // store handler on element so it won't be duplicated if code changes later
+    if(el._prefHandler) return;
+    el._prefHandler = function(){
       const s = getSession(); if(!s) return;
       const p = JSON.parse(localStorage.getItem(prefsKeyFor(s.username)) || '{}');
       p.email = q('profileEmail')?.value || p.email || '';
@@ -4124,9 +4270,11 @@ function bindProfileControls(){
       p.emailNotifications = !!q('prefEmailNotif')?.checked;
       p.pushNotifications = !!q('prefPushNotif')?.checked;
       localStorage.setItem(prefsKeyFor(s.username), JSON.stringify(p));
-    });
+    };
+    el.addEventListener('change', el._prefHandler);
   });
 }
+
 
 let resizeTimer = null;
 window.addEventListener('resize', () => {
