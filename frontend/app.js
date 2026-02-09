@@ -2429,44 +2429,33 @@ async function renderCalendarForMonth(year, month) {
 
     openModalHTML(html);
 
-    // apply bottom-sheet styling for mobile if requested
-    setTimeout(() => {
-      const modalCard = document.querySelector('.modal-card');
-      if (!modalCard) return;
-      if (bottom) {
-        modalCard.classList.add('modal-bottom-sheet');
-        // inline styles to ensure consistent bottom-sheet behaviour if CSS absent
-        modalCard.style.position = 'fixed';
-        modalCard.style.left = '8px';
-        modalCard.style.right = '8px';
-        modalCard.style.bottom = '12px';
-        modalCard.style.top = 'auto';
-        modalCard.style.maxHeight = '72vh';
-        modalCard.style.borderRadius = '12px';
-        modalCard.style.overflow = 'auto';
-        modalCard.style.boxShadow = '0 20px 60px rgba(0,0,0,0.20)';
-      } else {
-        // ensure standard modal layout for desktop
-        modalCard.style.position = modalCard.style.position || '';
-        modalCard.style.left = modalCard.style.left || '';
-        modalCard.style.right = modalCard.style.right || '';
-        modalCard.style.bottom = modalCard.style.bottom || '';
-        modalCard.style.top = modalCard.style.top || '';
-        modalCard.style.maxHeight = modalCard.style.maxHeight || '';
-        modalCard.style.borderRadius = modalCard.style.borderRadius || '';
-        modalCard.style.overflow = modalCard.style.overflow || '';
-        modalCard.style.boxShadow = modalCard.style.boxShadow || '';
-        modalCard.classList.remove('modal-bottom-sheet');
-      }
-    }, 10);
+    const modalCard = document.querySelector('.modal-card');
+    if (!modalCard) return;
+
+    // reset always
+    modalCard.classList.remove('modal-bottom-sheet');
+    modalCard.classList.add('modal-enter');
+
+    modalCard.style = ''; // clear stale inline styles
+
+    if (bottom) {
+      modalCard.classList.add('modal-bottom-sheet');
+    }
+
+    // force reflow so animation applies cleanly
+    modalCard.offsetHeight;
+
+    requestAnimationFrame(() => {
+      modalCard.classList.remove('modal-enter');
+    });
+
 
     q('closeDayEvents')?.addEventListener('click', () => {
       // remove bottom-sheet class when closed
       const modalCard = document.querySelector('.modal-card');
       if (modalCard) {
         modalCard.classList.remove('modal-bottom-sheet');
-        modalCard.style.position = '';
-        modalCard.style.left = '';
+        modalCard.style = '';
         modalCard.style.right = '';
         modalCard.style.bottom = '';
         modalCard.style.top = '';
