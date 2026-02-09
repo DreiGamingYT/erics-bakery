@@ -1236,6 +1236,32 @@ async function renderIngredientCards(page = 1, limit = 5) {
   const chip = document.querySelector('.filter-chips .chip.active')?.dataset.filter || 'all';
   const invType = document.querySelector('input[name="invType"]:checked')?.value || 'all';
 
+  // inject responsive table CSS once to improve mobile layout (stack rows into card-like blocks)
+  if (!document.getElementById('inv-table-responsive-style')) {
+    const st = document.createElement('style');
+    st.id = 'inv-table-responsive-style';
+    st.textContent = `
+      .inv-table-wrap { width:100%; overflow:auto; -webkit-overflow-scrolling:touch; }
+      /* Desktop/tablet keep original table */
+      .inv-table { width:100%; border-collapse:collapse }
+      .inv-table thead th { text-align:left; padding:8px; border-bottom:1px solid rgba(0,0,0,0.06); }
+
+      /* Mobile: transform table into stacked cards for readability */
+      @media (max-width:700px) {
+        .inv-table { display:block; }
+        .inv-table thead { display:none; }
+        .inv-table tbody { display:block; }
+        .inv-table tr { display:block; margin-bottom:10px; border-radius:8px; background:var(--card); padding:10px; border:1px solid rgba(0,0,0,0.04); }
+        .inv-table td { display:flex; justify-content:space-between; padding:6px 8px; border:0; }
+        .inv-table td[data-label]::before { content: attr(data-label); font-weight:700; color:rgba(0,0,0,0.6); margin-right:8px; white-space:nowrap; }
+        .inv-table td .muted.small { display:block; margin-left:12px; color:rgba(0,0,0,0.54); margin-top:6px; font-size:12px; }
+        .inv-table td input { max-width:40%; }
+        .inv-table td .btn { margin-left:8px; }
+      }
+    `;
+    document.head.appendChild(st);
+  }
+
   // show loading placeholder
   container.innerHTML = `<div class="card muted">Loading inventory…</div>`;
 
@@ -1254,23 +1280,24 @@ async function renderIngredientCards(page = 1, limit = 5) {
 
     // Header with radios, export, print, and pagination placeholder
     const header = `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;flex-wrap:wrap">
-        <div style="display:flex;gap:8px;align-items:center">
-          <label style="display:flex;align-items:center;gap:8px"><input type="radio" name="invType" value="all" ${invType==='all'?'checked':''}/> All</label>
-          <label style="display:flex;align-items:center;gap:8px"><input type="radio" name="invType" value="ingredient" ${invType==='ingredient'?'checked':''}/> Ingredients</label>
-          <label style="display:flex;align-items:center;gap:8px"><input type="radio" name="invType" value="packaging" ${invType==='packaging'?'checked':''}/> Packaging</label>
-          <label style="display:flex;align-items:center;gap:8px"><input type="radio" name="invType" value="equipment" ${invType==='equipment'?'checked':''}/> Equipment</label>
-          <label style="display:flex;align-items:center;gap:8px"><input type="radio" name="invType" value="maintenance" ${invType==='maintenance'?'checked':''}/> Maintenance</label>
+      <div class="inv-header">
+        <div class="inv-filters">
+          <label><input type="radio" name="invType" value="all" ${invType==='all'?'checked':''}/> All</label>
+          <label><input type="radio" name="invType" value="ingredient" ${invType==='ingredient'?'checked':''}/> Ingredients</label>
+          <label><input type="radio" name="invType" value="packaging" ${invType==='packaging'?'checked':''}/> Packaging</label>
+          <label><input type="radio" name="invType" value="equipment" ${invType==='equipment'?'checked':''}/> Equipment</label>
+          <label><input type="radio" name="invType" value="maintenance" ${invType==='maintenance'?'checked':''}/> Maintenance</label>
         </div>
-        <div style="display:flex;gap:8px;align-items:center">
+        <div class="inv-actions">
           <button class="btn small" id="exportInventoryCsvBtn" type="button">Export CSV</button>
           <button class="btn small" id="printInventoryBtn" type="button">Print / Save PDF</button>
         </div>
       </div>
     `;
 
-    // table head
+    // table head (wrapped for overflow)
     const tableHead = `
+      <div class="inv-table-wrap">
       <table class="inv-table" style="width:100%;border-collapse:collapse" role="table" aria-label="Inventory table">
         <thead>
           <tr role="row" style="text-align:left">
@@ -1297,24 +1324,26 @@ async function renderIngredientCards(page = 1, limit = 5) {
       const expiryNote = (isMaterial && i.expiry ? `<div class="muted small">${daysUntil(i.expiry)}d</div>` : '');
       
       return `<tr data-id="${i.id}" data-type="${escapeHtml(i.type||'')}" style="background:var(--card);border-bottom:1px solid rgba(0,0,0,0.04)">
-        <td style="padding:10px;vertical-align:middle">${i.id}</td>
-        <td style="padding:10px;vertical-align:middle"><strong>${escapeHtml(i.name)}</strong><div class="muted small">${escapeHtml(i.type)}</div></td>
-        <td style="padding:10px;vertical-align:middle">${isMaterial ? escapeHtml(i.supplier||'') : ''}</td>
-        <td style="padding:10px;vertical-align:middle"><span class="qty-value">${i.qty}</span> ${expiryNote} ${lowBadge}</td>
-        <td style="padding:10px;vertical-align:middle">${isMaterial ? escapeHtml(i.unit||'') : ''}</td>
-        <td style="padding:10px;vertical-align:middle">${isMaterial ? threshold : ''}</td>
-        <td style="padding:10px;vertical-align:middle">${isMaterial ? `<input class="min-input" type="number" value="${i.min_qty||0}" step="0.01" style="width:80px" />` : ''}</td>
-        <td style="padding:10px;vertical-align:middle"><input class="in-input" type="number" step="0.01" style="width:90px" /></td>
-        <td style="padding:10px;vertical-align:middle"><input class="out-input" type="number" step="0.01" style="width:90px" /></td>
-        <td style="padding:10px;vertical-align:middle">
-          <button class="btn small save-row" type="button">Save</button>
-          <button class="btn small soft details-btn" data-id="${i.id}" type="button">Details</button>
-          <button class="btn small soft edit-btn" type="button">Edit</button>
+        <td data-label="ID" style="padding:10px;vertical-align:middle">${i.id}</td>
+        <td data-label="Name" style="padding:10px;vertical-align:middle"><strong>${escapeHtml(i.name)}</strong><div class="muted small">${escapeHtml(i.type)}</div></td>
+        <td data-label="Supplier" style="padding:10px;vertical-align:middle">${isMaterial ? escapeHtml(i.supplier||'') : ''}</td>
+        <td data-label="Qty" style="padding:10px;vertical-align:middle"><span class="qty-value">${i.qty}</span> ${expiryNote} ${lowBadge}</td>
+        <td data-label="Unit" style="padding:10px;vertical-align:middle">${isMaterial ? escapeHtml(i.unit||'') : ''}</td>
+        <td data-label="Threshold" style="padding:10px;vertical-align:middle">${isMaterial ? threshold : ''}</td>
+        <td data-label="Min" style="padding:10px;vertical-align:middle">${isMaterial ? `<input class="min-input" type="number" value="${i.min_qty||0}" step="0.01" style="width:80px" />` : ''}</td>
+        <td data-label="In" style="padding:10px;vertical-align:middle"><input class="in-input" type="number" step="0.01" style="width:90px" /></td>
+        <td data-label="Out" style="padding:10px;vertical-align:middle"><input class="out-input" type="number" step="0.01" style="width:90px" /></td>
+        <td data-label="Actions" style="padding:10px;vertical-align:middle">
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn small save-row" type="button">Save</button>
+            <button class="btn small soft details-btn" data-id="${i.id}" type="button">Details</button>
+            <button class="btn small soft edit-btn" type="button">Edit</button>
+          </div>
         </td>
       </tr>`;
     }).join('') || `<tr><td colspan="10" class="muted" style="padding:12px">No inventory items</td></tr>`;
 
-    const tableFooter = `</tbody></table>`;
+    const tableFooter = `</tbody></table></div>`;
 
     // pagination wrapper
     const paginationWrap = `<div id="invPagination" style="margin-top:12px;display:flex;justify-content:center"></div>`;
@@ -1360,7 +1389,7 @@ async function renderIngredientCards(page = 1, limit = 5) {
 
     // Details handlers (open modal with server-fetched details if necessary)
     container.querySelectorAll('.details-btn').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
+      btn.addEventListener('click', async () => {
         const id = Number(btn.dataset.id);
         try {
           // fetch single ingredient if you want detail (server doesn't have single GET endpoint in provided code)
@@ -1445,8 +1474,14 @@ async function renderIngredientCards(page = 1, limit = 5) {
         const iframe = document.createElement('iframe');
         iframe.style.position = 'fixed'; iframe.style.right = '0'; iframe.style.bottom = '0'; iframe.style.width = '0'; iframe.style.height = '0'; iframe.style.border = '0'; iframe.setAttribute('aria-hidden','true');
         document.body.appendChild(iframe);
-        const idoc = iframe.contentWindow.document;
-        idoc.open(); idoc.write(html); idoc.close();
+        // Use modern srcdoc where available instead of deprecated document.write
+        try {
+          iframe.srcdoc = html;
+        } catch (e) {
+          // fallback to document write if srcdoc not supported
+          const idoc = iframe.contentWindow.document;
+          idoc.open(); idoc.write(html); idoc.close();
+        }
         setTimeout(() => {
           try { iframe.contentWindow.focus(); iframe.contentWindow.print(); } catch (e) { try { window.print(); } catch(e2){} }
           setTimeout(()=> iframe.remove(), 800);

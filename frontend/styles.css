@@ -1748,7 +1748,7 @@ html {
 @media (min-width: 1024px) {
   .inventory-layout {
     display: grid;
-    grid-template-columns: 1fr 550px;
+    grid-template-columns: 1fr 295px;
     gap: 12px;
     align-items: start;
   }
@@ -1904,106 +1904,60 @@ html {
   }
 }
 
-@media (max-width:560px) {
+.inv-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
 
-  /* wrapper */
-  #ingredientList {
-    padding: 6px;
-  }
+.inv-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
 
-  /* hide header */
-  #ingredientList .inv-table thead {
-    display: none;
-  }
+.inv-filters label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
 
-  /* each row becomes a card */
-  #ingredientList .inv-table tbody tr {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 8px;
-    padding: 12px;
-    border-radius: 12px;
-    margin-bottom: 12px;
-    box-shadow: var(--shadow);
-    background: var(--card);
-  }
+.inv-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 
-  /* reset td */
-  #ingredientList .inv-table td {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 4px 0;
-    border: none;
-    font-size: 13px;
-  }
-
-  /* ingredient name = header */
-  #ingredientList .inv-table td:nth-child(1) {
-    font-size: 15px;
-    font-weight: 800;
-  }
-
-  #ingredientList .inv-table td:nth-child(1),
-  #ingredientList .inv-table td:nth-child(2) {
+/* ===============================
+   MOBILE STACKING
+================================ */
+@media (max-width: 640px) {
+  .inv-header {
     flex-direction: column;
-    align-items: flex-start;
-    gap: 4px;
+    align-items: stretch;
+    gap: 12px;
   }
 
-  /* qty + min stock highlight */
-  #ingredientList .inv-table td:nth-child(3),
-  #ingredientList .inv-table td:nth-child(4) {
-    font-weight: 800;
-    color: var(--primary);
+  .inv-actions {
+    justify-content: flex-start;
+    gap: 6px;
   }
 
-  /* inputs go full width */
-  #ingredientList .inv-table input {
-    width: 100%;
-    min-width: 0;
+  .inv-actions .btn {
+    flex: 1 1 auto; /* buttons expand to full width */
   }
 
-  /* action buttons row */
-  #ingredientList .inv-table td:last-child {
-    justify-content: flex-end;
-    gap: 8px;
-    padding-top: 8px;
+  .inv-filters {
+    justify-content: flex-start;
+    gap: 6px;
   }
 
-  /* badges wrap */
-  #ingredientList .badge.low {
-    margin-left: 0;
-    margin-top: 4px;
+  .inv-filters label {
+    font-size: 14px;
   }
 }
-
-/* base modal */
-.modal-card {
-  transition: transform .25s ease, opacity .2s ease;
-}
-
-/* default centered */
-.modal-card:not(.modal-bottom-sheet) {
-  position: relative;
-  margin: auto;
-}
-
-/* mobile bottom sheet */
-.modal-card.modal-bottom-sheet {
-  position: fixed !important;
-  left: 8px;
-  right: 8px;
-  bottom: 12px;
-  top: auto !important;
-  max-height: 75vh;
-  border-radius: 16px;
-  transform: translateY(0);
-}
-
-/* initial hidden state for animation */
-.modal-card.modal-enter {
-  opacity: 0;
-  transform: translateY(20px);
-}
-
