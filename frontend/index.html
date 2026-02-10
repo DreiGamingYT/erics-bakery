@@ -32,7 +32,7 @@
                     <img class="visual-hero" src="./logo.jpg" alt="hero art" />
                     <div class="visual-caption">
                         <h1>ERIC'S BAKERY</h1>
-                        <p class="muted">Friendly inventory tracking for small Filipino bakeries.</p>
+                        <p class="muted">Inventory System</p>
                     </div>
                     <div id="recentProfiles" class="recent-profiles" aria-label="Recent users" role="region" style="margin-bottom:12px"></div>
                 </div>
@@ -138,7 +138,7 @@
 
             <div class="top-center">
                 <div class="top-search">
-                    <input id="topSearch" placeholder="Search products, ingredients, activity..." />
+                    <input id="topSearch" placeholder="Search ingredients, activity..." />
                 </div>
             </div>
 
@@ -311,14 +311,14 @@
                         <div class="card" id="inventoryReportCard">
                             <h3>Inventory list & stock graph</h3>
                             <div class="card1 inventory-layout">
-                                <div>
+                                <div id="inventoryGraph">
                                     <div style="margin-bottom:8px;display:flex;gap:8px;align-items:center">
                                         <input id="reportItemSearch" placeholder="Search ingredient..." style="flex:1;height:40px;padding:8px 10px;border-radius:8px;border:1px solid rgba(0,0,0,0.06)" />
                                         <button id="exportInventoryCSV" class="btn small" type="button">Export CSV</button>
                                     </div>
                                     <div id="inventoryReportList" style="max-height:42vh;overflow:auto"></div>
                                 </div>
-                                <div>
+                                <div id="itemGraph">
                                     <div style="height:330px" class="chart-container">
                                         <canvas id="inventoryStockChart" width="400" height="220"></canvas>
                                     </div>
@@ -382,7 +382,6 @@
                     <div class="page-header">
                         <h2>User Profile</h2>
                         <div class="page-actions">
-                            <button id="profileCancel" class="btn ghost small" type="button">Cancel</button>
                             <button id="saveProfile" class="btn primary small" type="button">Save Profile</button>
                         </div>
                     </div>
@@ -403,7 +402,7 @@
                                     <div class="muted small" style="margin-top:8px">Square JPEG/PNG, max ~1.5MB.</div>
                                 </div>
 
-                                <div class="card small-card" style="margin-top:10px">
+                                <div id="recent" class="card small-card" style="margin-top:10px">
                                     <h3 style="margin:0 0 8px 0">Recent logins</h3>
                                     <ul id="recentLogins" class="timeline" style="margin:0;padding:0;list-style:none"></ul>
                                     <div class="muted small" style="margin-top:8px">Tap an entry to quickly prefill username on login.</div>
@@ -430,7 +429,7 @@
                                     </label>
                                 </div>
 
-                                <div class="card small-card" style="margin-top:12px">
+                                <div id="security" class="card small-card" style="margin-top:12px">
                                     <h3 style="margin:0 0 8px 0">Security</h3>
                                     <div class="muted small" style="margin-bottom:8px">Change your password</div>
                                     <label class="field"><span class="field-label">Current password</span>
@@ -448,7 +447,7 @@
                                     </div>
                                 </div>
 
-                                <div class="card small-card" style="margin-top:12px">
+                                <div id="action" class="card small-card" style="margin-top:12px">
                                     <h3 style="margin:0 0 8px 0">Account actions</h3>
                                     <div style="display:flex;flex-direction:column;gap:8px">
                                         <button id="signOutBtn" class="btn ghost small" type="button">Sign out</button>

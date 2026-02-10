@@ -251,8 +251,8 @@ function notify(msg, opts = {}) {
 
 const PERMISSIONS = {
   Owner: { help: true, dashboard: true, calendar: true, profile: true, inventory: true, reports: true, settings: true },
-  Baker: { help: false, dashboard: true, calendar: true, profile: false, inventory: true, reports: true, settings: false },
-  Assistant: { help: false, dashboard: true, calendar: true, profile: false, inventory: true, reports: false, settings: false },
+  Baker: { help: false, dashboard: true, calendar: false, profile: false, inventory: true, reports: false, settings: false },
+  Assistant: { help: true, dashboard: true, calendar: true, profile: false, inventory: true, reports: true, settings: false },
 };
 
 function getCurrentRole(){
@@ -1876,7 +1876,7 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
           <div style="font-weight:800">Reports — ${filter === 'usage' ? 'Ingredient Usage' : filter === 'low' ? 'Low stock' : 'Expiring items'}</div>
           <div class="muted small">Period: ${start.toISOString().slice(0,10)} to ${end.toISOString().slice(0,10)} • Total used: ${totalUsed} • Low items: ${lowCount} • Expiring: ${expiringCount} • Top used: ${best}</div>
         </div>
-        <div style="display:flex;gap:8px;align-items:center">
+        <div id="summarybtns" style="display:flex;gap:8px;align-items:center">
           <button id="printReportsBtn" class="btn small">Print / Save PDF</button>
           <button id="exportReportsCsvBtn" class="btn small">Export CSV</button>
         </div>
@@ -2423,6 +2423,7 @@ async function renderCalendarForMonth(year, month) {
 
       const eventListWrap = document.createElement('div');
       eventListWrap.className = 'calendar-events';
+      eventListWrap.id = 'event';
       eventListWrap.style.display = 'flex';
       eventListWrap.style.flexDirection = 'column';
       eventListWrap.style.gap = '6px';
@@ -4363,131 +4364,84 @@ document.addEventListener('DOMContentLoaded', () => {
   setTimeout(addPasswordToggles, 300);
 });
 
-/* Guided Help / Tour JS */
-
-// ----- Define help steps per view (edit messages/selectors as you want) -----
+/* ------- HELP STEPS (expanded) ------- */
 const HELP_STEPS = {
   dashboard: [
-    { sel: '#topSearch', title: 'Search suggestions', text: 'Start typing to see suggestions from your recent searches, products, ingredients, and orders. Use arrow keys to navigate.', pos: 'bottom' },
-    { sel: '#kpi-total-ing', title: 'Total ingredients', text: 'Total number of items tracked in inventory (ingredients, tools, packaging).', pos: 'right' },
-    { sel: '#kpi-low', title: 'Low stock', text: 'Items at or below their threshold. Restock these first.', pos: 'right' },
-    { sel: '#stockChart', title: 'Stock Movement', text: 'Shows stock in and stock out events across recent days.', pos: 'left' }
+    { sel: '#topSearch', title: 'Global search', text: 'Search ingredients, activity and history from here.', pos: 'bottom' },
+    { sel: '#kpi-total-ing', title: 'Total ingredients', text: 'Total number of inventory items tracked.', pos: 'right' },
+    { sel: '#kpi-low', title: 'Low stock', text: 'Items at or below their minimum threshold. Prioritize restocking them.', pos: 'right' },
+    { sel: '#kpi-exp', title: 'Expiring soon', text: 'Shows items expiring within the selected period.', pos: 'right' },
+    { sel: '#kpi-equipment', title: 'Equipments / Tools', text: 'Total number of equipments/tools tracked.', pos: 'left' },
+    { sel: '#stockChart', title: 'Stock Movement', text: 'View stock-in and stock-out trends over time.', pos: 'left' },
+    { sel: '#bestSellerChart', title: 'Used ingredients', text: 'View inventory used items trends.', pos: 'left' },
+    { sel: '#recentActivity', title: 'Recent activity', text: 'See recent inventory actions, edits, and production logs.', pos: 'left' }
   ],
   inventory: [
-    { sel: '#searchIng', title: 'Search', text: 'Type to quickly find an ingredient. Press Enter to apply search.', pos:'bottom' },
-    { sel: '#addIngredientBtn', title: 'Add Ingredient', text: 'Add a new raw material, tool, or packaging item here.', pos:'left' },
-    { sel: '#ingredientList', title: 'Inventory table', text: 'Edit min, stock in/out inline and click Save to update history.', pos:'top' },
-    { sel: '#topSearch', title: 'Search suggestions', text: 'Search suggestions appear as you type; pick one to jump directly to that item.', pos: 'bottom' },
-    { sel: '.filter-chips', title: 'Filters', text: 'Switch between All, Low stock, and Expiring to filter the table.', pos: 'bottom' },
-    { sel: 'input[name="invType"]', title: 'Inventory Type', text: 'Pick the inventory type (Ingredients, Packaging, Equipment, Maintenance) to narrow the list.', pos: 'bottom' },
-    { sel: '#printInventoryBtn', title: 'Print / Save PDF', text: 'Export the current filtered inventory as a printable report (Save as PDF).', pos: 'bottom' },
-    { sel: '#inventoryRecentActivity', title: 'Recent activity', text: 'Shows the latest stock changes and edits. Tap an item to view more details.', pos: 'left' }
-  ],
+    { sel: '#searchIng', title: 'Search inventory', text: 'Type to find an ingredient quickly. Press Enter to apply.', pos:'bottom' },
+    { sel: '.filter-chips', title: 'Filters', text: 'Filter the list by All / Low stock / Expiring.', pos: 'bottom' },
+    { sel: '#addIngredientBtn', title: 'Add ingredient', text: 'Add new ingredients, tools, or packaging items here.', pos:'left' },
+    { sel: '#ingredientList', title: 'Inventory table', text: 'Edit quantities inline, then Save to record the change to history.', pos:'top' },
+    { sel: '#inventoryRecentActivity', title: 'Recent inventory history', text: 'Shows the latest stock in/out and edits.', pos:'left' },
+    { sel: '#printInventoryBtn, #exportInventoryBtn', title: 'Export / Print', text: 'Export or print the currently filtered inventory view.', pos:'bottom' }
+  ], 
   reports: [
-    { sel: '#reportPreset', title: 'Date presets', text: 'Quickly select common date ranges for reports.', pos:'bottom' },
-    { sel: '#reportFilter', title: 'Report filter', text: 'Choose Usage / Low / Expiring to change the report content.', pos:'bottom' },
-    { sel: '#exportReportsBtn', title: 'Export CSV', text: 'Exports the filtered report to CSV.', pos:'left' },
-    { sel: '#exportReportsBtn', title: 'Print / Save PDF', text: 'Click to open print preview and save as PDF.', pos:'left' },
-    { sel: '#applyReportRange', title: 'Apply', text: 'Apply the selected date range and filters to update charts below.', pos: 'bottom' },
-  ],
-  activity: [
-    { sel: '#activityFilter', title: 'Activity Filter', text: 'Filter activity by type (stock, production, etc.)', pos: 'bottom' },
-    { sel: '#activityList', title: 'Activity Log', text: 'All actions are recorded here. This helps with audits and tracing inventory changes.', pos: 'right' }
-  ],
+    { sel: '#reportStart', title: 'From date', text: 'Pick a start date for your report range.', pos:'bottom' },
+    { sel: '#reportEnd', title: 'To date', text: 'Pick an end date then click Apply to refresh charts.', pos:'bottom' },
+    { sel: '#reportPreset', title: 'Date presets', text: 'Choose quick date ranges like 7/30/90 days.', pos:'bottom' },
+    { sel: '#reportFilter, #reportFilterSelect', title: 'Report filter', text: 'Switch between Inventory / Usage / Low stock reports.', pos:'left' },
+    { sel: '#applyReportRange', title: 'Apply', text: 'Apply the selected range and filters to update charts and CSV export.', pos:'bottom' },
+    { sel: '#inventoryGraph', title: 'Inventory Items', text: 'Check the inventory items stock history.', pos:'right' },
+    { sel: '#itemGraph', title: 'Items Graph', text: 'Item graph history.', pos:'left' },
+    { sel: '#reportSummary', title: 'Summary of items', text: 'Check the inventory items stock history.', pos:'top' },
+    { sel: '#exportInventoryCSV', title: 'Export CSV', text: 'Export the inventory list and stocks.', pos:'left' },
+    { sel: '#exportStockCSV', title: 'Export Stock CSV', text: 'Export the currently filtered item.', pos:'bottom' },
+    { sel: '#summarybtns', title: 'Export / Print', text: 'Export or print the summary of inventory.', pos:'left' }
+  
+  ], 
   calendar: [
-    { sel: '#calendarPrev', title: 'Prev / Next', text: 'Navigate months to see orders/events on different dates.', pos: 'bottom' },
-    { sel: '#calendarGrid', title: 'Month view', text: 'Events and orders appear on their respective calendar days.', pos: 'top' }
+    { sel: '#calendarPrev', title: 'Previous month', text: 'Navigate back by one month.', pos:'bottom' },
+    { sel: '#calendarToday', title: 'Today', text: 'Return to current month and day.', pos:'bottom' },
+    { sel: '#calendarNext', title: 'Next month', text: 'Navigate forward by one month.', pos:'bottom' },
+    { sel: '#calendarGrid', title: 'Month view', text: 'Days display stock-in / stock-out events and add-ingredient entries. Tap a day to open details.', pos:'top' },
+    { sel: '#event', title: 'Events', text: 'Open to view events.', pos:'right' }
   ],
   profile: [
-    { sel: '#profileName', title: 'Your name', text: 'Edit the display name for your profile.', pos:'right' },
-    { sel: '#profileAvatarPreview', title: 'Avatar', text: 'Upload a square avatar (max ~1.5MB) to personalize.', pos:'right' }
+    { sel: '#profileAvatarPreview', title: 'Avatar', text: 'Upload a square avatar (JPEG/PNG, ~1.5MB max).', pos:'right' },
+    { sel: '#recent', title: 'Saved profile logins', text: 'Use to load profile.', pos:'right' },
+    { sel: '#profileName', title: 'Display name', text: 'Edit your visible name in the app.', pos:'right' },
+    { sel: '#profileRole', title: 'Role', text: 'Your role (Owner/Baker/Assistant) — affects permissions.', pos:'right' },
+    { sel: '#security', title: 'Change password', text: 'Use this to update your password. Current password is required.', pos:'bottom' },
+    { sel: '#action', title: 'Delete / Sign out', text: 'Remove or Sign out your account.', pos:'bottom' },
+    { sel: '#saveProfile', title: 'Save profile', text: 'Remove or Sign out your account.', pos:'bottom' },
   ],
   settings: [
-    { sel: '#bakeryName', title: 'Bakery profile', text: 'Update bakery name, address, and default unit used in reports.', pos:'bottom' },
-    { sel: '#themeToggle', title: 'Appearance', text: 'Toggle between light and dark themes.', pos:'left' }
+    { sel: '#bakeryName', title: 'Bakery profile', text: 'Update bakery name, address and default unit.', pos:'bottom' },
+    { sel: '#themeToggle', title: 'Appearance', text: 'Toggle light / dark mode; this persists per user.', pos:'left' },
+    { sel: '#prefEmailNotif, #prefPushNotif', title: 'Notifications', text: 'Enable in-app or email notifications for events.', pos:'left' },
+    { sel: '#cursorSelect', title: 'Cursor design', text: 'Choose a custom cursor for the application.', pos:'left' }
+  ],
+  sidebar: [
+    { sel: '#sideNav', title: 'Main navigation', text: 'Use these to switch views: Dashboard, Inventory, Reports, History, Calendar, Profile, Settings.', pos:'right' }
+  ],
+  topbar: [
+    { sel: '#hamburger', title: 'Menu', text: 'Open the side menu on small screens.', pos:'bottom' },
+    { sel: '#userBadge', title: 'User menu', text: 'Profile, logout and account options.', pos:'left' }
   ]
 };
 
+/* ensure inventory pagination step added once */
 HELP_STEPS.inventory = HELP_STEPS.inventory || [];
-// avoid duplicate if run twice
 if(!HELP_STEPS.inventory.some(s => s.sel === '.inv-pagination')) {
   HELP_STEPS.inventory.push({
     sel: '.inv-pagination',
     title: 'Pagination (Inventory)',
-    text: 'Navigate inventory pages using Prev / Next or the page numbers. Each page shows up to 10 rows. Search, filters, and inventory type affect the total pages. Export / Print use the entire filtered list (all pages).',
+    text: 'Navigate pages; export and print use the complete filtered list.',
     pos: 'bottom'
   });
 }
 
-// ----- Guided help runtime -----
-let _helpState = { overlay:null, spotlight:null, tooltip:null, steps:[], idx:0, view:'' };
-
-function startHelp(viewName){
-  // find steps for view
-  const steps = Array.isArray(HELP_STEPS[viewName]) ? HELP_STEPS[viewName] : [];
-  if(steps.length === 0){
-    notify('No help steps defined for this view (ask dev to add steps).');
-    return;
-  }
-  // build overlay
-  cleanupHelp();
-  _helpState.view = viewName;
-  _helpState.steps = steps;
-  _helpState.idx = 0;
-
-  const overlay = document.createElement('div');
-  overlay.className = 'help-overlay';
-  overlay.setAttribute('role','dialog');
-  overlay.setAttribute('aria-modal','true');
-  overlay.setAttribute('aria-label','Help overlay');
-  overlay.addEventListener('click', (e)=> { e.stopPropagation(); /* prevent outside click from closing */ });
-
-  const blocker = document.createElement('div');
-  blocker.className = 'help-blocker';
-  overlay.appendChild(blocker);
-
-  const spotlight = document.createElement('div');
-  spotlight.className = 'help-spotlight';
-  overlay.appendChild(spotlight);
-
-  const tooltip = document.createElement('div');
-  tooltip.className = 'help-tooltip';
-  tooltip.setAttribute('tabindex','0');
-
-  // build tooltip inner HTML
-  tooltip.innerHTML = `
-    <div id="helpContent"><h4></h4><p></p></div>
-    <div class="help-controls">
-      <button id="helpPrev" class="btn ghost small">Prev</button>
-      <button id="helpNext" class="btn small">Next</button>
-      <button id="helpClose" class="btn primary small">I understand</button>
-    </div>
-  `;
-  overlay.appendChild(tooltip);
-
-  document.body.appendChild(overlay);
-  _helpState.overlay = overlay;
-  _helpState.spotlight = spotlight;
-  _helpState.tooltip = tooltip;
-
-  // event wiring
-  document.getElementById('helpPrev').addEventListener('click', ()=> { moveHelp(-1); });
-  document.getElementById('helpNext').addEventListener('click', ()=> { moveHelp(1); });
-  document.getElementById('helpClose').addEventListener('click', ()=> { cleanupHelp(true); });
-
-  // keyboard: Esc does nothing (require explicit "I understand"), but allow left/right arrows
-  overlay.addEventListener('keydown', (e)=> {
-    if(e.key === 'ArrowRight') moveHelp(1);
-    if(e.key === 'ArrowLeft') moveHelp(-1);
-    e.stopPropagation();
-  });
-
-  // show first step
-  setTimeout(()=> showHelpStep(0), 80);
-}
-
-// Replace existing showHelpStep() with this improved async version
-function waitForElement(selector, timeout = 1500) {
+/* ------- small helper to wait for dynamically inserted elements ------- */
+function waitForElement(selector, timeout = 3000) {
   return new Promise((resolve) => {
     const el = document.querySelector(selector);
     if (el) return resolve(el);
@@ -4510,6 +4464,86 @@ function waitForElement(selector, timeout = 1500) {
   });
 }
 
+/* internal help state */
+let _helpState = { overlay:null, spotlight:null, tooltip:null, steps:[], idx:0, view:'', keyHandler:null };
+
+/* ------- startHelp: create overlay, trap keys & show first step ------- */
+function startHelp(viewName){
+  // normalize view name
+  const steps = Array.isArray(HELP_STEPS[viewName]) ? HELP_STEPS[viewName] : [];
+  if(steps.length === 0){
+    notify('No help steps defined for this view.');
+    return;
+  }
+
+  cleanupHelp(); // ensure previous removed
+  _helpState.view = viewName;
+  _helpState.steps = steps;
+  _helpState.idx = 0;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'help-overlay';
+  overlay.setAttribute('role','dialog');
+  overlay.setAttribute('aria-modal','true');
+  overlay.setAttribute('aria-label','Help overlay');
+
+  // make focusable so it receives keyboard events
+  overlay.tabIndex = 0;
+
+  // block clicks from reaching the page; allow internal interactions
+  overlay.addEventListener('click', (e)=> { e.stopPropagation(); });
+
+  const blocker = document.createElement('div');
+  blocker.className = 'help-blocker';
+  overlay.appendChild(blocker);
+
+  const spotlight = document.createElement('div');
+  spotlight.className = 'help-spotlight';
+  overlay.appendChild(spotlight);
+
+  const tooltip = document.createElement('div');
+  tooltip.className = 'help-tooltip';
+  tooltip.tabIndex = 0;
+  tooltip.innerHTML = `
+    <div id="helpContent"><h4></h4><p></p></div>
+    <div class="help-controls">
+      <button id="helpPrev" class="btn ghost small">Prev</button>
+      <button id="helpNext" class="btn small">Next</button>
+      <button id="helpClose" class="btn primary small">I understand</button>
+    </div>
+  `;
+  overlay.appendChild(tooltip);
+
+  document.body.appendChild(overlay);
+  _helpState.overlay = overlay;
+  _helpState.spotlight = spotlight;
+  _helpState.tooltip = tooltip;
+
+  // wire buttons
+  tooltip.querySelector('#helpPrev').addEventListener('click', ()=> moveHelp(-1));
+  tooltip.querySelector('#helpNext').addEventListener('click', ()=> moveHelp(1));
+  tooltip.querySelector('#helpClose').addEventListener('click', ()=> cleanupHelp(true));
+
+  // global key handler for arrows & Esc (Esc will close as a convenience)
+  const keyHandler = (e) => {
+    if(!_helpState.overlay) return;
+    if(e.key === 'ArrowRight') { moveHelp(1); e.preventDefault(); }
+    else if(e.key === 'ArrowLeft') { moveHelp(-1); e.preventDefault(); }
+    else if(e.key === 'Escape') { cleanupHelp(true); e.preventDefault(); }
+  };
+  _helpState.keyHandler = keyHandler;
+  document.addEventListener('keydown', keyHandler, { capture: true });
+
+  // focus the overlay so key events are received reliably
+  setTimeout(()=> {
+    try { overlay.focus(); } catch(e){}
+  }, 40);
+
+  // show first step
+  setTimeout(()=> showHelpStep(0), 80);
+}
+
+/* ------- show a particular step (mostly same as your version) ------- */
 async function showHelpStep(index){
   const steps = _helpState.steps || [];
   if(index < 0) index = 0;
@@ -4522,36 +4556,28 @@ async function showHelpStep(index){
   tip.querySelector('h4').textContent = step.title || '';
   tip.querySelector('p').textContent = step.text || '';
 
-  // Try to find target; wait briefly if it's not present (useful for dynamic content like pagination)
-  let el = null;
-  try {
-    el = document.querySelector(step.sel);
-    if(!el) el = await waitForElement(step.sel, 1500);
-  } catch(e) {
-    el = document.querySelector(step.sel) || null;
-  }
+  // wait for target (use querySelector first, fallback to wait)
+  let el = document.querySelector(step.sel);
+  if(!el) el = await waitForElement(step.sel, 3000);
 
-  // If element missing after waiting, show centered tooltip and hide spotlight
+  // if missing: center the tooltip and hide the spotlight
   if(!el){
     if(_helpState.spotlight) { _helpState.spotlight.style.width = '0px'; _helpState.spotlight.classList.remove('pulse'); }
     tip.classList.remove('top','right','left','bottom');
     tip.style.left = '50%';
-    tip.style.top = '10%';
+    tip.style.top = '12%';
     tip.style.transform = 'translateX(-50%)';
     tip.focus();
     updateHelpControls();
     return;
   }
 
-  // If we have the element: scroll it into view smoothly, then position the spotlight/tooltip
-  try {
-    el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
-  } catch(e){ /* ignore if browser doesn't support */ }
+  // bring it into view
+  try{ el.scrollIntoView({ behavior:'smooth', block:'center', inline:'nearest' }); } catch(e){}
 
-  // Wait for scroll & layout to settle
+  // allow layout to settle
   await new Promise(r => setTimeout(r, 260));
 
-  // compute bounding
   const rect = el.getBoundingClientRect();
   const padding = 12;
   const left = Math.max(8, Math.round(rect.left - padding + window.scrollX));
@@ -4559,7 +4585,6 @@ async function showHelpStep(index){
   const width = Math.max(36, Math.round(rect.width + padding * 2));
   const height = Math.max(24, Math.round(rect.height + padding * 2));
 
-  // position spotlight
   const sp = _helpState.spotlight;
   sp.style.left = `${left}px`;
   sp.style.top = `${top}px`;
@@ -4568,7 +4593,7 @@ async function showHelpStep(index){
   try { sp.style.borderRadius = window.getComputedStyle(el).borderRadius || '10px'; } catch(e){ sp.style.borderRadius = '10px'; }
   sp.classList.add('pulse');
 
-  // position tooltip per preferred pos with clamping
+  // tooltip placement
   tip.classList.remove('top','right','left','bottom');
   tip.style.transform = '';
   tip.style.left = ''; tip.style.top = ''; tip.style.right = ''; tip.style.bottom = '';
@@ -4577,6 +4602,7 @@ async function showHelpStep(index){
   const prefer = step.pos || (window.innerWidth <= 420 ? 'bottom' : 'right');
   let tx, ty, cls;
   const estH = Math.min(200, window.innerHeight * 0.4);
+
   if(prefer === 'bottom'){
     tx = left + (width/2) - (tooltipMaxW/2);
     ty = top + height + 12;
@@ -4606,7 +4632,7 @@ async function showHelpStep(index){
   updateHelpControls();
 }
 
-
+/* ------- moveHelp & controls ------- */
 function moveHelp(dir){
   const idx = _helpState.idx + dir;
   if(idx < 0) return;
@@ -4623,27 +4649,28 @@ function updateHelpControls(){
   if(nextBtn) nextBtn.disabled = idx === (len - 1);
 }
 
+/* ------- cleanup: remove overlay and key handler ------- */
 function cleanupHelp(closedByUser){
   if(_helpState.overlay){
     try { _helpState.overlay.remove(); } catch(e) {}
   }
-  _helpState = { overlay:null, spotlight:null, tooltip:null, steps:[], idx:0, view:'' };
-  // focus back to primary UI
-  try { document.querySelector('.view:not(.hidden)')?.focus(); } catch(e){}
+  // unregister key handler
+  if(_helpState.keyHandler){
+    try { document.removeEventListener('keydown', _helpState.keyHandler, { capture: true }); } catch(e){ try { document.removeEventListener('keydown', _helpState.keyHandler); } catch(e){} }
+  }
+  _helpState = { overlay:null, spotlight:null, tooltip:null, steps:[], idx:0, view:'', keyHandler:null };
+  // restore focus (try a sensible element)
+  try { const mainView = document.querySelector('.view:not(.hidden)'); if(mainView) { mainView.focus?.(); } } catch(e){}
 }
 
-// attach a help button to the topbar and wire side-nav to start help when view is active
+/* ------- attach Help buttons to page headers and add a global topbar help ------- */
 function attachHelpButtons(){
-  // add help small button to each page header (optional, will create if missing)
+  // add help small button to each page header
   document.querySelectorAll('.page-header').forEach(ph => {
-    // find the page-actions container
     const pa = ph.querySelector('.page-actions');
     if(!pa) return;
-
-    // if a help button already exists in this page-actions, skip
     if(pa.querySelector('.page-help')) return;
 
-    // create the button (styled to match existing .btn classes)
     const hb = document.createElement('button');
     hb.type = 'button';
     hb.className = 'page-help btn ghost small';
@@ -4652,7 +4679,6 @@ function attachHelpButtons(){
     hb.style.marginLeft = '6px';
     hb.innerHTML = '<i class="fa fa-question"></i> Help';
 
-    // wire click: determine view id from closest .view
     hb.addEventListener('click', (e) => {
       e.preventDefault();
       const view = ph.closest('.view');
@@ -4660,12 +4686,30 @@ function attachHelpButtons(){
       startHelp(id);
     });
 
-    // append to page-actions so it stays next to other action buttons
     pa.appendChild(hb);
   });
 
-  // also ensure we don't accidentally leave the old footer/leftover help buttons
-  // If there are any legacy .page-help placed elsewhere, move them into closest .page-actions
+  /* place a global help button in the topbar (if not present)
+  const topbar = document.querySelector('.topbar');
+  if(topbar && !topbar.querySelector('#globalHelpBtn')){
+    const btn = document.createElement('button');
+    btn.id = 'globalHelpBtn';
+    btn.className = 'btn ghost small';
+    btn.title = 'Open guided help for current view';
+    btn.innerHTML = '<i class="fa fa-life-ring"></i>';
+    btn.style.marginLeft = '8px';
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const currentView = document.querySelector('.view:not(.hidden)');
+      const id = currentView?.id?.replace('view-','') || 'dashboard';
+      startHelp(id);
+    });
+    // append to the right side of topbar (try to find top-right actions container)
+    const topRight = document.querySelector('.top-right') || topbar;
+    topRight?.appendChild(btn);
+  } */
+
+  // Move any legacy .page-help buttons into their nearest .page-actions
   document.querySelectorAll('.page-help').forEach(btn => {
     const closestPa = btn.closest('.page-header')?.querySelector('.page-actions');
     if(closestPa && btn.parentElement !== closestPa){
@@ -4674,11 +4718,12 @@ function attachHelpButtons(){
   });
 }
 
-// Auto attach on DOMContentLoaded (or call attachHelpButtons() from your startApp)
-document.addEventListener('DOMContentLoaded', () => {
-  // small defer to ensure elements exist after your app boot
-  setTimeout(()=> attachHelpButtons(), 420);
-});
+/* auto attach on DOM ready (defer slightly so app init can finish) */
+if(document.readyState === 'loading'){
+  document.addEventListener('DOMContentLoaded', ()=> setTimeout(attachHelpButtons, 420));
+} else {
+  setTimeout(attachHelpButtons, 420);
+}
 
 /* ==== KPI popover & mobile expand: initialize lists and fetch KPI values ==== */
 (function(){
@@ -5318,7 +5363,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
 })();
-async function showHelpStep(idx){
+/* async function showHelpStep(idx){
   const step = (_helpState.steps || [])[idx];
   if(!step) return;
   _helpState.idx = idx;
@@ -5520,7 +5565,8 @@ function attachHelpButtons(){
 }
 document.addEventListener('DOMContentLoaded', () => {
   attachHelpButtons();
-});
+}); */
+
 function renderKpiList(container, items){
   container.innerHTML = '';
   const list = document.createElement('ul');
@@ -5814,6 +5860,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.initKpiLists = initKpiLists;
 })();
 /* ===== KPI detailed lists on hover /tap (desktop floating + mobile stacked with expand/collapse) ===== */
+
 (function(){
   function createSpinnerEl() {
     const s = document.createElement('span');

@@ -1118,6 +1118,26 @@ body{
     padding: 14px;
   }
 
+  .sidebar-header {
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+  }
+
+  .sidebar-logo {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+  }
+
+  .sidebar-logo-img {
+      display: block;
+      margin: 0 auto;
+  }
+
   .avatar-wrap { align-items:center; text-align:center; }
   .profile-fields { width:100%; }
   .profile-left { align-items:center; }
@@ -1141,7 +1161,7 @@ body{
     width: 100%;
   }
 
-  .sidebar .sidebar-logo{ display:block; }
+  .sidebar .sidebar-logo{ display:block; text-align: center;}
 
   #drawerOverlay {
     position: fixed;
@@ -1204,7 +1224,6 @@ body{
 
 @media (max-width:1000px){
   .main{margin-left:110px}
-  .sidebar{left:12px}
 }
 
 @media (max-width:420px) {
@@ -1748,7 +1767,7 @@ html {
 @media (min-width: 1024px) {
   .inventory-layout {
     display: grid;
-    grid-template-columns: 1fr 295px;
+    grid-template-columns: 1fr 400px;
     gap: 12px;
     align-items: start;
   }
