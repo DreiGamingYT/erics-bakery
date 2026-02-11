@@ -6058,6 +6058,12 @@ const HELP_STEPS = {
 			text: 'Edit quantities inline, then Save to record the change to history.',
 			pos: 'top'
 		},
+    {
+			sel: '#invPagination',
+			title: 'Pagination',
+			text: 'Navigate pages; export and print use the complete filtered list.',
+			pos: 'top'
+		},
 		{
 			sel: '#inventoryRecentActivity',
 			title: 'Recent inventory history',
@@ -6258,16 +6264,6 @@ const HELP_STEPS = {
 		}
 	]
 };
-
-HELP_STEPS.inventory = HELP_STEPS.inventory || [];
-if (!HELP_STEPS.inventory.some(s => s.sel === '.inv-pagination')) {
-	HELP_STEPS.inventory.push({
-		sel: '.inv-pagination',
-		title: 'Pagination (Inventory)',
-		text: 'Navigate pages; export and print use the complete filtered list.',
-		pos: 'bottom'
-	});
-}
 
 function waitForElement(selector, timeout = 3000) {
 	return new Promise((resolve) => {
