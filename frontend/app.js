@@ -2886,113 +2886,67 @@ async function renderReports(rangeStart, rangeEnd, reportFilter) {
   start.setHours(0, 0, 0, 0);
   end.setHours(23, 59, 59, 999);
 
-  // allow override or UI select
   const filter = reportFilter || q('reportFilter')?.value || 'usage';
 
-  // remove existing sales card/chart if present
   try {
     const salesCard = q('salesTimelineChart') ? q('salesTimelineChart').closest('.card') : null;
     if (salesCard && salesCard.parentElement) salesCard.remove();
-    try { chartSalesTimeline && chartSalesTimeline.destroy(); } catch (e) {}
+    try { chartSalesTimeline && chartSalesTimeline.destroy(); } catch(e){}
     chartSalesTimeline = null;
-  } catch (e) {}
+  } catch(e){}
 
-  // Build usageMap for entire period (full set) — used for summary and chart (chart uses top N)
-  let agg = null;
-  if (typeof aggregateUsageFromActivity === 'function') {
-    // if you have a helper that already aggregates, prefer it but request full set if supported
-    // try to get full data; fall back to limit 50 if function requires it
+  // ---------------------------
+  // Build full usage map from activity (for the date range)
+  // ---------------------------
+  const usageMap = {};
+  (DB.ingredients || []).forEach(i => {
+    // normalize id key as string so map keys match regardless of type
+    usageMap[String(i.id)] = 0;
+  });
+
+  (DB.activity || []).forEach(a => {
     try {
-      const full = await aggregateUsageFromActivity(start.toISOString(), end.toISOString(), 0); // 0 => no limit (if supported)
-      // If helper returns short list only, we'll compute fallback below.
-      if (full && full.raw && full.raw.length) {
-        // ensure we have a full raw list (helper dependent)
-        agg = {
-          labels: full.labels || [],
-          data: full.data || [],
-          raw: full.raw // may be limited depending on helper
-        };
-      }
-    } catch (e) {
-      // ignore; we'll compute below
-    }
-  }
-
-  if (!agg) {
-    // compute usage from DB.activity (full)
-    const usageMap = {}; // keyed by ingredient id (as number)
-    (DB.ingredients || []).forEach(i => {
-      const id = Number(i.id);
-      usageMap[id] = 0;
-    });
-
-    (DB.activity || []).forEach(a => {
-      // only consider events inside range
       const t = new Date(a.time || a.date || null);
-      if (!t || isNaN(t)) return;
+      if (!t || isNaN(t.getTime())) return;
       if (t < start || t > end) return;
-
-      // heuristics: look for stock-out / used / used for patterns OR explicit ingredient_id
-      const txt = String(a.text || '').toLowerCase();
-      // if activity has explicit ingredient_id and qty, prefer that
-      const iid = a.ingredient_id ? Number(a.ingredient_id) : null;
-      let qty = 0;
-      if (a.qty || a.quantity) {
-        qty = Number(a.qty || a.quantity) || 0;
-      } else {
-        // try to parse numeric value from text (fallback)
-        const m = String(a.text || '').match(/([0-9]+(?:\.[0-9]+)?)/);
-        if (m) qty = Number(m[0]) || 0;
+      const text = String(a.text || '').toLowerCase();
+      // consider events that indicate consumption/stock-out or "used"
+      if (!(text.includes('used') || text.includes('stock out') || text.includes('used for') || text.includes('stock-out'))) return;
+      const m = String(a.text || '').match(/([0-9]*\.?[0-9]+)/g);
+      if (!m) return;
+      const v = Number(m[0]) || 0;
+      if (!a.ingredient_id && a.ingredient) {
+        // fallback: if activity stores ingredient name instead of id, attempt to map name -> id
+        const ing = (DB.ingredients || []).find(ii => String(ii.name || '').toLowerCase() === String(a.ingredient || '').toLowerCase());
+        if (ing) usageMap[String(ing.id)] = (usageMap[String(ing.id)] || 0) + v;
+      } else if (a.ingredient_id) {
+        usageMap[String(a.ingredient_id)] = (usageMap[String(a.ingredient_id)] || 0) + v;
       }
+    } catch (e) { /* ignore malformed activity */ }
+  });
 
-      // Only count 'used' or 'stock out' types or if ingredient_id present
-      const relevant = iid || txt.includes('used') || txt.includes('stock out') || txt.includes('stock-out') || txt.includes('stockout') || txt.includes('stock in') || txt.includes('stock-in') || txt.includes('stockin');
-      if (!relevant) return;
+  // Build sorted array of usage for chart (top N)
+  const usageArr = Object.keys(usageMap).map(k => ({ id: isFinite(Number(k)) ? Number(k) : k, qty: usageMap[k] || 0 }));
+  const sortedByUsage = usageArr.slice().sort((a,b) => b.qty - a.qty);
+  const topForChart = sortedByUsage.slice(0, 50); // keep chart focused
 
-      if (iid) {
-        usageMap[iid] = (usageMap[iid] || 0) + (qty || 0);
-      } else {
-        // If no explicit ingredient_id, try to infer by matching ingredient name in text (best-effort)
-        const lowerText = String(a.text || '').toLowerCase();
-        (DB.ingredients || []).forEach(ing => {
-          if (!ing || !ing.name) return;
-          const nm = String(ing.name).toLowerCase();
-          if (nm && lowerText.includes(nm)) {
-            const idn = Number(ing.id);
-            usageMap[idn] = (usageMap[idn] || 0) + (qty || 0);
-          }
-        });
-      }
-    });
+  const agg = {
+    labels: topForChart.map(x => (DB.ingredients.find(i => String(i.id) === String(x.id))?.name) || `#${x.id}`),
+    data: topForChart.map(x => +(x.qty.toFixed ? x.qty.toFixed(3) : Number(x.qty).toFixed(3))),
+    raw: topForChart // only top portion used by chart
+  };
 
-    // build sorted array (desc by qty)
-    const fullArr = Object.keys(usageMap).map(k => ({
-      id: Number(k),
-      qty: usageMap[k] || 0
-    })).sort((a, b) => (b.qty || 0) - (a.qty || 0));
-
-    // top N for chart visualization (keep chart performance)
-    const topN = fullArr.slice(0, 50);
-
-    agg = {
-      labels: topN.map(x => (DB.ingredients.find(i => Number(i.id) === x.id)?.name) || `#${x.id}`),
-      data: topN.map(x => +(x.qty.toFixed(3))),
-      raw: fullArr // full array (not sliced) — used for summary
-    };
-  }
-
-  // Render the usage chart (top results only)
   const ingCtx = q('ingredientUsageChart')?.getContext('2d');
   if (ingCtx) {
     try { if (chartIngredientUsage) chartIngredientUsage.destroy(); } catch (e) {}
     chartIngredientUsage = new Chart(ingCtx, {
       type: 'bar',
       data: {
-        labels: agg.labels || [],
+        labels: agg.labels,
         datasets: [{
           label: 'Units used',
-          data: agg.data || [],
-          backgroundColor: generateColors((agg.data || []).length)
+          data: agg.data,
+          backgroundColor: generateColors(agg.data.length)
         }]
       },
       options: {
@@ -3005,58 +2959,66 @@ async function renderReports(rangeStart, rangeEnd, reportFilter) {
     });
   }
 
-  // Build summary panel: use full usage data so ALL ingredients are shown for 'usage'
   const summaryEl = q('reportSummary');
   if (summaryEl) {
-    // compute totals from full raw array
-    const totalUsed = (agg.raw || []).reduce((s, r) => s + (r.qty || 0), 0);
-
-    const lowCount = (DB.ingredients || []).filter(i => i.type === 'ingredient' && (Number(i.qty) <= (Number(i.min) || computeThresholdForIngredient(i)))).length;
+    const totalUsed = Object.values(usageMap).reduce((s, v) => s + (Number(v) || 0), 0);
+    const lowCount = (DB.ingredients || []).filter(i => i.type === 'ingredient' && (i.qty <= (i.min || computeThresholdForIngredient(i)))).length;
     const expiringCount = (DB.ingredients || []).filter(i => i.type === 'ingredient' && i.expiry && daysUntil(i.expiry) >= 0 && daysUntil(i.expiry) <= 30).length;
-    const best = (agg.raw && agg.raw.length) ? (DB.ingredients.find(i => Number(i.id) === agg.raw[0].id)?.name || `#${agg.raw[0].id}`) : '—';
+    const bestRaw = sortedByUsage.length ? sortedByUsage[0] : null;
+    const best = bestRaw ? (DB.ingredients.find(i => String(i.id) === String(bestRaw.id))?.name || `#${bestRaw.id}`) : '—';
 
-    // Build table rows differently based on filter:
-    // - 'usage' => show ALL ingredients, use usageMap (agg.raw) to populate usedQty
-    // - 'low' => show only low items
-    // - 'expiring' => show only expiring items
-    // - 'all' => show everything
-    const usageMapFromRaw = {};
-    (agg.raw || []).forEach(r => { usageMapFromRaw[Number(r.id)] = r.qty || 0; });
-
-    const rows = (DB.ingredients || []).filter(i => {
-      if (filter === 'low') {
-        return i.type === 'ingredient' && (Number(i.qty) <= (Number(i.min) || computeThresholdForIngredient(i)));
+    // Build table rows:
+    // - if filter === 'usage' -> include ALL ingredients (with usedQty from usageMap)
+    // - if filter === 'low' / 'expiring' -> include only matching ingredients
+    // - if filter === 'all' -> include all ingredients
+    let rows = (DB.ingredients || []).map(i => {
+      const usedQty = usageMap[String(i.id)] || 0;
+      // apply filters
+      if (filter === 'usage') {
+        // include all ingredients (even if usedQty == 0)
+      } else if (filter === 'low') {
+        if (!(i.type === 'ingredient' && i.qty <= (i.min || computeThresholdForIngredient(i)))) return null;
       } else if (filter === 'expiring') {
-        return i.type === 'ingredient' && i.expiry && daysUntil(i.expiry) >= 0 && daysUntil(i.expiry) <= 30;
-      } else if (filter === 'usage') {
-        // show all ingredients for usage summary (including zero-used ones)
-        return true;
+        if (!(i.type === 'ingredient' && i.expiry && daysUntil(i.expiry) >= 0 && daysUntil(i.expiry) <= 30)) return null;
       } else if (filter === 'all') {
-        return true;
+        // include all
+      } else {
+        // unknown filter fallback -> include only usage matches
+        if (!(usageArr.some(u => String(u.id) === String(i.id) && u.qty > 0))) return null;
       }
-      // default: usage behavior
-      return true;
-    }).map(i => {
-      const usedQty = usageMapFromRaw[Number(i.id)] || 0;
-      return `<tr>
-        <td style="padding:8px;border:1px solid #eee">${i.id}</td>
-        <td style="padding:8px;border:1px solid #eee">${escapeHtml(i.name)}</td>
-        <td style="padding:8px;border:1px solid #eee;text-align:right">${usedQty}</td>
-        <td style="padding:8px;border:1px solid #eee;text-align:right">${i.qty}</td>
-        <td style="padding:8px;border:1px solid #eee">${escapeHtml(i.unit||'')}</td>
-        <td style="padding:8px;border:1px solid #eee">${i.min || computeThresholdForIngredient(i)}</td>
-        <td style="padding:8px;border:1px solid #eee">${i.type||''}</td>
-        <td style="padding:8px;border:1px solid #eee">${i.expiry||''}</td>
-      </tr>`;
-    }).join('') || `<tr><td colspan="8" style="padding:12px" class="muted">No items match the selected filter/range</td></tr>`;
 
-    // update header label for the filter
-    const filterTitle = filter === 'usage' ? 'Ingredient Usage' : filter === 'low' ? 'Low stock' : filter === 'expiring' ? 'Expiring items' : 'All inventory';
+      return {
+        id: i.id,
+        name: i.name,
+        usedQty,
+        currentQty: i.qty || 0,
+        unit: i.unit || '',
+        min: i.min || computeThresholdForIngredient(i),
+        type: i.type || '',
+        expiry: i.expiry || ''
+      };
+    }).filter(Boolean);
+
+    // If showing usage, order by usedQty desc for easier reading
+    if (filter === 'usage') {
+      rows.sort((a,b) => b.usedQty - a.usedQty);
+    }
+
+    const tableRows = rows.map(i => `<tr>
+        <td style="padding:8px;border:1px solid #eee">${escapeHtml(String(i.id))}</td>
+        <td style="padding:8px;border:1px solid #eee">${escapeHtml(String(i.name))}</td>
+        <td style="padding:8px;border:1px solid #eee;text-align:right">${+(Number(i.usedQty)||0)}</td>
+        <td style="padding:8px;border:1px solid #eee;text-align:right">${+(Number(i.currentQty)||0)}</td>
+        <td style="padding:8px;border:1px solid #eee">${escapeHtml(i.unit||'')}</td>
+        <td style="padding:8px;border:1px solid #eee">${escapeHtml(String(i.min||''))}</td>
+        <td style="padding:8px;border:1px solid #eee">${escapeHtml(i.type||'')}</td>
+        <td style="padding:8px;border:1px solid #eee">${escapeHtml(i.expiry||'')}</td>
+      </tr>`).join('') || `<tr><td colspan="8" style="padding:12px" class="muted">No items match the selected filter/range</td></tr>`;
 
     summaryEl.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
         <div>
-          <div style="font-weight:800">Reports — ${filterTitle}</div>
+          <div style="font-weight:800">Reports — ${filter === 'usage' ? 'Ingredient Usage' : filter === 'low' ? 'Low stock' : filter === 'expiring' ? 'Expiring items' : 'All items'}</div>
           <div class="muted small">Period: ${start.toISOString().slice(0,10)} to ${end.toISOString().slice(0,10)} • Total used: ${totalUsed} • Low items: ${lowCount} • Expiring: ${expiringCount} • Top used: ${best}</div>
         </div>
         <div id="summarybtns" style="display:flex;gap:8px;align-items:center">
@@ -3077,19 +3039,16 @@ async function renderReports(rangeStart, rangeEnd, reportFilter) {
             <th style="padding:8px;border:1px solid #eee">Type</th>
             <th style="padding:8px;border:1px solid #eee">Expiry</th>
           </tr></thead>
-          <tbody>${rows}</tbody>
+          <tbody>${tableRows}</tbody>
         </table>
       </div>
     `;
 
-    // wire print/export buttons
-    const prBtn = q('printReportsBtn');
-    if (prBtn) prBtn.onclick = () => printReports(start.toISOString(), end.toISOString(), filter);
-    const exBtn = q('exportReportsCsvBtn');
-    if (exBtn) exBtn.onclick = () => exportReportsCSVReport(start.toISOString(), end.toISOString(), filter);
+    q('printReportsBtn')?.addEventListener('click', () => printReports(start.toISOString(), end.toISOString(), filter));
+    q('exportReportsCsvBtn')?.addEventListener('click', () => exportReportsCSVReport(start.toISOString(), end.toISOString(), filter));
   }
 
-  try { chartIngredientUsage && chartIngredientUsage.resize && chartIngredientUsage.resize(); } catch (e) {}
+  try { chartIngredientUsage && chartIngredientUsage.resize && chartIngredientUsage.resize(); } catch(e) {}
 }
 
 
@@ -5096,7 +5055,7 @@ function startApp() {
 		if (parent) {
 			const sel = document.createElement('select');
 			sel.id = 'reportFilter';
-			sel.innerHTML = `<option value="usage">Ingredient usage</option><option value="low">Low stock</option><option value="expiring">Expiring</option><option value="all">All inventory</option>`;
+			sel.innerHTML = `<option value="usage">Ingredient usage</option><option value="low">Low stock</option><option value="expiring">Expiring</option><option value="all">All items</option>`;
 			parent.appendChild(sel);
 
 			sel.addEventListener('change', () => {
