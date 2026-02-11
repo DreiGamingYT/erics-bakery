@@ -339,8 +339,7 @@ app.get('/api/ingredients', authMiddleware, async (req, res) => {
 		const type = (req.query.type || 'all');
 		const filter = (req.query.filter || 'all');
 		const search = (req.query.search || '').trim();
-		const sort = (['name', 'qty', 'expiry'].includes(req.query.sort) ? req.query.sort :
-			'name');
+		const sort = (['id', 'name', 'qty', 'expiry'].includes(req.query.sort) ? req.query.sort : 'id');
 		const order = (req.query.order === 'desc' ? 'DESC' : 'ASC');
 		const where = [];
 		const params = [];
@@ -742,7 +741,7 @@ app.get('/api/ingredients/export/csv', authMiddleware, async (req, res) => {
 		}
 		const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
 		const [rows] = await pool.query(
-			`SELECT id,name,type,supplier,qty,unit,min_qty,max_qty,expiry FROM ingredients ${whereSql} ORDER BY name ASC`,
+			`SELECT id,name,type,supplier,qty,unit,min_qty,max_qty,expiry FROM ingredients ${whereSql} ORDER BY id ASC`,
 			params);
 		let csv = 'id,name,type,supplier,qty,unit,min_qty,max_qty,expiry\n';
 		for (const r of rows) {
