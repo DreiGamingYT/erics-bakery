@@ -499,7 +499,33 @@ const sampleIngredients = [{
 	},
 	{
 		id: 32,
-		name: 'Baking trays & pans / molder',
+		name: 'Baking trays',
+		unit: 'pcs',
+		qty: 40,
+		min: 10,
+		max: 100,
+		expiry: null,
+		supplier: 'Protego Inc.',
+		icon: 'fa-pan-food',
+		type: 'equipment',
+		attrs: {}
+	},
+  {
+		id: 32,
+		name: 'Baking Pans',
+		unit: 'pcs',
+		qty: 40,
+		min: 10,
+		max: 100,
+		expiry: null,
+		supplier: 'Protego Inc.',
+		icon: 'fa-pan-food',
+		type: 'equipment',
+		attrs: {}
+	},
+  {
+		id: 32,
+		name: 'Baking molder',
 		unit: 'pcs',
 		qty: 40,
 		min: 10,
@@ -512,7 +538,33 @@ const sampleIngredients = [{
 	},
 	{
 		id: 33,
-		name: 'Measuring cups / spoons / scales',
+		name: 'Measuring cups',
+		unit: 'pcs',
+		qty: 12,
+		min: 3,
+		max: 30,
+		expiry: null,
+		supplier: 'Protego Inc.',
+		icon: 'fa-weight-scale',
+		type: 'equipment',
+		attrs: {}
+	},
+  {
+		id: 33,
+		name: 'Measuring spoons',
+		unit: 'pcs',
+		qty: 12,
+		min: 3,
+		max: 30,
+		expiry: null,
+		supplier: 'Protego Inc.',
+		icon: 'fa-weight-scale',
+		type: 'equipment',
+		attrs: {}
+	},
+  {
+		id: 33,
+		name: 'Measuring scales',
 		unit: 'pcs',
 		qty: 12,
 		min: 3,
@@ -525,7 +577,7 @@ const sampleIngredients = [{
 	},
 	{
 		id: 34,
-		name: 'Dough roller / Rolling pins',
+		name: 'Rolling pins',
 		unit: 'pcs',
 		qty: 8,
 		min: 2,
@@ -551,7 +603,7 @@ const sampleIngredients = [{
 	},
 	{
 		id: 36,
-		name: 'Knives & spatulas',
+		name: 'Knives',
 		unit: 'pcs',
 		qty: 30,
 		min: 6,
@@ -562,7 +614,19 @@ const sampleIngredients = [{
 		type: 'equipment',
 		attrs: {}
 	},
-
+  {
+		id: 36,
+		name: 'Spatulas',
+		unit: 'pcs',
+		qty: 30,
+		min: 6,
+		max: 60,
+		expiry: null,
+		supplier: 'Protego Inc.',
+		icon: 'fa-utensils',
+		type: 'equipment',
+		attrs: {}
+	},
 	{
 		id: 40,
 		name: 'Hairnet',
@@ -2089,7 +2153,7 @@ function renderPaginationControls(container, meta, onPageClick) {
 
 	const pages = meta.totalPages || 1;
 	const current = meta.page || 1;
-	const maxButtons = 7;
+	const maxButtons = 4;
 
 	if (!container) return;
 
@@ -2167,8 +2231,17 @@ async function renderIngredientCards(page = 1, limit = 5) {
 		if (qv) params.set('search', qv);
 
 		const res = await apiFetch(`/api/ingredients?${params.toString()}`);
-		const items = (res && res.items) ? res.items : [];
-		const meta = (res && res.meta) ? res.meta : {
+    let items = (res && res.items) ? res.items : [];
+
+    items.sort((a, b) => {
+      const ia = Number(a?.id ?? 0);
+      const ib = Number(b?.id ?? 0);
+      if (Number.isFinite(ia) && Number.isFinite(ib)) return ia - ib;
+      
+      return String(a?.id || '').localeCompare(String(b?.id || ''), undefined, { numeric: true });
+    });
+
+    const meta = (res && res.meta) ? res.meta : {
 			total: items.length,
 			page: page,
 			limit,
