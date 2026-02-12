@@ -858,7 +858,7 @@ const PERMISSIONS = {
 		help: false,
 		dashboard: true,
 		calendar: false,
-		profile: false,
+		profile: true,
 		inventory: true,
 		reports: false,
 		settings: false
@@ -867,7 +867,7 @@ const PERMISSIONS = {
 		help: true,
 		dashboard: true,
 		calendar: true,
-		profile: false,
+		profile: true,
 		inventory: true,
 		reports: true,
 		settings: false
