@@ -2877,149 +2877,136 @@ async function renderInventoryActivity(limit = 20) {
 	}
 }
 
-async function renderReports(rangeStart, rangeEnd, reportFilter) {
-  const startInput = rangeStart || q('reportStart')?.value || null;
-  const endInput = rangeEnd || q('reportEnd')?.value || null;
-  const end = endInput ? new Date(endInput) : new Date();
-  const start = startInput ? new Date(startInput) : new Date(end);
-  if (!startInput) start.setDate(end.getDate() - 29);
-  start.setHours(0, 0, 0, 0);
-  end.setHours(23, 59, 59, 999);
+function renderReports(rangeStart, rangeEnd, reportFilter) {
+	const startInput = rangeStart || q('reportStart')?.value || null;
+	const endInput = rangeEnd || q('reportEnd')?.value || null;
+	const end = endInput ? new Date(endInput) : new Date();
+	const start = startInput ? new Date(startInput) : new Date(end);
+	if (!startInput) start.setDate(end.getDate() - 29);
+	start.setHours(0, 0, 0, 0);
+	end.setHours(23, 59, 59, 999);
 
-  const filter = reportFilter || q('reportFilter')?.value || 'usage';
+	const filter = reportFilter || q('reportFilter')?.value || 'usage';
 
-  try {
-    const salesCard = q('salesTimelineChart') ? q('salesTimelineChart').closest('.card') : null;
-    if (salesCard && salesCard.parentElement) salesCard.remove();
-    try { chartSalesTimeline && chartSalesTimeline.destroy(); } catch(e){}
-    chartSalesTimeline = null;
-  } catch(e){}
+	try {
+		const salesCard = q('salesTimelineChart') ? q('salesTimelineChart').closest('.card') : null;
+		if (salesCard && salesCard.parentElement) salesCard.remove();
+		try { chartSalesTimeline && chartSalesTimeline.destroy(); } catch (e) {}
+		chartSalesTimeline = null;
+	} catch (e) {}
 
-  // ---------------------------
-  // Build full usage map from activity (for the date range)
-  // ---------------------------
-  const usageMap = {};
-  (DB.ingredients || []).forEach(i => {
-    // normalize id key as string so map keys match regardless of type
-    usageMap[String(i.id)] = 0;
-  });
+	let agg;
+	if (typeof aggregateUsageFromActivity === 'function') {
+		agg = aggregateUsageFromActivity(start.toISOString(), end.toISOString(), 50);
+	} else {
+		const usageMap = {};
+		(DB.ingredients || []).forEach(i => {
+			if (i && String(i.type || '').toLowerCase() === 'ingredient') {
+				usageMap[i.id] = 0;
+			}
+		});
+		(DB.activity || []).forEach(a => {
+			const t = new Date(a.time || a.date || null);
+			if (!t || t < start || t > end) return;
+			const iid = Number(a.ingredient_id || 0);
+			if (!iid || !(iid in usageMap)) return;
+			const text = String(a.text || '').toLowerCase();
+			if (!(text.includes('used') || text.includes('stock out') || text.includes('used for'))) return;
+			const m = String(a.text || '').match(/([0-9]*\.?[0-9]+)/g);
+			if (!m) return;
+			const v = Number(m[0]) || 0;
+			usageMap[iid] = (usageMap[iid] || 0) + v;
+		});
+		const arr = Object.keys(usageMap).map(k => ({
+			id: Number(k),
+			qty: usageMap[k]
+		})).sort((a, b) => b.qty - a.qty).slice(0, 50);
+		agg = {
+			labels: arr.map(x => (DB.ingredients.find(i => i.id === x.id)?.name) || `#${x.id}`),
+			data: arr.map(x => +(x.qty.toFixed(3))),
+			raw: arr
+		};
+	}
 
-  (DB.activity || []).forEach(a => {
-    try {
-      const t = new Date(a.time || a.date || null);
-      if (!t || isNaN(t.getTime())) return;
-      if (t < start || t > end) return;
-      const text = String(a.text || '').toLowerCase();
-      // consider events that indicate consumption/stock-out or "used"
-      if (!(text.includes('used') || text.includes('stock out') || text.includes('used for') || text.includes('stock-out'))) return;
-      const m = String(a.text || '').match(/([0-9]*\.?[0-9]+)/g);
-      if (!m) return;
-      const v = Number(m[0]) || 0;
-      if (!a.ingredient_id && a.ingredient) {
-        // fallback: if activity stores ingredient name instead of id, attempt to map name -> id
-        const ing = (DB.ingredients || []).find(ii => String(ii.name || '').toLowerCase() === String(a.ingredient || '').toLowerCase());
-        if (ing) usageMap[String(ing.id)] = (usageMap[String(ing.id)] || 0) + v;
-      } else if (a.ingredient_id) {
-        usageMap[String(a.ingredient_id)] = (usageMap[String(a.ingredient_id)] || 0) + v;
-      }
-    } catch (e) { /* ignore malformed activity */ }
-  });
+	const ingCtx = q('ingredientUsageChart')?.getContext('2d');
+	if (ingCtx) {
+		try { if (chartIngredientUsage) chartIngredientUsage.destroy(); } catch (e) {}
+		chartIngredientUsage = new Chart(ingCtx, {
+			type: 'bar',
+			data: {
+				labels: agg.labels,
+				datasets: [{
+					label: 'Units used',
+					data: agg.data,
+					backgroundColor: generateColors(agg.data.length)
+				}]
+			},
+			options: {
+				indexAxis: 'y',
+				responsive: true,
+				maintainAspectRatio: false,
+				scales: { x: { beginAtZero: true } },
+				plugins: { legend: { display: false } }
+			}
+		});
+	}
 
-  // Build sorted array of usage for chart (top N)
-  const usageArr = Object.keys(usageMap).map(k => ({ id: isFinite(Number(k)) ? Number(k) : k, qty: usageMap[k] || 0 }));
-  const sortedByUsage = usageArr.slice().sort((a,b) => b.qty - a.qty);
-  const topForChart = sortedByUsage.slice(0, 50); // keep chart focused
+	const summaryEl = q('reportSummary');
+	if (summaryEl) {
+		const totalUsed = (agg.raw || []).reduce((s, r) => s + (r.qty || 0), 0);
 
-  const agg = {
-    labels: topForChart.map(x => (DB.ingredients.find(i => String(i.id) === String(x.id))?.name) || `#${x.id}`),
-    data: topForChart.map(x => +(x.qty.toFixed ? x.qty.toFixed(3) : Number(x.qty).toFixed(3))),
-    raw: topForChart // only top portion used by chart
-  };
+		const lowCount = (DB.ingredients || []).filter(i => {
+			const minVal = (i && (i.min != null)) ? i.min : computeThresholdForIngredient(i);
+			return Number(i.qty || 0) <= Number(minVal || 0);
+		}).length;
 
-  const ingCtx = q('ingredientUsageChart')?.getContext('2d');
-  if (ingCtx) {
-    try { if (chartIngredientUsage) chartIngredientUsage.destroy(); } catch (e) {}
-    chartIngredientUsage = new Chart(ingCtx, {
-      type: 'bar',
-      data: {
-        labels: agg.labels,
-        datasets: [{
-          label: 'Units used',
-          data: agg.data,
-          backgroundColor: generateColors(agg.data.length)
-        }]
-      },
-      options: {
-        indexAxis: 'y',
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: { x: { beginAtZero: true } },
-        plugins: { legend: { display: false } }
-      }
-    });
-  }
+		const expiringCount = (DB.ingredients || []).filter(i =>
+			String(i.type || '').toLowerCase() === 'ingredient' &&
+			i.expiry && daysUntil(i.expiry) >= 0 && daysUntil(i.expiry) <= 30
+		).length;
 
-  const summaryEl = q('reportSummary');
-  if (summaryEl) {
-    const totalUsed = Object.values(usageMap).reduce((s, v) => s + (Number(v) || 0), 0);
-    const lowCount = (DB.ingredients || []).filter(i => i.type === 'ingredient' && (i.qty <= (i.min || computeThresholdForIngredient(i)))).length;
-    const expiringCount = (DB.ingredients || []).filter(i => i.type === 'ingredient' && i.expiry && daysUntil(i.expiry) >= 0 && daysUntil(i.expiry) <= 30).length;
-    const bestRaw = sortedByUsage.length ? sortedByUsage[0] : null;
-    const best = bestRaw ? (DB.ingredients.find(i => String(i.id) === String(bestRaw.id))?.name || `#${bestRaw.id}`) : '—';
+		const best = (agg.raw && agg.raw.length) ? (DB.ingredients.find(i => i.id === agg.raw[0].id)?.name || `#${agg.raw[0].id}`) : '—';
 
-    // Build table rows:
-    // - if filter === 'usage' -> include ALL ingredients (with usedQty from usageMap)
-    // - if filter === 'low' / 'expiring' -> include only matching ingredients
-    // - if filter === 'all' -> include all ingredients
-    let rows = (DB.ingredients || []).map(i => {
-      const usedQty = usageMap[String(i.id)] || 0;
-      // apply filters
-      if (filter === 'usage') {
-        // include all ingredients (even if usedQty == 0)
-      } else if (filter === 'low') {
-        if (!(i.type === 'ingredient' && i.qty <= (i.min || computeThresholdForIngredient(i)))) return null;
-      } else if (filter === 'expiring') {
-        if (!(i.type === 'ingredient' && i.expiry && daysUntil(i.expiry) >= 0 && daysUntil(i.expiry) <= 30)) return null;
-      } else if (filter === 'all') {
-        // include all
-      } else {
-        // unknown filter fallback -> include only usage matches
-        if (!(usageArr.some(u => String(u.id) === String(i.id) && u.qty > 0))) return null;
-      }
+		let tableRows = (DB.ingredients || []).map(i => {
+			if (!i) return null;
 
-      return {
-        id: i.id,
-        name: i.name,
-        usedQty,
-        currentQty: i.qty || 0,
-        unit: i.unit || '',
-        min: i.min || computeThresholdForIngredient(i),
-        type: i.type || '',
-        expiry: i.expiry || ''
-      };
-    }).filter(Boolean);
+			const isIngredient = String(i.type || '').toLowerCase() === 'ingredient';
+			const minVal = (i && (i.min != null)) ? i.min : computeThresholdForIngredient(i);
 
-    // If showing usage, order by usedQty desc for easier reading
-    if (filter === 'usage') {
-      rows.sort((a,b) => b.usedQty - a.usedQty);
-    }
+			if (filter === 'usage') {
+				if (!isIngredient) return null;
+				if (!((agg.raw || []).some(r => r.id === i.id))) return null;
+			} else if (filter === 'low') {
+				if (!(Number(i.qty || 0) <= Number(minVal || 0))) return null;
+			} else if (filter === 'expiring') {
+				if (!isIngredient) return null;
+				if (!(i.expiry && daysUntil(i.expiry) >= 0 && daysUntil(i.expiry) <= 30)) return null;
+			} else if (filter === 'all') {
+			} else {
+				if (!isIngredient) return null;
+				if (!((agg.raw || []).some(r => r.id === i.id))) return null;
+			}
 
-    const tableRows = rows.map(i => `<tr>
-        <td style="padding:8px;border:1px solid #eee">${escapeHtml(String(i.id))}</td>
-        <td style="padding:8px;border:1px solid #eee">${escapeHtml(String(i.name))}</td>
-        <td style="padding:8px;border:1px solid #eee;text-align:right">${+(Number(i.usedQty)||0)}</td>
-        <td style="padding:8px;border:1px solid #eee;text-align:right">${+(Number(i.currentQty)||0)}</td>
+			const used = (agg.raw || []).find(r => r.id === i.id);
+			const usedQty = used ? used.qty : 0;
+
+			return `<tr>
+        <td style="padding:8px;border:1px solid #eee">${i.id}</td>
+        <td style="padding:8px;border:1px solid #eee">${escapeHtml(i.name)}</td>
+        <td style="padding:8px;border:1px solid #eee;text-align:right">${+usedQty.toFixed(3)}</td>
+        <td style="padding:8px;border:1px solid #eee;text-align:right">${+Number(i.qty || 0).toFixed(3)}</td>
         <td style="padding:8px;border:1px solid #eee">${escapeHtml(i.unit||'')}</td>
-        <td style="padding:8px;border:1px solid #eee">${escapeHtml(String(i.min||''))}</td>
+        <td style="padding:8px;border:1px solid #eee">${minVal != null ? minVal : ''}</td>
         <td style="padding:8px;border:1px solid #eee">${escapeHtml(i.type||'')}</td>
-        <td style="padding:8px;border:1px solid #eee">${escapeHtml(i.expiry||'')}</td>
-      </tr>`).join('') || `<tr><td colspan="8" style="padding:12px" class="muted">No items match the selected filter/range</td></tr>`;
+        <td style="padding:8px;border:1px solid #eee">${i.expiry||''}</td>
+      </tr>`;
+		}).filter(Boolean).join('') || `<tr><td colspan="8" style="padding:12px" class="muted">No items match the selected filter/range</td></tr>`;
 
-    summaryEl.innerHTML = `
+		summaryEl.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
         <div>
           <div style="font-weight:800">Reports — ${filter === 'usage' ? 'Ingredient Usage' : filter === 'low' ? 'Low stock' : filter === 'expiring' ? 'Expiring items' : 'All items'}</div>
-          <div class="muted small">Period: ${start.toISOString().slice(0,10)} to ${end.toISOString().slice(0,10)} • Total used: ${totalUsed} • Low items: ${lowCount} • Expiring: ${expiringCount} • Top used: ${best}</div>
+          <div class="muted small">Period: ${start.toISOString().slice(0,10)} to ${end.toISOString().slice(0,10)} • Total used: ${+totalUsed.toFixed(3)} • Low items: ${lowCount} • Expiring: ${expiringCount} • Top used: ${best}</div>
         </div>
         <div id="summarybtns" style="display:flex;gap:8px;align-items:center">
           <button id="printReportsBtn" class="btn small">Print / Save PDF</button>
@@ -3044,13 +3031,14 @@ async function renderReports(rangeStart, rangeEnd, reportFilter) {
       </div>
     `;
 
-    q('printReportsBtn')?.addEventListener('click', () => printReports(start.toISOString(), end.toISOString(), filter));
-    q('exportReportsCsvBtn')?.addEventListener('click', () => exportReportsCSVReport(start.toISOString(), end.toISOString(), filter));
-  }
+		const prBtn = q('printReportsBtn');
+		if (prBtn) prBtn.onclick = () => printReports(start.toISOString(), end.toISOString(), filter);
+		const exBtn = q('exportReportsCsvBtn');
+		if (exBtn) exBtn.onclick = () => exportReportsCSVReport(start.toISOString(), end.toISOString(), filter);
+	}
 
-  try { chartIngredientUsage && chartIngredientUsage.resize && chartIngredientUsage.resize(); } catch(e) {}
+	try { chartIngredientUsage && chartIngredientUsage.resize && chartIngredientUsage.resize(); } catch (e) {}
 }
-
 
 function printReports(rangeStartISO, rangeEndISO, filter) {
 	try {
@@ -4831,46 +4819,60 @@ function populateSettings() {
 }
 
 async function loadRemoteInventory() {
-	try {
-		const res = await fetch('/api/ingredients', {
-			credentials: 'include'
-		});
-		if (!res.ok) {
-			console.debug('loadRemoteInventory failed', res.status);
-			return;
-		}
-		const json = await res.json().catch(() => ({}));
+  try {
+    let allItems = [];
+    let page = 1;
+    const perPage = 500;
 
-		const items = json.data || json.items || json || [];
-		if (!Array.isArray(items)) return;
+    while (true) {
+      const res = await fetch(`/api/ingredients?limit=${perPage}&page=${page}`, {
+        credentials: 'include'
+      });
+      if (!res.ok) {
+        console.debug('loadRemoteInventory failed for page', page, res.status);
+        break;
+      }
 
-		DB.ingredients = items.map(i => ({
-			id: i.id,
-			name: i.name,
+      const json = await res.json().catch(() => null);
+      const pageItems = json && (json.items || json.data) ? (json.items || json.data) : [];
+      if (!Array.isArray(pageItems) || pageItems.length === 0) break;
 
-			unit: (i.unit && String(i.unit).trim()) || (i.unit_name && String(i.unit_name).trim()) || ((i.type === 'ingredient') ? 'kg' : ''),
-			qty: Number(i.qty || i.quantity || 0),
-			min: Number(i.min_qty || i.min || 0),
-			max: i.max_qty || i.max || null,
-			expiry: i.expiry || null,
-			supplier: i.supplier || '',
-			type: i.type || 'ingredient',
-			attrs: (typeof i.attrs === 'string' ? (() => {
-				try {
-					return JSON.parse(i.attrs);
-				} catch (e) {
-					return null;
-				}
-			})() : i.attrs) || null,
-			icon: i.icon || 'fa-box-open'
-		}));
+      allItems = allItems.concat(pageItems);
 
-		renderIngredientCards();
-		renderDashboard();
-	} catch (err) {
-		console.error('loadRemoteInventory error', err);
-	}
+      if (json && json.meta && typeof json.meta.total === 'number') {
+        const totalPages = Math.ceil((json.meta.total || 0) / perPage);
+        if (page >= totalPages) break;
+      } else if (pageItems.length < perPage) {
+        
+        break;
+      }
+
+      page++;
+    }
+
+    if (!Array.isArray(allItems) || allItems.length === 0) return;
+
+    DB.ingredients = allItems.map(i => ({
+      id: i.id,
+      name: i.name,
+      unit: (i.unit && String(i.unit).trim()) || (i.unit_name && String(i.unit_name).trim()) || ((i.type === 'ingredient') ? 'kg' : ''),
+      qty: Number(i.qty || i.quantity || 0),
+      min: Number(i.min_qty || i.min || 0),
+      max: i.max_qty || i.max || null,
+      expiry: i.expiry || null,
+      supplier: i.supplier || '',
+      type: i.type || 'ingredient',
+      attrs: (typeof i.attrs === 'string' ? (() => { try { return JSON.parse(i.attrs); } catch (e) { return null; } })() : i.attrs) || null,
+      icon: i.icon || 'fa-box-open'
+    }));
+
+    renderIngredientCards();
+    renderDashboard();
+  } catch (err) {
+    console.error('loadRemoteInventory error', err);
+  }
 }
+
 
 function startApp() {
 	showApp(true);
@@ -5055,7 +5057,7 @@ function startApp() {
 		if (parent) {
 			const sel = document.createElement('select');
 			sel.id = 'reportFilter';
-			sel.innerHTML = `<option value="usage">Ingredient usage</option><option value="low">Low stock</option><option value="expiring">Expiring</option><option value="all">All items</option>`;
+			sel.innerHTML = `<option value="all">All items</option><option value="usage">Ingredient usage</option><option value="low">Low stock</option><option value="expiring">Expiring</option>`;
 			parent.appendChild(sel);
 
 			sel.addEventListener('change', () => {
@@ -8467,3 +8469,68 @@ async function logClientActivity({
 		console.warn('logClientActivity failed', e);
 	}
 }
+
+async function populateUserMenu() {
+	const userMenuName = q('userMenuName');
+	const userMenuRole = q('userMenuRole');
+	const userMenu = q('userMenu');
+
+	let s = getSession();
+	try {
+		const res = await fetch('/api/auth/me', { credentials: 'include' });
+		if (res.ok) {
+			const data = await res.json();
+			if (data && data.user) {
+				s = data.user;
+				setSession(s, !!getPersistentSession());
+			}
+		}
+	} catch (e) {
+		console.debug('populateUserMenu: no server /api/auth/me', e?.message || e);
+	}
+	if (!s) return;
+
+	// Update menu name & role
+	if (userMenuName) userMenuName.textContent = s.name || s.username || 'User';
+	if (userMenuRole) userMenuRole.textContent = s.role || '—';
+
+	// Avatar inside menu (prepend avatar if not exists)
+	let avatarHtml = '<i class="fa fa-user fa-2x"></i>'; // placeholder
+	const avatarData = localStorage.getItem(avatarKeyFor(s.username));
+	if (avatarData) {
+		avatarHtml = `<img src="${avatarData}" alt="avatar" class="user-menu-avatar">`;
+	}
+
+	if (userMenuName) {
+		const wrap = userMenuName.closest('.user-menu-top');
+		if (wrap) {
+			let avatarEl = wrap.querySelector('.user-menu-avatar');
+			if (!avatarEl) {
+				const div = document.createElement('div');
+				div.className = 'user-menu-avatar-wrap';
+				div.innerHTML = avatarHtml;
+				wrap.insertBefore(div, userMenuName);
+			} else {
+				avatarEl.src = avatarData;
+			}
+		}
+	}
+
+	// Show the menu
+	if (userMenu) userMenu.classList.remove('hidden');
+
+	// Wire buttons
+	const btnProfile = q('userMenuProfile');
+	if (btnProfile) btnProfile.onclick = () => {
+		showProfileModal(); // your existing profile modal function
+	};
+
+	const btnLogout = q('userMenuLogout');
+	if (btnLogout) btnLogout.onclick = () => {
+		logoutUser(); // your existing logout function
+	};
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+	populateUserMenu();
+});

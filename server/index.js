@@ -334,7 +334,7 @@ app.post('/api/auth/logout', (req, res) => {
 app.get('/api/ingredients', authMiddleware, async (req, res) => {
 	try {
 		const page = Math.max(1, parseInt(req.query.page || '1'));
-		const limit = Math.max(1, Math.min(100, parseInt(req.query.limit || '10')));
+		const limit = Math.max(1, Math.min(1000, parseInt(req.query.limit || '100')));
 		const offset = (page - 1) * limit;
 		const type = (req.query.type || 'all');
 		const filter = (req.query.filter || 'all');
