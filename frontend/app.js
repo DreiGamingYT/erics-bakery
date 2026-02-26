@@ -855,7 +855,7 @@ const PERMISSIONS = {
 		settings: true
 	},
 	Baker: {
-		help: false,
+		help: true,
 		dashboard: true,
 		calendar: false,
 		profile: false,
