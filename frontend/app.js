@@ -1011,7 +1011,7 @@ function computeThresholdForIngredient(ing, options = {}) {
 	const fallbackDays = Number(options.fallbackDays ?? 3);
 
 	if (!ing || !ing.name) return 0;
-	const key = (ing.name || '').toLowerCase().trim();
+	const key = (ing.name || '').toLowerCase().trim(); 
 
 	const prog = PROGRAMMED_CONSUMPTION[key] || PROGRAMMED_CONSUMPTION[ing.id];
 	if (prog && prog.unit && String(prog.unit).toLowerCase() === String(ing.unit || '').toLowerCase()) {
