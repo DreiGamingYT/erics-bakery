@@ -855,13 +855,13 @@ const PERMISSIONS = {
 		settings: true
 	},
 	Baker: {
-		help: false,
+		help: true,
 		dashboard: true,
 		calendar: false,
 		profile: false,
 		inventory: true,
 		reports: false,
-		settings: false
+		settings: true
 	},
 	Assistant: {
 		help: true,
@@ -870,7 +870,7 @@ const PERMISSIONS = {
 		profile: false,
 		inventory: true,
 		reports: true,
-		settings: false
+		settings: true
 	},
 };
 
