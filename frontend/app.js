@@ -1003,72 +1003,7 @@ const PROGRAMMED_CONSUMPTION = {
 	'dobrim': {
 		dailyAmount: 2,
 		unit: 'kg'
-	},
-
-	'1': {
-		dailyAmount: 62.5,
-		unit: 'kg'
-	}, // Flour
-	'2': {
-		dailyAmount: 8,
-		unit: 'kg'
-	}, // Sugar
-	'3': {
-		dailyAmount: 2,
-		unit: 'kg'
-	}, // Yeast
-	'4': {
-		dailyAmount: 1,
-		unit: 'kg'
-	}, // Baking powder
-	'5': {
-		dailyAmount: 2,
-		unit: 'kg'
-	}, // Salt
-	'6': {
-		dailyAmount: 200,
-		unit: 'pcs'
-	}, // Eggs
-	'7': {
-		dailyAmount: 15,
-		unit: 'L'
-	}, // Milk / Cream
-	'8': {
-		dailyAmount: 10,
-		unit: 'kg'
-	}, // Butter
-	'9': {
-		dailyAmount: 10,
-		unit: 'kg'
-	}, // Margarine
-	'10': {
-		dailyAmount: 10,
-		unit: 'kg'
-	}, // Oil
-	'11': {
-		dailyAmount: 10,
-		unit: 'kg'
-	}, // Shortening
-	'12': {
-		dailyAmount: 1,
-		unit: 'kg'
-	}, // Cocoa powder
-	'13': {
-		dailyAmount: 0.1,
-		unit: 'L'
-	}, // Vanilla
-	'14': {
-		dailyAmount: 1,
-		unit: 'kg'
-	}, // Sesame seeds
-	'15': {
-		dailyAmount: 50,
-		unit: 'mL'
-	}, // Food coloring
-	'16': {
-		dailyAmount: 2,
-		unit: 'kg'
-	} // Dobrim
+	}
 };
 
 function computeThresholdForIngredient(ing, options = {}) {
@@ -1901,7 +1836,7 @@ function _parseQtyFromText(text) {
 	return parseFloat(m[1]) || 0;
 }
 
-async function renderStockChart(rangeStart, rangeEnd) {
+/* async function renderStockChart(rangeStart, rangeEnd) {
 	const ctx = q('stockChart')?.getContext('2d');
 	if (!ctx) return;
 	const end = rangeEnd ? new Date(rangeEnd) : new Date();
@@ -1977,7 +1912,7 @@ async function renderStockChart(rangeStart, rangeEnd) {
 			chartStock = null;
 		} catch (e) {}
 	}
-}
+} */
 
 async function renderBestSellerChart() {
 
@@ -2084,7 +2019,7 @@ async function renderDashboard() {
 	}
 }
 
-async function fetchAllIngredientsMap() {
+/* async function fetchAllIngredientsMap() {
 	try {
 		const resp = await apiFetch('/api/ingredients?limit=1000&page=1');
 		const items = (resp && resp.items) ? resp.items : [];
@@ -2107,9 +2042,9 @@ async function fetchAllIngredientsMap() {
 			map
 		};
 	}
-}
+} */
 
-async function renderActivity(limit = 6) {
+/* async function renderActivity(limit = 6) {
 
 	const container = q('recentActivity');
 	if (!container) return;
@@ -2131,15 +2066,15 @@ async function renderActivity(limit = 6) {
 		console.error('renderActivity err', e);
 		container.innerHTML = '<li class="muted">Failed to load activity</li>';
 	}
-}
+} */
 
-function _parseQtyFromText(text) {
+/* function _parseQtyFromText(text) {
 	if (!text) return 0;
 
 	const m = text.match(/(\d+(?:\.\d+)?)/);
 	if (!m) return 0;
 	return parseFloat(m[1]) || 0;
-}
+} */
 
 function debounce(fn, wait = 250) {
 	let t = null;
@@ -2707,7 +2642,7 @@ async function renderStockChart(rangeStart, rangeEnd) {
 	}
 }
 
-async function renderBestSellerChart() {
+/* async function renderBestSellerChart() {
 
 	const ctx = q('bestSellerChart')?.getContext('2d');
 	if (!ctx) return;
@@ -2774,7 +2709,7 @@ async function renderBestSellerChart() {
 			chartBestSeller = null;
 		} catch (e) {}
 	}
-}
+} */
 
 async function apiFetch(path, opts = {}) {
 	const cfg = Object.assign({}, opts);
@@ -8310,7 +8245,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 })();
 
-function escapeHtml(str) {
+/* function escapeHtml(str) {
 	if (str == null) return '';
 	return String(str)
 		.replace(/&/g, '&amp;')
@@ -8318,7 +8253,7 @@ function escapeHtml(str) {
 		.replace(/>/g, '&gt;')
 		.replace(/"/g, '&quot;')
 		.replace(/'/g, '&#039;');
-}
+} */
 
 function frontendHasRole(roles = []) {
 	if (!window.currentUser || !window.currentUser.role) return false;
@@ -8396,7 +8331,7 @@ function makeHistoryItemHtml(it) {
   `;
 }
 
-function escapeHtml(s) {
+/* function escapeHtml(s) {
 	if (!s && s !== 0) return '';
 	return String(s)
 		.replace(/&/g, '&amp;')
@@ -8404,7 +8339,7 @@ function escapeHtml(s) {
 		.replace(/>/g, '&gt;')
 		.replace(/"/g, '&quot;')
 		.replace(/'/g, '&#39;');
-}
+} */
 
 async function renderHistory(opts = {}) {
 	const limit = opts.limit || 200;

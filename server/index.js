@@ -3,6 +3,7 @@ const path = require('path');
 const express = require('express');
 const pool = require('./db');
 const bcrypt = require('bcryptjs');
+const rateLimit = require('express-rate-limit');
 
 const {
 	promisify
@@ -43,7 +44,16 @@ function buildCookieOptions() {
 	return opts;
 }
 
-const JWT_SECRET = process.env.JWT_SECRET || 'replace_with_strong_secret';
+// FIX #1 — Refuse to start if JWT_SECRET is missing or using the unsafe default
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET || JWT_SECRET === 'replace_with_strong_secret') {
+	console.error(
+		'\n❌  STARTUP ERROR: JWT_SECRET is not set or is using the unsafe default.\n' +
+		'    Generate a strong secret and add it to your .env file:\n\n' +
+		'    node -e "console.log(require(\'crypto\').randomBytes(64).toString(\'hex\'))"\n'
+	);
+	process.exit(1);
+}
 const TOKEN_NAME = process.env.COOKIE_NAME || 'bakery_token';
 
 const crypto = require('crypto');
@@ -59,6 +69,31 @@ const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
 const SMTP_USER = process.env.SMTP_USER;
 const SMTP_PASS = process.env.SMTP_PASS;
 const EMAIL_FROM = process.env.EMAIL_FROM || `"Eric's Bakery" <archlinux@google.com>`;
+
+// FIX #2 — Rate limiting on sensitive auth endpoints
+const loginLimiter = rateLimit({
+	windowMs: 15 * 60 * 1000,    // 15-minute window
+	max: 10,                       // max 10 attempts per window per IP
+	standardHeaders: true,
+	legacyHeaders: false,
+	message: { message: 'Too many login attempts. Please try again in 15 minutes.' }
+});
+
+const signupLimiter = rateLimit({
+	windowMs: 60 * 60 * 1000,    // 1-hour window
+	max: 5,                        // max 5 accounts per hour per IP
+	standardHeaders: true,
+	legacyHeaders: false,
+	message: { message: 'Too many accounts created from this IP. Please try again later.' }
+});
+
+const forgotLimiter = rateLimit({
+	windowMs: 60 * 60 * 1000,    // 1-hour window
+	max: 5,                        // max 5 reset requests per hour per IP
+	standardHeaders: true,
+	legacyHeaders: false,
+	message: { message: 'Too many password reset requests. Please try again in an hour.' }
+});
 
 app.all(['/api/products', '/api/products/*', '/api/product', '/api/product/*', '/api/orders', '/api/orders/*', '/api/order', '/api/order/*'], (req, res) => {
 	return res.status(404).json({
@@ -134,7 +169,7 @@ if (process.env.MAIL_HOST && process.env.MAIL_USER && process.env.MAIL_PASS) {
 	});
 }
 
-app.post('/api/auth/signup', async (req, res) => {
+app.post('/api/auth/signup', signupLimiter, async (req, res) => {
 	try {
 		const {
 			username,
@@ -177,7 +212,7 @@ app.post('/api/auth/signup', async (req, res) => {
 	}
 });
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', loginLimiter, async (req, res) => {
 	try {
 		const {
 			username,
@@ -579,6 +614,63 @@ app.put('/api/ingredients/:id', authMiddleware, async (req, res) => {
 	}
 });
 
+app.delete('/api/ingredients/:id', authMiddleware, async (req, res) => {
+	try {
+		const id = Number(req.params.id);
+		if (!id) return res.status(400).json({
+			error: 'Invalid id'
+		});
+
+		// Only Owners can permanently delete ingredients
+		if (!hasRole(req.user, ['Owner', 'Admin'])) {
+			return res.status(403).json({
+				error: 'Forbidden: only Owners can delete items'
+			});
+		}
+
+		// Fetch ingredient first so we can log its name in activity
+		const [rows] = await pool.query(
+			'SELECT id, name, type FROM ingredients WHERE id = ? LIMIT 1', [id]
+		);
+		if (!rows || rows.length === 0) return res.status(404).json({
+			error: 'Ingredient not found'
+		});
+		const ing = rows[0];
+
+		// Nullify ingredient_id in activity so history rows are kept but not orphaned
+		await pool.query(
+			'UPDATE activity SET ingredient_id = NULL WHERE ingredient_id = ?', [id]
+		);
+
+		await pool.query('DELETE FROM ingredients WHERE id = ?', [id]);
+
+		// Log the deletion as an activity entry
+		(async () => {
+			try {
+				const userId = (req.user && req.user.id) ? req.user.id : null;
+				const text = `Deleted ${ing.type || 'item'}: ${ing.name}`;
+				await pool.query(
+					'INSERT INTO activity (ingredient_id, user_id, action, text) VALUES (?, ?, ?, ?)',
+					[null, userId, 'delete', text]
+				);
+				console.info(`[activity] delete logged: ingredient=${id} user=${userId}`);
+			} catch (actErr) {
+				console.error('[activity] failed to log delete (non-blocking):', actErr && actErr.message ? actErr.message : actErr);
+			}
+		})();
+
+		return res.json({
+			ok: true,
+			deleted: { id, name: ing.name }
+		});
+	} catch (err) {
+		console.error('DELETE /api/ingredients/:id err', err && err.stack ? err.stack : err);
+		return res.status(500).json({
+			error: 'Server error'
+		});
+	}
+});
+
 app.post('/api/ingredients/:id/stock', authMiddleware, async (req, res) => {
 	const id = Number(req.params.id);
 	const type = req.body.type;
@@ -758,7 +850,7 @@ app.get('/api/ingredients/export/csv', authMiddleware, async (req, res) => {
 	}
 });
 
-app.post('/api/auth/forgot', async (req, res) => {
+app.post('/api/auth/forgot', forgotLimiter, async (req, res) => {
 	try {
 		const emailOrUsername = (req.body && (req.body.email || '')).toString().trim();
 		if (!emailOrUsername) return res.status(400).json({
@@ -816,7 +908,7 @@ app.post('/api/auth/forgot', async (req, res) => {
 	}
 });
 
-app.post('/api/auth/forgot/verify', async (req, res) => {
+app.post('/api/auth/forgot/verify', forgotLimiter, async (req, res) => {
 	try {
 		const email = (req.body && (req.body.email || '')).trim();
 		const code = (req.body && (req.body.code || '')).trim();
@@ -860,7 +952,7 @@ app.post('/api/auth/forgot/verify', async (req, res) => {
 	}
 });
 
-app.post('/api/auth/forgot/reset', async (req, res) => {
+app.post('/api/auth/forgot/reset', forgotLimiter, async (req, res) => {
 	try {
 		const email = (req.body && (req.body.email || '')).trim();
 		const code = (req.body && (req.body.code || '')).trim();
@@ -922,106 +1014,9 @@ app.post('/api/auth/forgot/reset', async (req, res) => {
 	}
 });
 
-app.post('/api/auth/verify-reset', async (req, res) => {
-	try {
-		const email = (req.body.email || '').trim().toLowerCase();
-		const code = (req.body.code || '').trim();
-		if (!email || !code) return res.status(400).json({
-			error: 'Email and code required'
-		});
-
-		const [urows] = await pool.query('SELECT id FROM users WHERE email = ?', [email]);
-		if (!urows || urows.length === 0) return res.status(400).json({
-			error: 'Invalid email or code'
-		});
-		const uid = urows[0].id;
-
-		const [resRows] = await pool.query(
-			'SELECT id, code_hash, expires_at, used FROM password_resets WHERE user_id = ? AND used = 0 ORDER BY created_at DESC LIMIT 1',
-			[uid]
-		);
-		if (!resRows || resRows.length === 0) return res.status(400).json({
-			error: 'Invalid or expired code'
-		});
-
-		const rec = resRows[0];
-		if (new Date(rec.expires_at) < new Date()) return res.status(400).json({
-			error: 'Code expired'
-		});
-
-		const ok = await bcrypt.compare(code, rec.code_hash);
-		if (!ok) return res.status(400).json({
-			error: 'Invalid code'
-		});
-
-		const token = signResetToken({
-			uid,
-			rid: rec.id
-		});
-		return res.json({
-			ok: true,
-			resetToken: token
-		});
-	} catch (e) {
-		console.error('POST /api/auth/verify-reset err', e);
-		return res.status(500).json({
-			error: 'Server error'
-		});
-	}
-});
-
-app.post('/api/auth/reset', async (req, res) => {
-	try {
-		const {
-			resetToken,
-			newPassword
-		} = req.body || {};
-		if (!resetToken || !newPassword) return res.status(400).json({
-			error: 'Token and new password required'
-		});
-
-		let payload;
-		try {
-			payload = jwt.verify(resetToken, JWT_SECRET);
-		} catch (e) {
-			return res.status(400).json({
-				error: 'Invalid or expired reset token'
-			});
-		}
-		const uid = payload.uid;
-		const rid = payload.rid;
-		if (!uid || !rid) return res.status(400).json({
-			error: 'Invalid token payload'
-		});
-
-		const [rows] = await pool.query('SELECT id, used, expires_at FROM password_resets WHERE id = ? AND user_id = ?', [rid, uid]);
-		if (!rows || rows.length === 0) return res.status(400).json({
-			error: 'Reset request not found'
-		});
-		const rec = rows[0];
-		if (rec.used) return res.status(400).json({
-			error: 'This reset code has already been used'
-		});
-		if (new Date(rec.expires_at) < new Date()) return res.status(400).json({
-			error: 'Reset code expired'
-		});
-
-		const newHash = await bcrypt.hash(newPassword, 10);
-		await pool.query('UPDATE users SET password_hash = ? WHERE id = ?', [newHash, uid]);
-
-		await pool.query('UPDATE password_resets SET used = 1 WHERE id = ?', [rid]);
-
-		return res.json({
-			ok: true,
-			message: 'Password updated'
-		});
-	} catch (e) {
-		console.error('POST /api/auth/reset err', e);
-		return res.status(500).json({
-			error: 'Server error'
-		});
-	}
-});
+// REMOVED: Duplicate /api/auth/verify-reset and /api/auth/reset routes.
+// These referenced a non-existent `code_hash` column and would crash at runtime.
+// Use the /api/auth/forgot/* flow below instead (forgot → forgot/verify → forgot/reset).
 
 async function hasColumn(tableName, columnName) {
 	try {
@@ -1164,14 +1159,6 @@ async function sendResetEmail(toEmail, code) {
 		console.error('sendResetEmail: error', err && err.stack ? err.stack : err);
 
 	}
-}
-
-function signResetToken(payload) {
-
-	const expires = (process.env.RESET_TOKEN_EXPIRE_MIN ? Number(process.env.RESET_TOKEN_EXPIRE_MIN) : 10);
-	return jwt.sign(payload, JWT_SECRET, {
-		expiresIn: `${expires}m`
-	});
 }
 
 app.get('/api/events', authMiddleware, async (req, res) => {
