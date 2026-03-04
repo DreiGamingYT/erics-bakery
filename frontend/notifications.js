@@ -74,7 +74,6 @@
 		if (!isNewAlert && !forceRecheck) return;
 		lastAlertKey = alertKey;
 
-		// Browser push
 		if (prefs.pushEnabled && permissionStatus() === 'granted') {
 			if (prefs.pushLowStock && alerts.lowStock?.length) {
 				const names = alerts.lowStock.slice(0, 3).map(i => i.name).join(', ');
@@ -94,7 +93,6 @@
 			}
 		}
 
-		// Auto email — only when alert set changes
 		if (prefs.emailEnabled && isNewAlert && alertKey !== lastEmailKey) {
 			lastEmailKey = alertKey;
 			if (prefs.emailLowStock && alerts.lowStock?.length)
@@ -187,21 +185,13 @@
 	}
 
 	// ── Settings UI wiring ────────────────────────────────────────────────────
-	// Called every time populateSettings runs (i.e. every time settings tab opens).
-	// Uses .onclick assignment instead of addEventListener so there's
-	// never a stale duplicate listener — assigning replaces the previous handler.
 
-	async function initNotifSettings() {
+	function initNotifSettings() {
 		const saveBtn     = q('saveNotifPrefs');
 		const pushToggle  = q('prefPushNotif');
 		const emailToggle = q('prefEmailNotif');
 		if (!saveBtn) return;
 
-		// Always reload from server so toggles always reflect saved state
-		currentPrefs = await loadPrefs();
-		applyPrefsToUI(currentPrefs);
-
-		// .onchange replaces any previous handler — no duplicate listeners
 		if (pushToggle) {
 			pushToggle.onchange = async (e) => {
 				if (e.target.checked) {
@@ -251,24 +241,31 @@
 		};
 	}
 
-	// ── Patch populateSettings ────────────────────────────────────────────────
-	// Wraps app.js's populateSettings so initNotifSettings runs after it every time.
-	// Safe to call multiple times — _notifPatched flag prevents double-wrapping.
+	// ── THE REAL FIX: patch populateProfile ───────────────────────────────────
+	// app.js's populateProfile() is async. After awaiting /api/auth/me it reads
+	// localStorage and sets prefEmailNotif + prefPushNotif to false (because
+	// our DB prefs were never stored there). We wrap populateProfile so that
+	// after it completes, we run our own loadPrefs() and overwrite the toggles.
+	// Running both in parallel via Promise.all means zero extra latency.
 
-	function patchPopulateSettings() {
-		if (window.populateSettings?._notifPatched) return;
-		const orig = window.populateSettings;
+	function patchPopulateProfile() {
+		if (window.populateProfile?._notifPatched) return;
+		const orig = window.populateProfile;
 		if (typeof orig !== 'function') return;
-		window.populateSettings = function () {
-			orig.apply(this, arguments);
-			// app.js just overwrote our checkboxes from localStorage (always false).
-			// Re-apply DB prefs on top, then re-wire listeners.
-			setTimeout(() => {
-				applyPrefsToUI(currentPrefs);
-				initNotifSettings();
-			}, 0);
+
+		window.populateProfile = async function () {
+			// Run app.js's version AND our prefs fetch simultaneously
+			const [, prefs] = await Promise.all([
+				orig.apply(this, arguments),
+				loadPrefs()
+			]);
+			// orig just set checkboxes to false from localStorage — overwrite now
+			currentPrefs = prefs;
+			applyPrefsToUI(prefs);
+			restartPoll(prefs);
+			initNotifSettings();
 		};
-		window.populateSettings._notifPatched = true;
+		window.populateProfile._notifPatched = true;
 	}
 
 	// ── Daily digest ──────────────────────────────────────────────────────────
@@ -285,26 +282,27 @@
 
 	// ── Init ──────────────────────────────────────────────────────────────────
 
-	async function init() {
-		patchPopulateSettings();
-
-		// Load prefs and start background poll on every page load —
-		// this is what keeps notifications alive after refresh without
-		// needing the settings tab to be opened.
-		const prefs = await loadPrefs();
-		currentPrefs = prefs;
-		restartPoll(prefs);
-		await maybeSendDailyDigest(prefs);
-
-		// If settings view is already visible on load, wire it up immediately
-		const section = document.getElementById('view-settings');
-		if (section && !section.classList.contains('hidden')) initNotifSettings();
+	function init() {
+		// Patch as early as possible — before app.js calls populateProfile
+		if (typeof window.populateProfile === 'function') {
+			patchPopulateProfile();
+		} else {
+			// If not defined yet, wait and retry once DOM is ready
+			document.addEventListener('DOMContentLoaded', () => {
+				patchPopulateProfile();
+			});
+			// Also poll briefly in case app.js defines it after our script runs
+			let attempts = 0;
+			const tryPatch = setInterval(() => {
+				if (window.populateProfile && !window.populateProfile._notifPatched) {
+					patchPopulateProfile();
+				}
+				if (++attempts > 20 || window.populateProfile?._notifPatched) clearInterval(tryPatch);
+			}, 50);
+		}
 	}
 
-	if (document.readyState === 'loading') {
-		document.addEventListener('DOMContentLoaded', init);
-	} else {
-		init();
-	}
+	// Run synchronously so the patch is in place before app.js calls populateProfile
+	init();
 
 })();
