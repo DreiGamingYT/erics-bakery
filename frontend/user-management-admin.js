@@ -115,11 +115,13 @@
 			.uma-modal-body { overflow-y:auto; padding:16px 20px; flex:1; }
 			.uma-hist-grid { display:grid; grid-template-columns:1fr 1fr auto; gap:4px 12px; margin-bottom:8px; }
 			.uma-hist-label { color:var(--muted,#888); font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
-			.uma-hist-row { display:grid; grid-template-columns:1fr 1fr auto; gap:6px 12px; padding:8px 10px; border-radius:8px; margin-bottom:6px; background:var(--bg,#f9f9f9); font-size:12px; }
+			.uma-hist-row { display:grid; grid-template-columns:1fr 1fr auto; gap:4px 12px; padding:8px 10px; border-radius:8px; margin-bottom:6px; background:var(--bg,#f9f9f9); font-size:12px; }
 			.uma-hist-row:nth-child(even) { background:rgba(0,0,0,.025); }
 			.uma-hist-in  { color:#15803d; font-weight:700; }
 			.uma-hist-out { color:#dc2626; font-weight:700; }
 			.uma-hist-dur { color:var(--muted,#888); font-size:11px; align-self:center; white-space:nowrap; }
+			.uma-hist-meta { grid-column:1/-1; display:flex; gap:12px; flex-wrap:wrap; padding-top:2px; border-top:1px solid rgba(0,0,0,.04); margin-top:2px; }
+			.uma-hist-meta span { color:var(--muted,#888); font-size:10px; display:flex; align-items:center; gap:4px; }
 			.uma-no-hist  { color:var(--muted,#888); font-size:13px; text-align:center; padding:28px 0; }
 			.uma-loading  { color:var(--muted,#888); font-size:13px; text-align:center; padding:20px 0; }
 			#umaDeleteModal { position:fixed; inset:0; z-index:100000; background:rgba(0,0,0,.5); backdrop-filter:blur(4px); display:flex; align-items:center; justify-content:center; padding:20px; }
@@ -296,6 +298,22 @@
 		});
 	}
 
+	// ── UA parser (minimal) ──────────────────────────────────────────────────
+
+	function parseUA(ua) {
+		if (!ua) return '';
+		if (/mobile|android|iphone|ipad/i.test(ua)) {
+			if (/iphone/i.test(ua)) return 'iPhone';
+			if (/ipad/i.test(ua)) return 'iPad';
+			if (/android/i.test(ua)) return 'Android';
+			return 'Mobile';
+		}
+		if (/windows/i.test(ua)) return 'Windows';
+		if (/macintosh|mac os/i.test(ua)) return 'Mac';
+		if (/linux/i.test(ua)) return 'Linux';
+		return 'Desktop';
+	}
+
 	// ── History modal ─────────────────────────────────────────────────────────
 
 	function openHistoryModal(user) {
@@ -327,9 +345,6 @@
 
 		fetchSessions(user.id).then(sessions => {
 			if (!sessions.length) {
-				body.innerHTML = `<div class="uma-no-hist"><i class="fa fa-clock-rotate-left" style="font-size:26px;opacity:.3;display:block;margin-bottom:10px"></i>No login sessions recorded yet.</div>`;
-				return;
-			}
 			body.innerHTML = `
 				<div class="uma-hist-grid">
 					<div class="uma-hist-label">Login</div>
@@ -345,9 +360,14 @@
 						<div class="uma-hist-out">
 							${s.logout
 								? `<i class="fa fa-arrow-right-from-bracket" style="margin-right:4px;font-size:10px"></i>${fmt(s.logout)}`
-								: `<span style="color:var(--muted,#888);font-weight:400">Still active / not recorded</span>`}
+								: `<span style="color:#15803d;font-weight:700"><i class="fa fa-circle" style="font-size:7px;margin-right:4px"></i>Active now</span>`}
 						</div>
-						<div class="uma-hist-dur">${duration(s.login, s.logout) || '—'}</div>
+						<div class="uma-hist-dur">${duration(s.login, s.logout) || (s.logout ? '—' : 'ongoing')}</div>
+						${(s.ip_address || s.user_agent) ? `
+						<div class="uma-hist-meta">
+							${s.ip_address ? `<span><i class="fa fa-location-dot"></i> ${escHtml(s.ip_address)}</span>` : ''}
+							${s.user_agent ? `<span><i class="fa fa-display"></i> ${escHtml(parseUA(s.user_agent))}</span>` : ''}
+						</div>` : ''}
 					</div>
 				`).join('')}
 			`;

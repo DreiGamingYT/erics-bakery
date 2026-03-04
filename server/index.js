@@ -237,14 +237,18 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
 
 		res.cookie(TOKEN_NAME, token, buildCookieOptions());
 
-		// Log login event (non-blocking)
+		// Record session start in user_sessions
 		(async () => {
 			try {
-				await pool.query(
-					'INSERT INTO activity (user_id, action, text) VALUES (?, ?, ?)',
-					[user.id, 'user_login', `User logged in — ${user.username}`]
+				const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || null;
+				const ua = req.headers['user-agent']?.slice(0, 255) || null;
+				const [result] = await pool.query(
+					'INSERT INTO user_sessions (user_id, ip_address, user_agent) VALUES (?, ?, ?)',
+					[user.id, ip, ua]
 				);
-			} catch (e) { console.warn('[activity] login log failed', e && e.message); }
+				// Pass session id back via a short-lived header so logout can close it
+				res.setHeader('X-Session-Row-Id', String(result.insertId));
+			} catch (e) { console.warn('[sessions] login insert failed', e && e.message); }
 		})();
 
 		return res.json({
@@ -368,15 +372,20 @@ app.put('/api/users/me', authMiddleware, async (req, res) => {
 });
 
 app.post('/api/auth/logout', authMiddleware, async (req, res) => {
-	// Log logout event (non-blocking)
+	// Close the open session row in user_sessions
 	if (req.user && req.user.id) {
 		(async () => {
 			try {
+				// Close the most recent open session for this user
 				await pool.query(
-					'INSERT INTO activity (user_id, action, text) VALUES (?, ?, ?)',
-					[req.user.id, 'user_logout', `User logged out — ${req.user.username}`]
+					`UPDATE user_sessions
+					 SET logged_out_at = CURRENT_TIMESTAMP
+					 WHERE user_id = ? AND logged_out_at IS NULL
+					 ORDER BY logged_in_at DESC
+					 LIMIT 1`,
+					[req.user.id]
 				);
-			} catch (e) { console.warn('[activity] logout log failed', e && e.message); }
+			} catch (e) { console.warn('[sessions] logout update failed', e && e.message); }
 		})();
 	}
 	res.clearCookie(TOKEN_NAME, { httpOnly: true });
@@ -429,25 +438,14 @@ app.get('/api/admin/users/:id/sessions', authMiddleware, async (req, res) => {
 	if (!targetId) return res.status(400).json({ error: 'Invalid user id' });
 	try {
 		const [rows] = await pool.query(
-			`SELECT action, text, time FROM activity
-			 WHERE user_id = ? AND action IN ('user_login', 'user_logout')
-			 ORDER BY time DESC
+			`SELECT id, logged_in_at AS login, logged_out_at AS logout, ip_address, user_agent
+			 FROM user_sessions
+			 WHERE user_id = ?
+			 ORDER BY logged_in_at DESC
 			 LIMIT 100`,
 			[targetId]
 		);
-		// Pair logins with their following logout
-		const logins  = rows.filter(r => r.action === 'user_login');
-		const logouts = rows.filter(r => r.action === 'user_logout');
-		const sessions = logins.map(login => {
-			// Find the nearest logout that comes AFTER this login
-			const loginTime = new Date(login.time);
-			const matchedLogout = logouts.find(lo => new Date(lo.time) > loginTime) || null;
-			return {
-				login: login.time,
-				logout: matchedLogout ? matchedLogout.time : null
-			};
-		});
-		return res.json({ sessions });
+		return res.json({ sessions: rows });
 	} catch (err) {
 		console.error('GET /api/admin/users/:id/sessions err', err && err.stack ? err.stack : err);
 		return res.status(500).json({ error: 'Server error' });
