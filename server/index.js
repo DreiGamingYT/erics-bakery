@@ -1285,6 +1285,8 @@ app.get('/api/events', authMiddleware, async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 
+// ── Notification prefs ───────────────────────────────────────────────────────
+
 app.get('/api/notifications/prefs', authMiddleware, async (req, res) => {
 	try {
 		const [rows] = await pool.query('SELECT notif_prefs FROM users WHERE id = ? LIMIT 1', [req.user.id]);
@@ -1339,19 +1341,20 @@ app.get('/api/notifications/alerts', authMiddleware, async (req, res) => {
 
 // ── Send email alert to the requesting user ───────────────────────────────────
 app.post('/api/notifications/send-email', authMiddleware, async (req, res) => {
-	const { type } = req.body || {};
+	try {
+		const { type } = req.body || {};
 
-	// Look up this user's email
-	const [rows] = await pool.query('SELECT email, name, username FROM users WHERE id = ? LIMIT 1', [req.user.id]);
-	const user = rows[0];
-	const toEmail = user?.email;
+		// Look up this user's email
+		const [rows] = await pool.query('SELECT email, name, username FROM users WHERE id = ? LIMIT 1', [req.user.id]);
+		const user = rows[0];
+		const toEmail = user?.email;
 
-	if (!toEmail) {
-		return res.status(400).json({ error: 'No email address on your account. Add one in Profile first.' });
-	}
-	if (!mailTransporter) {
-		return res.status(503).json({ error: 'Email is not configured on this server (SMTP_HOST missing).' });
-	}
+		if (!toEmail) {
+			return res.status(400).json({ error: 'No email address on your account. Add one in Profile first.' });
+		}
+		if (!mailTransporter) {
+			return res.status(503).json({ error: 'Email is not configured on this server (SMTP_HOST missing).' });
+		}
 
 	try {
 		const [ingredients] = await pool.query(
@@ -1410,25 +1413,36 @@ app.post('/api/notifications/send-email', authMiddleware, async (req, res) => {
 		});
 
 		return res.json({ ok: true, sent: true, to: toEmail });
+		} catch (innerErr) {
+			console.error('POST /api/notifications/send-email (send) err', innerErr && innerErr.message);
+			return res.status(500).json({ error: `Email failed: ${innerErr.message}` });
+		}
 	} catch (err) {
 		console.error('POST /api/notifications/send-email err', err && err.message);
-		return res.status(500).json({ error: `Email failed: ${err.message}` });
+		return res.status(500).json({ error: err.message || 'Server error' });
 	}
 });
 
+// ── Ensure user_sessions table exists before accepting traffic
+// ── Ensure user_sessions table exists before accepting traffic ─────────────
 async function ensureNotifPrefsColumn() {
 	try {
-		await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS notif_prefs JSON DEFAULT NULL`);
-		console.log('[startup] notif_prefs column ready');
-	} catch (err) {
-		// Some MySQL versions don't support IF NOT EXISTS on ALTER — ignore duplicate column error
-		if (!String(err.message || '').includes('Duplicate column')) {
-			console.warn('[startup] notif_prefs column check:', err && err.message ? err.message : err);
+		// Check if column exists first (works on all MySQL/MariaDB versions)
+		const [cols] = await pool.query(
+			`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+			 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'notif_prefs'`
+		);
+		if (cols.length === 0) {
+			await pool.query(`ALTER TABLE users ADD COLUMN notif_prefs JSON DEFAULT NULL`);
+			console.log('[startup] notif_prefs column created');
+		} else {
+			console.log('[startup] notif_prefs column already exists');
 		}
+	} catch (err) {
+		console.error('[startup] notif_prefs column error:', err && err.message ? err.message : err);
 	}
 }
 
-// ── Ensure user_sessions table exists before accepting traffic ─────────────
 async function ensureUserSessionsTable() {
 	try {
 		await pool.query(`
