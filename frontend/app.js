@@ -1701,7 +1701,7 @@ function buildTopNav() {
 	});
 }
 
-const views = ['dashboard', 'inventory', 'profile', 'settings', 'reports', 'calendar'];
+const views = ['dashboard', 'inventory', 'profile', 'settings', 'reports', 'calendar', 'users'];
 
 function showView(name) {
 	if (!isLoggedIn()) {
