@@ -261,7 +261,12 @@
 		if (typeof orig !== 'function') return;
 		window.populateSettings = function () {
 			orig.apply(this, arguments);
-			setTimeout(initNotifSettings, 0);
+			// app.js just overwrote our checkboxes from localStorage (always false).
+			// Re-apply DB prefs on top, then re-wire listeners.
+			setTimeout(() => {
+				applyPrefsToUI(currentPrefs);
+				initNotifSettings();
+			}, 0);
 		};
 		window.populateSettings._notifPatched = true;
 	}
