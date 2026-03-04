@@ -224,57 +224,41 @@
 			inventoryChart = null;
 		}
 		inventoryChart = new Chart(stockCtx.getContext('2d'), {
-			type: 'line',
+			type: 'bar',
 			data: {
 				labels: [],
 				datasets: [
 					{
 						label: 'Net Running Total',
 						data: [],
-						tension: 0.4,
 						fill: true,
 						borderColor: 'rgba(99, 102, 241, 1)',
 						backgroundColor: 'rgba(99, 102, 241, 0.15)',
 						borderWidth: 2,
-						pointRadius: 3,
-						pointHoverRadius: 5,
-						spanGaps: true
 					},
 					{
 						label: 'Stock In',
 						data: [],
-						tension: 0.4,
 						fill: true,
 						borderColor: 'rgba(34, 197, 94, 1)',
 						backgroundColor: 'rgba(34, 197, 94, 0.12)',
 						borderWidth: 2,
-						pointRadius: 4,
-						pointHoverRadius: 6,
-						spanGaps: false
 					},
 					{
 						label: 'Stock Out',
 						data: [],
-						tension: 0.4,
 						fill: true,
 						borderColor: 'rgba(239, 68, 68, 1)',
 						backgroundColor: 'rgba(239, 68, 68, 0.12)',
 						borderWidth: 2,
-						pointRadius: 4,
-						pointHoverRadius: 6,
-						spanGaps: false
 					},
 					{
 						label: 'Current Qty',
 						data: [],
-						tension: 0,
 						fill: false,
 						borderColor: 'rgba(234, 179, 8, 1)',
 						backgroundColor: 'rgba(234, 179, 8, 0)',
 						borderWidth: 2,
-						borderDash: [6, 4],
-						pointRadius: 0,
-						spanGaps: true
 					}
 				]
 			},
