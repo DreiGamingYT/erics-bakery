@@ -108,7 +108,7 @@
           <div class="sidebar-header">
             <div class="sidebar-logo"><img src="./logo.jpg" class="sidebar-logo-img" loading="lazy" /><strong>Eric's Bakery</strong></div>
           </div>
-          <nav class="nav" id="sideNav"><button class="nav-item" data-view="dashboard" type="button"><i class="fa fa-chart-pie"></i><span>Dashboard</span></button><button class="nav-item" data-view="inventory" type="button"><i class="fa fa-boxes-stacked"></i><span>Inventory</span></button><button class="nav-item" data-view="reports" type="button"><i class="fa fa-chart-bar"></i><span>Reports</span></button><button class="nav-item" data-view="calendar" type="button"><i class="fa fa-calendar"></i><span>Calendar</span></button><button class="nav-item" data-view="profile" type="button"><i class="fa fa-user"></i><span>Profile</span></button><button class="nav-item" data-view="settings" type="button"><i class="fa fa-gear"></i><span>Settings</span></button><button class="nav-item" id="navUsers" data-view="users" type="button" style="display:none"><i class="fa fa-users"></i><span>Users</span></button></nav>
+          <nav class="nav" id="sideNav"><button class="nav-item" data-view="dashboard" type="button"><i class="fa fa-chart-pie"></i><span>Dashboard</span></button><button class="nav-item" data-view="inventory" type="button"><i class="fa fa-boxes-stacked"></i><span>Inventory</span></button><button class="nav-item" data-view="reports" type="button"><i class="fa fa-chart-bar"></i><span>Reports</span></button><button class="nav-item" data-view="calendar" type="button"><i class="fa fa-calendar"></i><span>Calendar</span></button><button class="nav-item" data-view="profile" type="button"><i class="fa fa-user"></i><span>Profile</span></button><button class="nav-item" data-view="settings" type="button"><i class="fa fa-gear"></i><span>Settings</span></button><button class="nav-item" id="navUsers" data-view="users" type="button"><i class="fa fa-users"></i><span>Users</span></button></nav>
           <div class="sidebar-bottom"><button id="logoutBtn" class="nav-item logout" type="button"><i class="fa fa-right-from-bracket" aria-hidden="true"></i><span></span></button></div>
         </aside>
         <main class="main">
@@ -280,7 +280,35 @@
             <div class="card settings-grid">
               <div>
                 <div class="card" style="margin-bottom:12px">
-                  <h3>Notifications</h3><label style="display:flex;align-items:center;gap:10px"><input id="prefEmailNotif" type="checkbox" /><span class="field-label" style="font-weight:600;color:var(--text)">Email notifications</span></label><label style="display:flex;align-items:center;gap:10px;margin-top:8px"><input id="prefPushNotif" type="checkbox" /><span class="field-label" style="font-weight:600;color:var(--text)">In-app notifications</span></label>
+                  <h3>Notifications</h3>
+                  <div id="notifStatusBanner" style="display:none;margin-bottom:10px;padding:8px 10px;border-radius:8px;font-size:12px;font-weight:700"></div>
+                  <div style="display:flex;flex-direction:column;gap:10px">
+                    <div style="border:1px solid rgba(0,0,0,.06);border-radius:10px;padding:10px 12px">
+                      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+                        <span style="font-weight:700">In-app notifications</span>
+                        <label class="ntog"><input id="prefPushNotif" type="checkbox" /><span class="ntog-track"></span></label>
+                      </div>
+                      <div class="muted small" style="margin-top:4px">Show browser alerts for low stock and expiring items.</div>
+                      <div id="pushPermStatus" style="margin-top:5px;font-size:11px;font-weight:700"></div>
+                      <div id="pushSubOptions" style="display:none;margin-top:10px;flex-direction:column;gap:8px">
+                        <div class="nsub-row"><span>Alert on low stock</span><label class="ntog"><input id="pushNotifLowStock" type="checkbox" /><span class="ntog-track"></span></label></div>
+                        <div class="nsub-row"><span>Alert on expiring items</span><label class="ntog"><input id="pushNotifExpiring" type="checkbox" /><span class="ntog-track"></span></label></div>
+                      </div>
+                    </div>
+                    <div style="border:1px solid rgba(0,0,0,.06);border-radius:10px;padding:10px 12px">
+                      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+                        <span style="font-weight:700">Email notifications</span>
+                        <label class="ntog"><input id="prefEmailNotif" type="checkbox" /><span class="ntog-track"></span></label>
+                      </div>
+                      <div class="muted small" style="margin-top:4px">Sends alerts to your profile email address.</div>
+                      <div id="emailSubOptions" style="display:none;margin-top:10px;flex-direction:column;gap:8px">
+                        <div class="nsub-row"><span>Email on low stock</span><label class="ntog"><input id="emailNotifLowStock" type="checkbox" /><span class="ntog-track"></span></label></div>
+                        <div class="nsub-row"><span>Email on expiring items</span><label class="ntog"><input id="emailNotifExpiring" type="checkbox" /><span class="ntog-track"></span></label></div>
+                        <div class="nsub-row"><span>Daily digest email</span><label class="ntog"><input id="emailNotifDigest" type="checkbox" /><span class="ntog-track"></span></label></div>
+                      </div>
+                    </div>
+                  </div>
+                  <button id="saveNotifPrefs" class="btn small" type="button" style="margin-top:10px;width:100%">Save preferences</button>
                 </div>
                 <div class="card">
                   <h3>Advanced</h3>
@@ -292,11 +320,14 @@
                   <h3 style="margin:0 0 8px 0">Appearance</h3><label style="display:flex;align-items:center;gap:8px"><input id="themeToggle" type="checkbox" /> Dark theme</label>
                   <div class="muted small" style="margin-bottom:8px">Toggle between light and dark UI.</div>
                 </div>
+                
               </aside>
             </div>
           </section>
           <section id="view-users" class="view hidden">
-            <div class="page-header"><h2>User Management</h2></div>
+            <div class="page-header">
+              <h2>User Management</h2>
+            </div>
             <div id="usersList" class="users-list"></div>
           </section>
         </main>
@@ -308,7 +339,58 @@
       </div>
     </div>
     <script src="reports-enhancements.js"></script>
+    <script src="user-management-admin.js"></script>
+    <script src="notifications.js"></script>
+
+    <script>
+    // ── Users view patch — runs before app.js ───────────────────────────────
+    document.addEventListener('DOMContentLoaded', function() {
+      // 1. Extend app.js views array to include 'users'
+      const _origShowView = window.showView;
+      function extendShowView() {
+        if (typeof window.showView !== 'function' || window.showView._usersPatch) return;
+        const orig = window.showView;
+        window.showView = function(name) {
+          // Manually toggle view-users since app.js doesn't know about it
+          const usersEl = document.getElementById('view-users');
+          if (usersEl) usersEl.classList.toggle('hidden', name !== 'users');
+          // Only call orig for known views so it doesn't crash
+          if (name !== 'users') orig.apply(this, arguments);
+          // Update active state on all nav items
+          document.querySelectorAll('#sideNav .nav-item').forEach(b =>
+            b.classList.toggle('active', b.dataset.view === name)
+          );
+        };
+        window.showView._usersPatch = true;
+      }
+
+      // 2. Show/hide navUsers based on role after login
+      function applyUsersNavVisibility() {
+        const navUsers = document.getElementById('navUsers');
+        if (!navUsers) return;
+        const sess = typeof getSession === 'function' ? getSession() : null;
+        const role = (sess && sess.role || '').toLowerCase();
+        const allowed = ['owner', 'admin'];
+        navUsers.style.display = allowed.includes(role) ? '' : 'none';
+      }
+
+      // Poll until app.js defines showView and getSession, then patch
+      let attempts = 0;
+      const ready = setInterval(function() {
+        if (typeof window.showView === 'function' && typeof window.getSession === 'function') {
+          extendShowView();
+          applyUsersNavVisibility();
+          clearInterval(ready);
+        }
+        if (++attempts > 100) clearInterval(ready);
+      }, 50);
+
+      // Re-apply visibility whenever the app state might change (login/logout)
+      document.addEventListener('click', function() {
+        setTimeout(applyUsersNavVisibility, 100);
+      });
+    });
+    </script>
     <script src="app.js"></script>
-    
   </body>
 </html>
