@@ -390,6 +390,101 @@ body {
   font-size: 13px;
 }
 
+/* Sliding panels container */
+.auth-card {
+  overflow: hidden; /* hide the sliding overflow */
+  position: relative;
+}
+
+/* container twice the width so each panel occupies exactly 50% (i.e. full card) */
+.auth-panels {
+  display: flex;
+  width: 200%;
+  transform: translateX(0);
+  transition: transform 480ms cubic-bezier(.22,.9,.32,1), box-shadow 240ms ease;
+  will-change: transform;
+}
+
+/* Each panel takes half of the 200% container => full width of auth-card */
+.auth-panel {
+  width: 50%;
+  box-sizing: border-box;
+  padding: 20px; /* keep consistent with existing card padding */
+  transition: opacity 280ms ease, transform 480ms cubic-bezier(.22,.9,.32,1);
+}
+
+/* Slide left to reveal signup panel */
+.landing-overlay.signup-mode .auth-panels {
+  transform: translateX(-50%);
+}
+
+/* Optional subtle micro transform on panels for nicer feel */
+.landing-overlay .auth-panel {
+  transform: translateY(0);
+}
+.landing-overlay.signup-mode .auth-panel:first-child {
+  transform: translateX(-6px); /* micro parallax */
+  opacity: 0.98;
+}
+.landing-overlay.signup-mode .auth-panel:last-child {
+  transform: translateX(0);
+  opacity: 1;
+}
+
+/* Safety: if other code still toggles .hidden on .auth-panel,
+   make sure panels aren't forcibly removed (we want the slide). */
+.auth-panel.hidden {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+/* Swap animation: make sure overflow is hidden so panels slide cleanly */
+.landing-overlay {
+  overflow: hidden; /* hide moving elements */
+}
+
+/* ensure landing-split stays as-is but allow the children to be moved */
+.landing-split {
+  position: relative; /* for getBoundingClientRect stability */
+}
+
+/* animate the two columns using transform (fast GPU path) */
+.landing-visual,
+.landing-forms {
+  position: relative;
+  will-change: transform, opacity;
+  transition: transform 520ms cubic-bezier(.22,.9,.32,1), opacity 320ms ease;
+  /* keep them above background while moving */
+  z-index: 2;
+}
+
+/* small visual polish while swapping */
+.landing-overlay.signup-mode .landing-visual {
+  /* translate right by computed CSS var --swap-shift (set by JS) */
+  transform: translateX(var(--swap-shift, 560px));
+  opacity: 0.98;
+}
+
+.landing-overlay.signup-mode .landing-forms {
+  /* translate left by computed CSS var --swap-shift */
+  transform: translateX(calc(-1 * var(--swap-shift, 560px)));
+  opacity: 1;
+}
+
+/* reverse state (default) */
+.landing-overlay:not(.signup-mode) .landing-visual,
+.landing-overlay:not(.signup-mode) .landing-forms {
+  transform: translateX(0);
+}
+
+/* Reduce pointer events for the off-screen panel during animation (optional) */
+.landing-overlay.signup-mode .landing-forms[aria-hidden="true"],
+.landing-overlay:not(.signup-mode) .landing-visual[aria-hidden="true"] {
+  pointer-events: none;
+}
+
 .modal {
   position: fixed;
   inset: 0;
@@ -1734,6 +1829,17 @@ body {
 }
 .report-controls .btn {
   padding: 8px 10px;
+}
+
+#reportFilter {
+  height: 40px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgb(0 0 0 / 51%);
+  background: var(--card);
+  color: var(--text);
+  font-weight: 700;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.03);
 }
 
 #reportPreset {
@@ -3320,4 +3426,72 @@ html {
 .user-menu-actions .menu-item:hover {
 	background: #1b85ec;
 	color: #fff;
+}
+
+/* Desktop / wide: use horizontal swap using pixel shift set in --swap-shift */
+@media (min-width: 821px) {
+  /* default (signin) */
+  .landing-overlay:not(.signup-mode) .landing-visual,
+  .landing-overlay:not(.signup-mode) .landing-forms {
+    transform: translateX(0);
+  }
+
+  /* when signup-mode is active, move visual right and forms left by --swap-shift */
+  .landing-overlay.signup-mode .landing-visual {
+    transform: translateX(var(--swap-shift, 520px));
+    opacity: 0.98;
+  }
+  .landing-overlay.signup-mode .landing-forms {
+    transform: translateX(calc(-1 * var(--swap-shift, 520px)));
+    opacity: 1;
+  }
+
+  /* while not swapped, ensure pointer-events normally apply */
+  .landing-visual,
+  .landing-forms {
+    pointer-events: auto;
+  }
+}
+
+/* Mobile / narrow: stack columns and use vertical swap (accordion-like) */
+@media (max-width: 820px) {
+  .landing-split {
+    grid-template-columns: 1fr !important;
+    gap: 12px; /* slightly smaller gap on mobile */
+  }
+
+  /* make sure stacked children take full width */
+  .landing-visual,
+  .landing-forms {
+    width: 100%;
+    display: block;
+    transform: translateY(0);
+  }
+
+  /* When signup-mode: move visual down 100% of its own height and forms up — simple, robust */
+  .landing-overlay.signup-mode .landing-visual {
+    transform: translateY(100%);
+    opacity: 0.97;
+  }
+  .landing-overlay.signup-mode .landing-forms {
+    transform: translateY(0);
+    opacity: 1;
+  }
+
+  /* While animating, disable pointer events for off-screen panel */
+  .landing-overlay.signup-mode .landing-visual[aria-hidden="true"],
+  .landing-overlay:not(.signup-mode) .landing-forms[aria-hidden="true"] {
+    pointer-events: none;
+  }
+}
+
+/* Accessibility safety: do not let other code accidentally remove panels from layout */
+.landing-visual[hidden],
+.landing-forms[hidden],
+.landing-visual.hidden,
+.landing-forms.hidden {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
 }

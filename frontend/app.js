@@ -2943,7 +2943,13 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
           <div style="font-weight:800">Reports — ${filter === 'usage' ? 'Ingredient Usage' : filter === 'low' ? 'Low stock' : filter === 'expiring' ? 'Expiring items' : 'All items'}</div>
           <div class="muted small">Period: ${start.toISOString().slice(0,10)} to ${end.toISOString().slice(0,10)} • Total used: ${+totalUsed.toFixed(3)} • Low items: ${lowCount} • Expiring: ${expiringCount} • Top used: ${best}</div>
         </div>
-        <div id="summarybtns" style="display:flex;gap:8px;align-items:center">
+        <div id="summarybtns" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select id="reportFilter" title="Filter report">
+            <option value="all">All items</option>
+            <option value="usage">Ingredient usage</option>
+            <option value="low">Low stock</option>
+            <option value="expiring">Expiring</option>
+          </select>
           <button id="printReportsBtn" class="btn small">Print / Save PDF</button>
           <button id="exportReportsCsvBtn" class="btn small">Export CSV</button>
         </div>
@@ -2970,6 +2976,12 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
 		if (prBtn) prBtn.onclick = () => printReports(start.toISOString(), end.toISOString(), filter);
 		const exBtn = q('exportReportsCsvBtn');
 		if (exBtn) exBtn.onclick = () => exportReportsCSVReport(start.toISOString(), end.toISOString(), filter);
+		// Restore filter select to the value used for this render, and wire change handler
+		const filterSel = q('reportFilter');
+		if (filterSel) {
+			filterSel.value = filter;
+			filterSel.onchange = () => renderReports(q('reportStart')?.value || null, q('reportEnd')?.value || null, filterSel.value);
+		}
 	}
 
 	try { chartIngredientUsage && chartIngredientUsage.resize && chartIngredientUsage.resize(); } catch (e) {}
@@ -4986,23 +4998,7 @@ function startApp() {
 	if (q('view-inventory') && !q('exportInventoryCsvBtn')) {
 		renderIngredientCards();
 	}
-
-	if (!q('reportFilter')) {
-		const parent = q('view-reports')?.querySelector('.page-actions.report-controls');
-		if (parent) {
-			const sel = document.createElement('select');
-			sel.id = 'reportFilter';
-			sel.innerHTML = `<option value="all">All items</option><option value="usage">Ingredient usage</option><option value="low">Low stock</option><option value="expiring">Expiring</option>`;
-			parent.appendChild(sel);
-
-			sel.addEventListener('change', () => {
-				const start = q('reportStart')?.value || null;
-				const end = q('reportEnd')?.value || null;
-				renderReports(start, end, sel.value);
-			});
-		}
-	}
-
+	
 	const applyBtn = q('applyReportRange');
 	if (applyBtn) {
 		applyBtn.removeEventListener?.('click', () => {});
@@ -5026,7 +5022,6 @@ function startApp() {
 	renderBestSellerChart();
 	initSearchFeature();
 }
-
 async function performLogout() {
 	try {
 		await fetch('/api/auth/logout', {
@@ -5123,6 +5118,29 @@ document.addEventListener('DOMContentLoaded', () => {
 	renderRecentProfiles();
 });
 
+function updateSwapShift() {
+  const overlay = q('landingOverlay');
+  const visual = q('.landing-visual');
+  const forms = q('.landing-forms');
+  if (!overlay || !visual || !forms) return;
+
+  const rectV = visual.getBoundingClientRect();
+  const rectF = forms.getBoundingClientRect();
+
+  // distance from visual.left to forms.left (can be negative on small screens)
+  const shift = rectF.left - rectV.left;
+
+  // set on the overlay or documentElement so CSS can read it
+  overlay.style.setProperty('--swap-shift', `${shift}px`);
+}
+
+// call once on load and on resize so the pixel value is accurate
+window.addEventListener('load', updateSwapShift);
+window.addEventListener('resize', () => {
+  // throttle lightly if needed; this is fine for most apps
+  updateSwapShift();
+});
+
 document.addEventListener('DOMContentLoaded', () => {
 	const accounts = loadAccounts();
 	if (Object.keys(accounts).length === 0) {
@@ -5177,17 +5195,29 @@ document.addEventListener('DOMContentLoaded', () => {
 	}, splashDuration);
 
 	on('overlayToSignup', 'click', () => {
-		overlay && overlay.classList.add('signup-mode');
-		loginPanel && loginPanel.classList.add('hidden');
-		signupPanel && signupPanel.classList.remove('hidden');
-		setTimeout(() => q('overlay-su-username')?.focus(), 240);
-	});
+  const overlay = q('landingOverlay');
+  if (!overlay) return;
+  updateSwapShift();               // compute pixel shift for current layout
+  overlay.classList.add('signup-mode');
+
+  // update aria-hidden for screen readers (keep DOM present for animation)
+  q('.landing-forms')?.setAttribute('aria-hidden', 'false');
+  q('.landing-visual')?.setAttribute('aria-hidden', 'false');
+
+  // focus signup field after animation completes (match CSS 520ms)
+  setTimeout(() => q('overlay-su-username')?.focus(), 560);
+});
+
 	on('overlayBackToLogin', 'click', () => {
-		overlay && overlay.classList.remove('signup-mode');
-		signupPanel && signupPanel.classList.add('hidden');
-		loginPanel && loginPanel.classList.remove('hidden');
-		setTimeout(() => q('overlay-username')?.focus(), 160);
-	});
+  const overlay = q('landingOverlay');
+  if (!overlay) return;
+  updateSwapShift();
+  overlay.classList.remove('signup-mode');
+
+  // focus sign-in username after animation completes
+  setTimeout(() => q('overlay-username')?.focus(), 420);
+});
+
 	on('forgotPasswordBtn', 'click', (e) => {
 		openForgotPasswordModal();
 	});
@@ -5341,8 +5371,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
 				const overlay = q('landingOverlay');
 				if (overlay) overlay.classList.remove('signup-mode');
-				q('overlaySignup') && q('overlaySignup').classList.add('hidden');
+
+				// keep panels visible and focus the username field
+				q('overlaySignup') && q('overlaySignup').classList.remove('hidden');
 				q('overlayLogin') && q('overlayLogin').classList.remove('hidden');
+				setTimeout(() => q('overlay-username')?.focus(), 320);
 
 				setButtonLoadingWithMin(btn, false, 600);
 				showGlobalLoader(false);

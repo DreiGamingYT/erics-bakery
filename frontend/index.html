@@ -31,39 +31,41 @@
         <main class="landing-forms" role="main">
           <div class="forms-inner">
             <div class="auth-card" id="authCard">
-              <div id="overlayLogin" class="auth-panel">
-                <div class="auth-head">
-                  <div class="auth-title">
-                    <h2>Sign in</h2>
-                    <div class="small muted">Welcome back — enter your credentials</div>
+              <div class="auth-panels">
+                <div id="overlayLogin" class="auth-panel">
+                  <div class="auth-head">
+                    <div class="auth-title">
+                      <h2>Sign in</h2>
+                      <div class="small muted">Welcome back — enter your credentials</div>
+                    </div>
                   </div>
+                  <form class="auth-form" id="loginForm" onsubmit="return false;"><label class="field"><span class="field-label">Username</span><input id="overlay-username" name="username" type="text" placeholder="your username" autocomplete="username" /></label><label class="field"><span class="field-label">Email (optional)</span><input id="overlay-email" name="email" type="email" placeholder="you@bakery.example" autocomplete="email" /></label><label class="field"><span class="field-label">Password</span><input id="overlay-password" name="password" type="password" placeholder="••••••••" autocomplete="current-password" /></label><label class="field row" style="gap:8px;align-items:center;flex-direction:row"><input id="rememberMe" name="remember" type="checkbox" /><span class="field-label" style="font-weight:600;color:rgba(255,255,255,0.92);padding: 10px 0px 8px">Remember me</span></label>
+                    <div class="form-actions"><button id="overlaySignInBtn" type="button" class="btn primary large">SIGN IN</button>
+                      <div><button id="forgotPasswordBtn" type="button" class="btn ghost small" style="padding: 12px 16px;">Forgot password?</button></div>
+                    </div>
+                    <div class="auth-foot">
+                      <div class="muted small">Don't have an account yet?</div><button id="overlayToSignup" type="button" class="btn ghost small" style="padding: 12px 16px;">Create an account</button>
+                    </div>
+                  </form>
                 </div>
-                <form class="auth-form" id="loginForm" onsubmit="return false;"><label class="field"><span class="field-label">Username</span><input id="overlay-username" name="username" type="text" placeholder="your username" autocomplete="username" /></label><label class="field"><span class="field-label">Email (optional)</span><input id="overlay-email" name="email" type="email" placeholder="you@bakery.example" autocomplete="email" /></label><label class="field"><span class="field-label">Password</span><input id="overlay-password" name="password" type="password" placeholder="••••••••" autocomplete="current-password" /></label><label class="field row" style="gap:8px;align-items:center;flex-direction:row"><input id="rememberMe" name="remember" type="checkbox" /><span class="field-label" style="font-weight:600;color:rgba(255,255,255,0.92);padding: 10px 0px 8px">Remember me</span></label>
-                  <div class="form-actions"><button id="overlaySignInBtn" type="button" class="btn primary large">SIGN IN</button>
-                    <div><button id="forgotPasswordBtn" type="button" class="btn ghost small" style="padding: 12px 16px;">Forgot password?</button></div>
+                <div id="overlaySignup" class="auth-panel hidden">
+                  <div class="auth-head">
+                    <div class="auth-title">
+                      <h2>Create account</h2>
+                      <div class="small muted">Choose your role and register</div>
+                    </div>
                   </div>
-                  <div class="auth-foot">
-                    <div class="muted small">Don't have an account yet?</div><button id="overlayToSignup" type="button" class="btn ghost small" style="padding: 12px 16px;">Create an account</button>
-                  </div>
-                </form>
-              </div>
-              <div id="overlaySignup" class="auth-panel hidden">
-                <div class="auth-head">
-                  <div class="auth-title">
-                    <h2>Create account</h2>
-                    <div class="small muted">Choose your role and register</div>
-                  </div>
+                  <form class="auth-form" id="signupForm" onsubmit="return false;"><label class="field"><span class="field-label">Username</span><input id="overlay-su-username" name="su-username" type="text" placeholder="pick a username" autocomplete="username" /></label><label class="field"><span class="field-label">Email</span><input id="overlay-su-email" name="email" type="email" placeholder="you@example.com" required /></label><label class="field"><span class="field-label">Password</span><input id="overlay-su-password" name="su-password" type="password" placeholder="create password" autocomplete="new-password" /></label><label class="field"><span class="field-label">Position</span><select id="overlay-su-role" name="su-role" class="select" style="border-right: 16px solid transparent;">
+                        <option>Owner</option>
+                        <option>Baker</option>
+                        <option>Assistant</option>
+                      </select></label>
+                    <div class="form-actions"><button id="overlaySignUpBtn" type="button" class="btn primary large">CREATE ACCOUNT</button></div>
+                    <div class="auth-foot">
+                      <div class="muted small">Already have an account?</div><button id="overlayBackToLogin" type="button" class="btn ghost small">Back to Sign In</button>
+                    </div>
+                  </form>
                 </div>
-                <form class="auth-form" id="signupForm" onsubmit="return false;"><label class="field"><span class="field-label">Username</span><input id="overlay-su-username" name="su-username" type="text" placeholder="pick a username" autocomplete="username" /></label><label class="field"><span class="field-label">Email</span><input id="overlay-su-email" name="email" type="email" placeholder="you@example.com" required /></label><label class="field"><span class="field-label">Password</span><input id="overlay-su-password" name="su-password" type="password" placeholder="create password" autocomplete="new-password" /></label><label class="field"><span class="field-label">Position</span><select id="overlay-su-role" name="su-role" class="select" style="border-right: 16px solid transparent;">
-                      <option>Owner</option>
-                      <option>Baker</option>
-                      <option>Assistant</option>
-                    </select></label>
-                  <div class="form-actions"><button id="overlaySignUpBtn" type="button" class="btn primary large">CREATE ACCOUNT</button></div>
-                  <div class="auth-foot">
-                    <div class="muted small">Already have an account?</div><button id="overlayBackToLogin" type="button" class="btn ghost small">Back to Sign In</button>
-                  </div>
-                </form>
               </div>
             </div>
           </div>
