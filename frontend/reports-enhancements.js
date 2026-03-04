@@ -128,16 +128,7 @@
 			csvBtn.className = 'btn ghost small';
 			csvBtn.type = 'button';
 			csvBtn.textContent = 'Export';
-			csvBtn.addEventListener('click', async () => {
-				csvBtn.disabled = true;
-				csvBtn.textContent = 'Exporting…';
-				try {
-					await exportStockCSVForIngredient(it.id, it);
-				} finally {
-					csvBtn.disabled = false;
-					csvBtn.textContent = 'Export';
-				}
-			});
+			csvBtn.addEventListener('click', () => exportStockCSVForIngredient(it.id));
 			actions.appendChild(viewBtn);
 			actions.appendChild(csvBtn);
 
@@ -200,25 +191,30 @@
 		return Number(String(m[1]).replace(/,/g, ''));
 	}
 
-	function buildSeriesFromActivity(rows) {
-
+	function buildSeriesFromActivity(rows, currentQty) {
 		const labels = [];
-		const values = [];
+		const stockInData = [];
+		const stockOutData = [];
+		const netData = [];
+		const currentQtyData = [];
 		let running = 0;
+
 		rows.forEach(r => {
-			const delta = (/stock_in/i.test(r.action) || /stock in/i.test(r.text)) ? extractQtyFromActivityText(r.text) :
-				(/stock_out/i.test(r.action) || /stock out/i.test(r.text)) ? -extractQtyFromActivityText(r.text) :
-				0;
+			const isIn  = /stock_in/i.test(r.action)  || /stock in/i.test(r.text);
+			const isOut = /stock_out/i.test(r.action) || /stock out/i.test(r.text);
+			const qty   = extractQtyFromActivityText(r.text);
+			const delta = isIn ? qty : isOut ? -qty : 0;
 			running += delta;
+
 			const d = r.time ? new Date(r.time) : new Date();
 			labels.push(d.toLocaleString());
-			values.push(running);
+			stockInData.push(isIn  ? qty  : null);
+			stockOutData.push(isOut ? qty  : null);
+			netData.push(running);
+			currentQtyData.push(currentQty != null ? currentQty : null);
 		});
-		return {
-			labels,
-			values,
-			final: running
-		};
+
+		return { labels, stockInData, stockOutData, netData, currentQtyData, final: running };
 	}
 
 	function ensureChart() {
@@ -231,42 +227,113 @@
 			type: 'line',
 			data: {
 				labels: [],
-				datasets: [{
-					label: 'Net stock change',
-					data: [],
-					tension: 0.3,
-					fill: true
-				}]
+				datasets: [
+					{
+						label: 'Net Running Total',
+						data: [],
+						tension: 0.4,
+						fill: true,
+						borderColor: 'rgba(99, 102, 241, 1)',
+						backgroundColor: 'rgba(99, 102, 241, 0.15)',
+						borderWidth: 2,
+						pointRadius: 3,
+						pointHoverRadius: 5,
+						spanGaps: true
+					},
+					{
+						label: 'Stock In',
+						data: [],
+						tension: 0.4,
+						fill: true,
+						borderColor: 'rgba(34, 197, 94, 1)',
+						backgroundColor: 'rgba(34, 197, 94, 0.12)',
+						borderWidth: 2,
+						pointRadius: 4,
+						pointHoverRadius: 6,
+						spanGaps: false
+					},
+					{
+						label: 'Stock Out',
+						data: [],
+						tension: 0.4,
+						fill: true,
+						borderColor: 'rgba(239, 68, 68, 1)',
+						backgroundColor: 'rgba(239, 68, 68, 0.12)',
+						borderWidth: 2,
+						pointRadius: 4,
+						pointHoverRadius: 6,
+						spanGaps: false
+					},
+					{
+						label: 'Current Qty',
+						data: [],
+						tension: 0,
+						fill: false,
+						borderColor: 'rgba(234, 179, 8, 1)',
+						backgroundColor: 'rgba(234, 179, 8, 0)',
+						borderWidth: 2,
+						borderDash: [6, 4],
+						pointRadius: 0,
+						spanGaps: true
+					}
+				]
 			},
 			options: {
 				maintainAspectRatio: false,
 				responsive: true,
+				interaction: {
+					mode: 'index',
+					intersect: false
+				},
 				plugins: {
 					legend: {
-						display: true
+						display: true,
+						position: 'top',
+						labels: {
+							usePointStyle: true,
+							boxWidth: 8,
+							padding: 14,
+							font: { size: 12 }
+						}
+					},
+					tooltip: {
+						callbacks: {
+							label: ctx => {
+								if (ctx.parsed.y === null) return null;
+								return ` ${ctx.dataset.label}: ${ctx.parsed.y}`;
+							}
+						}
 					}
 				},
 				scales: {
 					x: {
 						display: true,
-						title: {
-							display: false
-						}
+						ticks: {
+							maxTicksLimit: 8,
+							maxRotation: 30,
+							font: { size: 11 }
+						},
+						grid: { display: false }
 					},
 					y: {
 						display: true,
-						beginAtZero: true
+						beginAtZero: true,
+						ticks: { font: { size: 11 } },
+						grid: { color: 'rgba(0,0,0,0.05)' }
 					}
 				}
 			}
 		});
 	}
 
-	function renderStockChart(labels, values) {
+	function renderStockChart(series) {
 		if (!inventoryChart) ensureChart();
 		if (!inventoryChart) return;
-		inventoryChart.data.labels = labels;
-		inventoryChart.data.datasets[0].data = values;
+		inventoryChart.data.labels = series.labels;
+		inventoryChart.data.datasets[0].data = series.netData;
+		inventoryChart.data.datasets[1].data = series.stockInData;
+		inventoryChart.data.datasets[2].data = series.stockOutData;
+		inventoryChart.data.datasets[3].data = series.currentQtyData;
 		inventoryChart.update();
 	}
 
@@ -281,13 +348,20 @@
 			await loadActivity();
 		}
 		const rows = filterActivityForIngredient(selectedIngredient.id, start, end);
-		const series = buildSeriesFromActivity(rows);
+		const currentQty = selectedIngredient.qty != null ? Number(selectedIngredient.qty) : null;
 
-		if (series.labels.length === 0) {
+		if (rows.length === 0) {
 			const now = new Date();
-			renderStockChart([now.toLocaleString()], [selectedIngredient.qty || 0]);
+			renderStockChart({
+				labels: [now.toLocaleString()],
+				netData: [currentQty || 0],
+				stockInData: [null],
+				stockOutData: [null],
+				currentQtyData: [currentQty]
+			});
 		} else {
-			renderStockChart(series.labels, series.values);
+			const series = buildSeriesFromActivity(rows, currentQty);
+			renderStockChart(series);
 		}
 	}
 
@@ -299,19 +373,15 @@
 		downloadCSV([headers].concat(rows), `inventory_${new Date().toISOString().slice(0,10)}.csv`);
 	}
 
-	async function exportSelectedStockCSV() {
+	function exportSelectedStockCSV() {
 		if (!selectedIngredient) {
 			alert('Select an ingredient first to export stock history');
 			return;
 		}
-		await exportStockCSVForIngredient(selectedIngredient.id, selectedIngredient);
+		exportStockCSVForIngredient(selectedIngredient.id);
 	}
 
-	async function exportStockCSVForIngredient(id, ingredientObj) {
-		// Ensure activity data is loaded before filtering
-		if (!activityCache || activityCache.length === 0) {
-			await loadActivity();
-		}
+	function exportStockCSVForIngredient(id) {
 		const {
 			start,
 			end
@@ -321,10 +391,7 @@
 			['time', 'action', 'text']
 		];
 		rows.forEach(r => csvRows.push([r.time, r.action || '', r.text || '']));
-		// Use the passed ingredient object first, then selectedIngredient, then fall back to cache lookup
-		const ing = ingredientObj || selectedIngredient || ingredientsCache.find(x => Number(x.id) === Number(id));
-		const safeName = ing && ing.name ? ing.name.replace(/\s+/g, '_') : `ingredient_${id}`;
-		downloadCSV(csvRows, `${safeName}_stock_${start}_to_${end}.csv`);
+		downloadCSV(csvRows, `${(selectedIngredient && selectedIngredient.name ? selectedIngredient.name.replace(/\s+/g,'_') : 'ingredient')}_stock_${start}_to_${end}.csv`);
 	}
 
 	function sanitizeCellValue(v) {
