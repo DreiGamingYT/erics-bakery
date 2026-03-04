@@ -120,7 +120,7 @@
 			.uma-hist-in  { color:#15803d; font-weight:700; }
 			.uma-hist-out { color:#dc2626; font-weight:700; }
 			.uma-hist-dur { color:var(--muted,#888); font-size:11px; align-self:center; white-space:nowrap; }
-			.uma-hist-meta { grid-column:1/-1; display:flex; gap:12px; flex-wrap:wrap; padding-top:2px; border-top:1px solid rgba(0,0,0,.04); margin-top:2px; }
+            .uma-hist-meta { grid-column:1/-1; display:flex; gap:12px; flex-wrap:wrap; padding-top:2px; border-top:1px solid rgba(0,0,0,.04); margin-top:2px; }
 			.uma-hist-meta span { color:var(--muted,#888); font-size:10px; display:flex; align-items:center; gap:4px; }
 			.uma-no-hist  { color:var(--muted,#888); font-size:13px; text-align:center; padding:28px 0; }
 			.uma-loading  { color:var(--muted,#888); font-size:13px; text-align:center; padding:20px 0; }
@@ -298,6 +298,7 @@
 		});
 	}
 
+    
 	// ── UA parser (minimal) ──────────────────────────────────────────────────
 
 	function parseUA(ua) {
@@ -345,6 +346,9 @@
 
 		fetchSessions(user.id).then(sessions => {
 			if (!sessions.length) {
+				body.innerHTML = `<div class="uma-no-hist"><i class="fa fa-clock-rotate-left" style="font-size:26px;opacity:.3;display:block;margin-bottom:10px"></i>No login sessions recorded yet.</div>`;
+				return;
+			}
 			body.innerHTML = `
 				<div class="uma-hist-grid">
 					<div class="uma-hist-label">Login</div>
