@@ -151,6 +151,25 @@
 		listWrap.appendChild(el);
 	}
 
+	function parseDateInputs() {
+		const start = document.getElementById('reportStart')?.value;
+		const end = document.getElementById('reportEnd')?.value;
+
+		if (!start || !end) {
+			const preset = Number(document.getElementById('reportPreset')?.value || 30);
+			const endDate = new Date();
+			const startDate = new Date(Date.now() - (preset * 24 * 60 * 60 * 1000));
+			return {
+				start: startDate.toISOString().slice(0, 10),
+				end: endDate.toISOString().slice(0, 10)
+			};
+		}
+		return {
+			start,
+			end
+		};
+	}
+
 	function selectIngredient(it) {
 		selectedIngredient = it;
 		selectedNameEl.textContent = it.name;
