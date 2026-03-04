@@ -8507,3 +8507,27 @@ async function populateUserMenu() {
 document.addEventListener('DOMContentLoaded', () => {
 	populateUserMenu();
 });
+
+(function () {
+	const INTERVAL = 4 * 60 * 1000; // every 4 minutes (well within the 10-min window)
+
+	function sendHeartbeat() {
+		if (!isLoggedIn()) return;
+		fetch('/api/auth/heartbeat', {
+			method: 'PUT',
+			credentials: 'include',
+			headers: { 'Content-Type': 'application/json' }
+		}).catch(() => {}); // silent — non-critical
+	}
+
+	// Fire immediately on load, then on a timer
+	document.addEventListener('DOMContentLoaded', () => {
+		sendHeartbeat();
+		setInterval(sendHeartbeat, INTERVAL);
+	});
+
+	// Also fire when the tab becomes visible again after being hidden
+	document.addEventListener('visibilitychange', () => {
+		if (document.visibilityState === 'visible') sendHeartbeat();
+	});
+})();

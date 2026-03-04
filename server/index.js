@@ -368,6 +368,23 @@ app.post('/api/auth/logout', async (req, res) => {
 	res.json({ ok: true });
 });
 
+app.put('/api/auth/heartbeat', authMiddleware, async (req, res) => {
+	try {
+		await pool.query(
+			`UPDATE user_sessions
+			 SET last_active_at = CURRENT_TIMESTAMP
+			 WHERE user_id = ? AND logged_out_at IS NULL
+			 ORDER BY logged_in_at DESC
+			 LIMIT 1`,
+			[req.user.id]
+		);
+		return res.json({ ok: true });
+	} catch (err) {
+		console.warn('[heartbeat] update failed:', err && err.message);
+		return res.json({ ok: false });
+	}
+});
+
 // ── Admin: list all users ──────────────────────────────────────────────────
 app.get('/api/admin/users', authMiddleware, async (req, res) => {
 	if (!hasRole(req.user, ['Owner', 'Admin'])) {
@@ -379,7 +396,9 @@ app.get('/api/admin/users', authMiddleware, async (req, res) => {
 				CASE WHEN s.user_id IS NOT NULL THEN 1 ELSE 0 END AS is_online
 			 FROM users u
 			 LEFT JOIN (
-				 SELECT DISTINCT user_id FROM user_sessions WHERE logged_out_at IS NULL
+				 SELECT DISTINCT user_id FROM user_sessions
+				 WHERE logged_out_at IS NULL
+				   AND last_active_at >= NOW() - INTERVAL 10 MINUTE
 			 ) s ON s.user_id = u.id
 			 ORDER BY u.created_at ASC`
 		);
@@ -1404,9 +1423,6 @@ app.post('/api/notifications/send-email', authMiddleware, async (req, res) => {
 	}
 });
 
-// ── Ensure user_sessions table exists before accepting traffic
-// ── Ensure user_sessions table exists before accepting traffic ─────────────
-// ── Run all startup DB migrations using a SINGLE pooled connection ──────────
 async function runStartupMigrations() {
 	const conn = await pool.getConnection();
 	try {
@@ -1431,6 +1447,14 @@ async function runStartupMigrations() {
 			console.log('[startup] notif_prefs column added');
 		} catch (e) {
 			if (e.code !== 'ER_DUP_FIELDNAME') console.warn('[startup] notif_prefs:', e.message);
+		}
+
+		try {
+			await conn.query(`ALTER TABLE user_sessions ADD COLUMN last_active_at DATETIME DEFAULT NULL`);
+			await conn.query(`ALTER TABLE user_sessions ADD INDEX idx_user_sessions_active (last_active_at)`);
+			console.log('[startup] last_active_at column added to user_sessions');
+		} catch (e) {
+			if (e.code !== 'ER_DUP_FIELDNAME') console.warn('[startup] last_active_at:', e.message);
 		}
 	} catch (err) {
 		console.error('[startup] migration error:', err && err.message ? err.message : err);
