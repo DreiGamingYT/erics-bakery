@@ -2955,15 +2955,6 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
           <div class="muted small">Period: ${start.toISOString().slice(0,10)} to ${end.toISOString().slice(0,10)} • Total used: ${+totalUsed.toFixed(3)} • Low items: ${lowCount} • Expiring: ${expiringCount} • Top used: ${best}</div>
         </div>
         <div id="summarybtns" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <label style="display:flex;align-items:center;gap:5px"><span class="small muted">From</span><input id="reportStart" type="date" value="${startInput || ''}" style="padding:5px 8px;border-radius:7px;border:1px solid rgba(0,0,0,.12);font-size:13px" /></label>
-          <label style="display:flex;align-items:center;gap:5px"><span class="small muted">To</span><input id="reportEnd" type="date" value="${endInput || ''}" style="padding:5px 8px;border-radius:7px;border:1px solid rgba(0,0,0,.12);font-size:13px" /></label>
-          <select id="reportPreset" style="padding:5px 8px;border-radius:7px;border:1px solid rgba(0,0,0,.12);font-size:13px">
-            <option value="7"  ${presetDays===7  ?'selected':''}>Last 7 days</option>
-            <option value="14" ${presetDays===14 ?'selected':''}>Last 14 days</option>
-            <option value="30" ${presetDays===30 ?'selected':''}>Last 30 days</option>
-            <option value="90" ${presetDays===90 ?'selected':''}>Last 90 days</option>
-          </select>
-          <button id="applyReportRange" class="btn small" type="button">Apply</button>
           <select id="reportFilter" title="Filter report" style="padding:5px 8px;border-radius:7px;border:1px solid rgba(0,0,0,.12);font-size:13px">
             <option value="all">All items</option>
             <option value="usage">Ingredient usage</option>
