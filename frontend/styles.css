@@ -3438,11 +3438,11 @@ html {
 
   /* when signup-mode is active, move visual right and forms left by --swap-shift */
   .landing-overlay.signup-mode .landing-visual {
-    transform: translateX(var(--swap-shift, 520px));
+    transform: translateX(var(--swap-shift, 560px));
     opacity: 0.98;
   }
   .landing-overlay.signup-mode .landing-forms {
-    transform: translateX(calc(-1 * var(--swap-shift, 520px)));
+    transform: translateX(calc(-1 * var(--swap-shift, 560px)));
     opacity: 1;
   }
 
