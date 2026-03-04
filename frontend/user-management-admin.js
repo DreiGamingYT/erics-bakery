@@ -122,6 +122,20 @@
 			.uma-hist-dur { color:var(--muted,#888); font-size:11px; align-self:center; white-space:nowrap; }
 			.uma-no-hist  { color:var(--muted,#888); font-size:13px; text-align:center; padding:28px 0; }
 			.uma-loading  { color:var(--muted,#888); font-size:13px; text-align:center; padding:20px 0; }
+			#umaDeleteModal { position:fixed; inset:0; z-index:100000; background:rgba(0,0,0,.5); backdrop-filter:blur(4px); display:flex; align-items:center; justify-content:center; padding:20px; }
+			#umaDeleteModal.hidden { display:none !important; }
+			.uma-del-card { background:var(--card,#fff); border-radius:16px; width:100%; max-width:380px; box-shadow:0 24px 60px rgba(0,0,0,.2); overflow:hidden; }
+			.uma-del-icon { width:52px; height:52px; border-radius:50%; background:rgba(239,68,68,.1); display:flex; align-items:center; justify-content:center; margin:28px auto 0; font-size:22px; color:#dc2626; }
+			.uma-del-body { padding:16px 24px 24px; text-align:center; }
+			.uma-del-body h4 { margin:12px 0 6px; font-size:16px; }
+			.uma-del-body p { margin:0 0 20px; font-size:13px; color:var(--muted,#888); line-height:1.5; }
+			.uma-del-user { font-weight:800; color:var(--text,#111); }
+			.uma-del-actions { display:flex; gap:8px; }
+			.uma-del-cancel { flex:1; padding:9px; border-radius:9px; border:1px solid rgba(0,0,0,.1); background:var(--bg,#f5f5f5); color:var(--text,#111); font-size:13px; font-weight:700; cursor:pointer; transition:background .12s; }
+			.uma-del-cancel:hover { background:var(--card-hover,#eee); }
+			.uma-del-confirm { flex:1; padding:9px; border-radius:9px; border:none; background:#dc2626; color:#fff; font-size:13px; font-weight:700; cursor:pointer; transition:background .12s; }
+			.uma-del-confirm:hover { background:#b91c1c; }
+			.uma-del-confirm:disabled { opacity:.6; cursor:not-allowed; }
 		`;
 		document.head.appendChild(s);
 	}
@@ -211,19 +225,8 @@
 
 			const delBtn = row.querySelector('.uma-btn-del');
 			if (delBtn) {
-				delBtn.addEventListener('click', async () => {
-					if (!confirm(`Delete account "${user.username}"? This cannot be undone.`)) return;
-					delBtn.disabled = true;
-					delBtn.textContent = 'Deleting…';
-					try {
-						await deleteUser(user.id);
-						if (typeof window.notify === 'function') window.notify(`User "${user.username}" deleted`);
-						row.remove();
-					} catch (err) {
-						if (typeof window.notify === 'function') window.notify(`Delete failed: ${err.message}`);
-						delBtn.disabled = false;
-						delBtn.innerHTML = '<i class="fa fa-trash" style="margin-right:4px"></i>Delete';
-					}
+				delBtn.addEventListener('click', () => {
+					openDeleteModal(user, row, delBtn);
 				});
 			}
 
@@ -237,6 +240,60 @@
 			</div>
 		`;
 		panel.appendChild(listEl);
+	}
+
+	// ── Delete confirmation modal ────────────────────────────────────────────
+
+	function openDeleteModal(user, row, triggerBtn) {
+		let modal = document.getElementById('umaDeleteModal');
+		if (!modal) {
+			modal = document.createElement('div');
+			modal.id = 'umaDeleteModal';
+			modal.className = 'hidden';
+			modal.innerHTML = `
+				<div class="uma-del-card">
+					<div class="uma-del-icon"><i class="fa fa-trash"></i></div>
+					<div class="uma-del-body">
+						<h4>Delete account?</h4>
+						<p id="umaDelMsg"></p>
+						<div class="uma-del-actions">
+							<button class="uma-del-cancel" id="umaDelCancel" type="button">Cancel</button>
+							<button class="uma-del-confirm" id="umaDelConfirm" type="button">Delete</button>
+						</div>
+					</div>
+				</div>
+			`;
+			document.body.appendChild(modal);
+			document.getElementById('umaDelCancel').addEventListener('click', () => modal.classList.add('hidden'));
+			modal.addEventListener('click', e => { if (e.target === modal) modal.classList.add('hidden'); });
+		}
+
+		document.getElementById('umaDelMsg').innerHTML =
+			`This will permanently delete <span class="uma-del-user">@${escHtml(user.username)}</span>${user.name && user.name !== user.username ? ` (${escHtml(user.name)})` : ''}.<br>This action cannot be undone.`;
+
+		const confirmBtn = document.getElementById('umaDelConfirm');
+		// Clone to remove old event listeners
+		const freshBtn = confirmBtn.cloneNode(true);
+		confirmBtn.parentNode.replaceChild(freshBtn, confirmBtn);
+
+		modal.classList.remove('hidden');
+		setTimeout(() => freshBtn.focus(), 50);
+
+		freshBtn.addEventListener('click', async () => {
+			freshBtn.disabled = true;
+			freshBtn.innerHTML = '<i class="fa fa-spinner fa-spin" style="margin-right:6px"></i>Deleting…';
+			try {
+				await deleteUser(user.id);
+				modal.classList.add('hidden');
+				if (typeof window.notify === 'function') window.notify(`User "${user.username}" deleted`);
+				row.remove();
+			} catch (err) {
+				modal.classList.add('hidden');
+				if (typeof window.notify === 'function') window.notify(`Delete failed: ${err.message}`);
+				triggerBtn.disabled = false;
+				triggerBtn.innerHTML = '<i class="fa fa-trash" style="margin-right:4px"></i>Delete';
+			}
+		});
 	}
 
 	// ── History modal ─────────────────────────────────────────────────────────
