@@ -280,7 +280,41 @@
             <div class="card settings-grid">
               <div>
                 <div class="card" style="margin-bottom:12px">
-                  <h3>Notifications</h3><label style="display:flex;align-items:center;gap:10px"><input id="prefEmailNotif" type="checkbox" /><span class="field-label" style="font-weight:600;color:var(--text)">Email notifications</span></label><label style="display:flex;align-items:center;gap:10px;margin-top:8px"><input id="prefPushNotif" type="checkbox" /><span class="field-label" style="font-weight:600;color:var(--text)">In-app notifications</span></label>
+                  <h3>Notifications</h3>
+                  <div id="notifStatusBanner" style="display:none;margin-bottom:10px;padding:8px 10px;border-radius:8px;font-size:12px;font-weight:700"></div>
+                  <div style="display:flex;flex-direction:column;gap:10px">
+                    <div style="border:1px solid rgba(0,0,0,.06);border-radius:10px;padding:10px 12px">
+                      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                          <input id="prefPushNotif" type="checkbox" />
+                          <span style="font-weight:700">In-app notifications</span>
+                        </label>
+                        <button id="testPushNotif" class="btn ghost small" type="button">Test</button>
+                      </div>
+                      <div class="muted small" style="margin-top:4px;padding-left:22px">Show browser alerts for low stock and expiring items.</div>
+                      <div id="pushPermStatus" style="margin-top:6px;padding-left:22px;font-size:11px;font-weight:700"></div>
+                      <div id="pushSubOptions" style="display:none;margin-top:8px;padding-left:22px;display:flex;flex-direction:column;gap:6px">
+                        <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input id="pushNotifLowStock" type="checkbox" /> Alert on low stock</label>
+                        <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input id="pushNotifExpiring" type="checkbox" /> Alert on expiring items</label>
+                      </div>
+                    </div>
+                    <div style="border:1px solid rgba(0,0,0,.06);border-radius:10px;padding:10px 12px">
+                      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                          <input id="prefEmailNotif" type="checkbox" />
+                          <span style="font-weight:700">Email notifications</span>
+                        </label>
+                        <button id="testEmailNotif" class="btn ghost small" type="button">Test</button>
+                      </div>
+                      <div class="muted small" style="margin-top:4px;padding-left:22px">Sends alerts to your profile email address.</div>
+                      <div id="emailSubOptions" style="display:none;margin-top:8px;padding-left:22px;display:flex;flex-direction:column;gap:6px">
+                        <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input id="emailNotifLowStock" type="checkbox" /> Email on low stock</label>
+                        <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input id="emailNotifExpiring" type="checkbox" /> Email on expiring items</label>
+                        <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input id="emailNotifDigest" type="checkbox" /> Daily digest email</label>
+                      </div>
+                    </div>
+                  </div>
+                  <button id="saveNotifPrefs" class="btn small" type="button" style="margin-top:10px;width:100%">Save notification preferences</button>
                 </div>
                 <div class="card">
                   <h3>Advanced</h3>
@@ -293,7 +327,6 @@
                   <div class="muted small" style="margin-bottom:8px">Toggle between light and dark UI.</div>
                 </div>
                 <div class="card small-card" style="margin-top:12px">
-                  <h3 style="margin:0 0 8px 0">User Management</h3>
                   <div id="usersList" class="users-list"></div>
                 </div>
               </aside>

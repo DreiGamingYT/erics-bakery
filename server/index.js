@@ -1285,6 +1285,149 @@ app.get('/api/events', authMiddleware, async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 
+app.get('/api/notifications/prefs', authMiddleware, async (req, res) => {
+	try {
+		const [rows] = await pool.query('SELECT notif_prefs FROM users WHERE id = ? LIMIT 1', [req.user.id]);
+		const raw = rows[0]?.notif_prefs || null;
+		let prefs = {};
+		try { prefs = raw ? JSON.parse(raw) : {}; } catch {}
+		return res.json({ prefs });
+	} catch (err) {
+		console.error('GET /api/notifications/prefs err', err && err.message);
+		return res.status(500).json({ error: 'Server error' });
+	}
+});
+
+app.put('/api/notifications/prefs', authMiddleware, async (req, res) => {
+	try {
+		const prefs = req.body || {};
+		await pool.query('UPDATE users SET notif_prefs = ? WHERE id = ?', [JSON.stringify(prefs), req.user.id]);
+		return res.json({ ok: true });
+	} catch (err) {
+		console.error('PUT /api/notifications/prefs err', err && err.message);
+		return res.status(500).json({ error: 'Server error' });
+	}
+});
+
+// ── Get current alerts (low stock + expiring) for in-app use ─────────────────
+app.get('/api/notifications/alerts', authMiddleware, async (req, res) => {
+	try {
+		const [ingredients] = await pool.query(
+			'SELECT id, name, qty, min_qty, expiry, unit FROM ingredients ORDER BY name ASC'
+		);
+
+		const now = new Date();
+		const soon = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+		const lowStock = ingredients.filter(i => {
+			const min = Number(i.min_qty || 0);
+			return Number(i.qty || 0) <= min;
+		});
+
+		const expiringSoon = ingredients.filter(i => {
+			if (!i.expiry) return false;
+			const exp = new Date(i.expiry);
+			return exp >= now && exp <= soon;
+		});
+
+		return res.json({ lowStock, expiringSoon });
+	} catch (err) {
+		console.error('GET /api/notifications/alerts err', err && err.message);
+		return res.status(500).json({ error: 'Server error' });
+	}
+});
+
+// ── Send email alert to the requesting user ───────────────────────────────────
+app.post('/api/notifications/send-email', authMiddleware, async (req, res) => {
+	const { type } = req.body || {};
+
+	// Look up this user's email
+	const [rows] = await pool.query('SELECT email, name, username FROM users WHERE id = ? LIMIT 1', [req.user.id]);
+	const user = rows[0];
+	const toEmail = user?.email;
+
+	if (!toEmail) {
+		return res.status(400).json({ error: 'No email address on your account. Add one in Profile first.' });
+	}
+	if (!mailTransporter) {
+		return res.status(503).json({ error: 'Email is not configured on this server (SMTP_HOST missing).' });
+	}
+
+	try {
+		const [ingredients] = await pool.query(
+			'SELECT id, name, qty, min_qty, expiry, unit FROM ingredients ORDER BY name ASC'
+		);
+
+		const now = new Date();
+		const soon = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+		const lowStock = ingredients.filter(i => Number(i.qty || 0) <= Number(i.min_qty || 0));
+		const expiringSoon = ingredients.filter(i => {
+			if (!i.expiry) return false;
+			const exp = new Date(i.expiry);
+			return exp >= now && exp <= soon;
+		});
+
+		let subject, htmlBody;
+
+		if (type === 'test') {
+			subject = "✅ Test notification — Eric's Bakery";
+			htmlBody = `<p>Hi ${user.name || user.username},</p><p>This is a test email from your bakery management system. Email notifications are working correctly!</p>`;
+		} else if (type === 'low_stock') {
+			if (!lowStock.length) return res.json({ ok: true, skipped: true, reason: 'No low stock items' });
+			subject = `⚠️ Low stock alert — ${lowStock.length} item${lowStock.length > 1 ? 's' : ''} need restocking`;
+			htmlBody = `<p>Hi ${user.name || user.username},</p><p>The following ingredients are at or below their minimum quantity:</p>
+				<table style="border-collapse:collapse;width:100%">
+					<tr style="background:#f5f5f5"><th style="padding:8px;border:1px solid #ddd;text-align:left">Ingredient</th><th style="padding:8px;border:1px solid #ddd">Current Qty</th><th style="padding:8px;border:1px solid #ddd">Min Qty</th><th style="padding:8px;border:1px solid #ddd">Unit</th></tr>
+					${lowStock.map(i => `<tr><td style="padding:8px;border:1px solid #ddd">${i.name}</td><td style="padding:8px;border:1px solid #ddd;text-align:center;color:#dc2626"><strong>${i.qty}</strong></td><td style="padding:8px;border:1px solid #ddd;text-align:center">${i.min_qty || 0}</td><td style="padding:8px;border:1px solid #ddd;text-align:center">${i.unit || '—'}</td></tr>`).join('')}
+				</table>`;
+		} else if (type === 'expiring') {
+			if (!expiringSoon.length) return res.json({ ok: true, skipped: true, reason: 'No expiring items' });
+			subject = `🕐 Expiry alert — ${expiringSoon.length} item${expiringSoon.length > 1 ? 's' : ''} expiring within 7 days`;
+			htmlBody = `<p>Hi ${user.name || user.username},</p><p>The following ingredients will expire within the next 7 days:</p>
+				<table style="border-collapse:collapse;width:100%">
+					<tr style="background:#f5f5f5"><th style="padding:8px;border:1px solid #ddd;text-align:left">Ingredient</th><th style="padding:8px;border:1px solid #ddd">Expiry Date</th><th style="padding:8px;border:1px solid #ddd">Qty Left</th></tr>
+					${expiringSoon.map(i => `<tr><td style="padding:8px;border:1px solid #ddd">${i.name}</td><td style="padding:8px;border:1px solid #ddd;text-align:center;color:#d97706"><strong>${i.expiry}</strong></td><td style="padding:8px;border:1px solid #ddd;text-align:center">${i.qty} ${i.unit || ''}</td></tr>`).join('')}
+				</table>`;
+		} else if (type === 'digest') {
+			subject = `📊 Daily digest — Eric's Bakery`;
+			htmlBody = `<p>Hi ${user.name || user.username},</p>
+				<h3>Daily Inventory Summary</h3>
+				<p><strong>Total ingredients:</strong> ${ingredients.length}</p>
+				<p><strong>Low stock items:</strong> ${lowStock.length}</p>
+				<p><strong>Expiring within 7 days:</strong> ${expiringSoon.length}</p>
+				${lowStock.length ? `<p style="color:#dc2626">⚠️ Items needing restock: ${lowStock.map(i => i.name).join(', ')}</p>` : '<p style="color:#15803d">✅ All stock levels are healthy.</p>'}
+				${expiringSoon.length ? `<p style="color:#d97706">🕐 Expiring soon: ${expiringSoon.map(i => i.name).join(', ')}</p>` : ''}`;
+		} else {
+			return res.status(400).json({ error: 'Unknown notification type' });
+		}
+
+		await mailTransporter.sendMail({
+			from: EMAIL_FROM,
+			to: toEmail,
+			subject,
+			html: `<!DOCTYPE html><html><body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px">${htmlBody}<hr style="margin-top:30px"><p style="color:#888;font-size:12px">Eric's Bakery Management System — <a href="#">Manage notification preferences</a></p></body></html>`
+		});
+
+		return res.json({ ok: true, sent: true, to: toEmail });
+	} catch (err) {
+		console.error('POST /api/notifications/send-email err', err && err.message);
+		return res.status(500).json({ error: `Email failed: ${err.message}` });
+	}
+});
+
+async function ensureNotifPrefsColumn() {
+	try {
+		await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS notif_prefs JSON DEFAULT NULL`);
+		console.log('[startup] notif_prefs column ready');
+	} catch (err) {
+		// Some MySQL versions don't support IF NOT EXISTS on ALTER — ignore duplicate column error
+		if (!String(err.message || '').includes('Duplicate column')) {
+			console.warn('[startup] notif_prefs column check:', err && err.message ? err.message : err);
+		}
+	}
+}
+
 // ── Ensure user_sessions table exists before accepting traffic ─────────────
 async function ensureUserSessionsTable() {
 	try {
@@ -1306,6 +1449,6 @@ async function ensureUserSessionsTable() {
 	}
 }
 
-ensureUserSessionsTable().then(() => {
+Promise.all([ensureUserSessionsTable(), ensureNotifPrefsColumn()]).then(() => {
 	app.listen(PORT, () => console.log('API + static server listening on', PORT));
 });
