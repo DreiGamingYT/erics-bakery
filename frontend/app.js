@@ -8487,18 +8487,20 @@ async function populateUserMenu() {
 		}
 	}
 
-	// Show the menu
-	if (userMenu) userMenu.classList.remove('hidden');
+	// Update badge text
+	if (q('userBadgeText')) q('userBadgeText').textContent = s.name || s.username || 'User';
 
-	// Wire buttons
+	// Wire buttons (use the real function names that exist in this file)
 	const btnProfile = q('userMenuProfile');
 	if (btnProfile) btnProfile.onclick = () => {
-		showProfileModal(); // your existing profile modal function
+		populateProfile();
+		showView('profile');
+		if (userMenu) { userMenu.classList.add('hidden'); userMenu.setAttribute('aria-hidden', 'true'); }
 	};
 
 	const btnLogout = q('userMenuLogout');
 	if (btnLogout) btnLogout.onclick = () => {
-		logoutUser(); // your existing logout function
+		performLogout();
 	};
 }
 
