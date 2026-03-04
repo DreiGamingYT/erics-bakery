@@ -237,6 +237,16 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
 
 		res.cookie(TOKEN_NAME, token, buildCookieOptions());
 
+		// Log login event (non-blocking)
+		(async () => {
+			try {
+				await pool.query(
+					'INSERT INTO activity (user_id, action, text) VALUES (?, ?, ?)',
+					[user.id, 'user_login', `User logged in — ${user.username}`]
+				);
+			} catch (e) { console.warn('[activity] login log failed', e && e.message); }
+		})();
+
 		return res.json({
 			user: {
 				id: user.id,
@@ -357,13 +367,91 @@ app.put('/api/users/me', authMiddleware, async (req, res) => {
 	}
 });
 
-app.post('/api/auth/logout', (req, res) => {
-	res.clearCookie(TOKEN_NAME, {
-		httpOnly: true
-	});
-	res.json({
-		ok: true
-	});
+app.post('/api/auth/logout', authMiddleware, async (req, res) => {
+	// Log logout event (non-blocking)
+	if (req.user && req.user.id) {
+		(async () => {
+			try {
+				await pool.query(
+					'INSERT INTO activity (user_id, action, text) VALUES (?, ?, ?)',
+					[req.user.id, 'user_logout', `User logged out — ${req.user.username}`]
+				);
+			} catch (e) { console.warn('[activity] logout log failed', e && e.message); }
+		})();
+	}
+	res.clearCookie(TOKEN_NAME, { httpOnly: true });
+	res.json({ ok: true });
+});
+
+// ── Admin: list all users ──────────────────────────────────────────────────
+app.get('/api/admin/users', authMiddleware, async (req, res) => {
+	if (!hasRole(req.user, ['Owner', 'Admin'])) {
+		return res.status(403).json({ error: 'Forbidden' });
+	}
+	try {
+		const [rows] = await pool.query(
+			'SELECT id, username, role, name, email, phone, created_at FROM users ORDER BY created_at ASC'
+		);
+		return res.json({ users: rows });
+	} catch (err) {
+		console.error('GET /api/admin/users err', err && err.stack ? err.stack : err);
+		return res.status(500).json({ error: 'Server error' });
+	}
+});
+
+// ── Admin: delete a user ───────────────────────────────────────────────────
+app.delete('/api/admin/users/:id', authMiddleware, async (req, res) => {
+	if (!hasRole(req.user, ['Owner', 'Admin'])) {
+		return res.status(403).json({ error: 'Forbidden' });
+	}
+	const targetId = Number(req.params.id);
+	if (!targetId) return res.status(400).json({ error: 'Invalid user id' });
+	if (targetId === Number(req.user.id)) {
+		return res.status(400).json({ error: 'Cannot delete your own account' });
+	}
+	try {
+		const [rows] = await pool.query('SELECT id, username FROM users WHERE id = ? LIMIT 1', [targetId]);
+		if (!rows || rows.length === 0) return res.status(404).json({ error: 'User not found' });
+		await pool.query('DELETE FROM users WHERE id = ?', [targetId]);
+		return res.json({ ok: true, deleted: rows[0].username });
+	} catch (err) {
+		console.error('DELETE /api/admin/users/:id err', err && err.stack ? err.stack : err);
+		return res.status(500).json({ error: 'Server error' });
+	}
+});
+
+// ── Admin: get login/logout history for a user ─────────────────────────────
+app.get('/api/admin/users/:id/sessions', authMiddleware, async (req, res) => {
+	if (!hasRole(req.user, ['Owner', 'Admin'])) {
+		return res.status(403).json({ error: 'Forbidden' });
+	}
+	const targetId = Number(req.params.id);
+	if (!targetId) return res.status(400).json({ error: 'Invalid user id' });
+	try {
+		const [rows] = await pool.query(
+			`SELECT action, text, time FROM activity
+			 WHERE user_id = ? AND action IN ('user_login', 'user_logout')
+			 ORDER BY time DESC
+			 LIMIT 100`,
+			[targetId]
+		);
+		// Pair logins with their following logout
+		const logins  = rows.filter(r => r.action === 'user_login');
+		const logouts = rows.filter(r => r.action === 'user_logout');
+		const sessions = logins.map(login => {
+			// Find the nearest logout that comes AFTER this login
+			const loginTime = new Date(login.time);
+			const matchedLogout = logouts.find(lo => new Date(lo.time) > loginTime) || null;
+			return {
+				login: login.time,
+				logout: matchedLogout ? matchedLogout.time : null
+			};
+		});
+		return res.json({ sessions });
+	} catch (err) {
+		console.error('GET /api/admin/users/:id/sessions err', err && err.stack ? err.stack : err);
+		return res.status(500).json({ error: 'Server error' });
+	}
 });
 
 app.get('/api/ingredients', authMiddleware, async (req, res) => {
