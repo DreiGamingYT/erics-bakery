@@ -2818,9 +2818,10 @@ async function renderInventoryActivity(limit = 20) {
 function renderReports(rangeStart, rangeEnd, reportFilter) {
 	const startInput = rangeStart || q('reportStart')?.value || null;
 	const endInput = rangeEnd || q('reportEnd')?.value || null;
+	const presetDays = Number(q('reportPreset')?.value || 30);
 	const end = endInput ? new Date(endInput) : new Date();
 	const start = startInput ? new Date(startInput) : new Date(end);
-	if (!startInput) start.setDate(end.getDate() - 29);
+	if (!startInput) start.setDate(end.getDate() - (presetDays - 1));
 	start.setHours(0, 0, 0, 0);
 	end.setHours(23, 59, 59, 999);
 
@@ -2957,10 +2958,10 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
           <label style="display:flex;align-items:center;gap:5px"><span class="small muted">From</span><input id="reportStart" type="date" value="${startInput || ''}" style="padding:5px 8px;border-radius:7px;border:1px solid rgba(0,0,0,.12);font-size:13px" /></label>
           <label style="display:flex;align-items:center;gap:5px"><span class="small muted">To</span><input id="reportEnd" type="date" value="${endInput || ''}" style="padding:5px 8px;border-radius:7px;border:1px solid rgba(0,0,0,.12);font-size:13px" /></label>
           <select id="reportPreset" style="padding:5px 8px;border-radius:7px;border:1px solid rgba(0,0,0,.12);font-size:13px">
-            <option value="7">Last 7 days</option>
-            <option value="14">Last 14 days</option>
-            <option value="30">Last 30 days</option>
-            <option value="90">Last 90 days</option>
+            <option value="7"  ${presetDays===7  ?'selected':''}>Last 7 days</option>
+            <option value="14" ${presetDays===14 ?'selected':''}>Last 14 days</option>
+            <option value="30" ${presetDays===30 ?'selected':''}>Last 30 days</option>
+            <option value="90" ${presetDays===90 ?'selected':''}>Last 90 days</option>
           </select>
           <button id="applyReportRange" class="btn small" type="button">Apply</button>
           <select id="reportFilter" title="Filter report" style="padding:5px 8px;border-radius:7px;border:1px solid rgba(0,0,0,.12);font-size:13px">
@@ -3016,7 +3017,7 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
 				// Clear manual dates so parseDateInputs() falls back to preset
 				const rStart = q('reportStart'); if (rStart) rStart.value = '';
 				const rEnd   = q('reportEnd');   if (rEnd)   rEnd.value   = '';
-				renderReports(null, null, q('reportFilter')?.value || 'usage');
+				renderReports('', '', q('reportFilter')?.value || 'usage');
 				if (typeof window.__reportRangeChanged === 'function') window.__reportRangeChanged();
 			};
 		}

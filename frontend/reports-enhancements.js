@@ -158,7 +158,7 @@
 		if (!start || !end) {
 			const preset = Number(document.getElementById('reportPreset')?.value || 30);
 			const endDate = new Date();
-			const startDate = new Date(Date.now() - (preset * 24 * 60 * 60 * 1000));
+			const startDate = new Date(Date.now() - ((preset - 1) * 24 * 60 * 60 * 1000));
 			return {
 				start: startDate.toISOString().slice(0, 10),
 				end: endDate.toISOString().slice(0, 10)
