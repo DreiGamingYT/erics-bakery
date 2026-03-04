@@ -5006,12 +5006,17 @@ function startApp() {
 	if (applyBtn) {
 		applyBtn.removeEventListener?.('click', () => {});
 		applyBtn.addEventListener('click', () => {
-			const presetDays = Number(q('reportPreset')?.value || 30);
-			const end = new Date();
-			const start = new Date();
-			start.setDate(end.getDate() - (presetDays - 1));
-			q('reportStart').value = start.toISOString().slice(0, 10);
-			q('reportEnd').value = end.toISOString().slice(0, 10);
+			// Use manual date inputs if both are set; otherwise compute from preset
+			const manualStart = q('reportStart')?.value;
+			const manualEnd   = q('reportEnd')?.value;
+			if (!manualStart || !manualEnd) {
+				const presetDays = Number(q('reportPreset')?.value || 30);
+				const end   = new Date();
+				const start = new Date();
+				start.setDate(end.getDate() - (presetDays - 1));
+				if (q('reportStart')) q('reportStart').value = start.toISOString().slice(0, 10);
+				if (q('reportEnd'))   q('reportEnd').value   = end.toISOString().slice(0, 10);
+			}
 			const filter = q('reportFilter')?.value || 'usage';
 			renderReports(q('reportStart').value, q('reportEnd').value, filter);
 			renderStockChart(q('reportStart').value, q('reportEnd').value);
