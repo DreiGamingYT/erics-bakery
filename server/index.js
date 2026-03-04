@@ -398,7 +398,7 @@ app.get('/api/admin/users', authMiddleware, async (req, res) => {
 			 LEFT JOIN (
 				 SELECT DISTINCT user_id FROM user_sessions
 				 WHERE logged_out_at IS NULL
-				   AND last_active_at >= NOW() - INTERVAL 10 MINUTE
+				   AND COALESCE(last_active_at, logged_in_at) >= NOW() - INTERVAL 10 MINUTE
 			 ) s ON s.user_id = u.id
 			 ORDER BY u.created_at ASC`
 		);
