@@ -852,7 +852,8 @@ const PERMISSIONS = {
 		profile: true,
 		inventory: true,
 		reports: true,
-		settings: true
+		settings: true,
+		users: true
 	},
 	Baker: {
 		help: true,
@@ -861,7 +862,8 @@ const PERMISSIONS = {
 		profile: false,
 		inventory: true,
 		reports: false,
-		settings: true
+		settings: true,
+		users: false
 	},
 	Assistant: {
 		help: true,
@@ -870,7 +872,8 @@ const PERMISSIONS = {
 		profile: false,
 		inventory: true,
 		reports: true,
-		settings: true
+		settings: true,
+		users: true
 	},
 };
 
