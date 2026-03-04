@@ -2818,9 +2818,10 @@ async function renderInventoryActivity(limit = 20) {
 function renderReports(rangeStart, rangeEnd, reportFilter) {
 	const startInput = rangeStart || q('reportStart')?.value || null;
 	const endInput = rangeEnd || q('reportEnd')?.value || null;
+	const presetDays = Number(q('reportPreset')?.value || 30);
 	const end = endInput ? new Date(endInput) : new Date();
 	const start = startInput ? new Date(startInput) : new Date(end);
-	if (!startInput) start.setDate(end.getDate() - 29);
+	if (!startInput) start.setDate(end.getDate() - (presetDays - 1));
 	start.setHours(0, 0, 0, 0);
 	end.setHours(23, 59, 59, 999);
 
@@ -2908,38 +2909,60 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
 		let tableRows = (DB.ingredients || []).map(i => {
 			if (!i) return null;
 
-			const isIngredient = String(i.type || '').toLowerCase() === 'ingredient';
-			const minVal = (i && (i.min != null)) ? i.min : computeThresholdForIngredient(i);
+			const isIngredient   = String(i.type || '').toLowerCase() === 'ingredient';
+			const minVal         = (i.min != null) ? i.min : computeThresholdForIngredient(i);
+			const days           = i.expiry ? daysUntil(i.expiry) : null;
+			const isLow          = Number(i.qty || 0) <= Number(minVal || 0);
+			const isExpiring     = isIngredient && days !== null && days >= 0 && days <= 7;
+			const isExpiringSoon = isIngredient && days !== null && days > 7 && days <= 30;
 
 			if (filter === 'usage') {
 				if (!isIngredient) return null;
 				if (!((agg.raw || []).some(r => r.id === i.id))) return null;
 			} else if (filter === 'low') {
-				if (!(Number(i.qty || 0) <= Number(minVal || 0))) return null;
+				if (!isLow) return null;
 			} else if (filter === 'expiring') {
 				if (!isIngredient) return null;
-				if (!(i.expiry && daysUntil(i.expiry) >= 0 && daysUntil(i.expiry) <= 30)) return null;
+				if (!(i.expiry && days >= 0 && days <= 30)) return null;
 			} else if (filter === 'all') {
 			} else {
 				if (!isIngredient) return null;
 				if (!((agg.raw || []).some(r => r.id === i.id))) return null;
 			}
 
-			const used = (agg.raw || []).find(r => r.id === i.id);
+			const used    = (agg.raw || []).find(r => r.id === i.id);
 			const usedQty = used ? used.qty : 0;
 
-			return `<tr>
-        <td style="padding:8px;border:1px solid #eee">${i.id}</td>
-        <td style="padding:8px;border:1px solid #eee">${escapeHtml(i.name)}</td>
-        <td style="padding:8px;border:1px solid #eee;text-align:right">${+usedQty.toFixed(3)}</td>
-        <td style="padding:8px;border:1px solid #eee;text-align:right">${+Number(i.qty || 0).toFixed(3)}</td>
-        <td style="padding:8px;border:1px solid #eee">${escapeHtml(i.unit||'')}</td>
-        <td style="padding:8px;border:1px solid #eee">${minVal != null ? minVal : ''}</td>
-        <td style="padding:8px;border:1px solid #eee">${escapeHtml(i.type||'')}</td>
-        <td style="padding:8px;border:1px solid #eee">${i.expiry||''}</td>
+			// Row background: expiring urgent (red) > low stock (orange) > expiring soon (yellow)
+			const rowBg = isExpiring     ? 'background:rgba(239,68,68,.08);'
+			            : isLow          ? 'background:rgba(249,115,22,.08);'
+			            : isExpiringSoon  ? 'background:rgba(234,179,8,.07);'
+			            : '';
+
+			// Inline badges for name cell
+			const lowBadge    = isLow         ? ' <span style="font-size:10px;font-weight:800;padding:2px 6px;border-radius:999px;background:rgba(249,115,22,.18);color:#c2410c">LOW</span>' : '';
+			const expiryBadge = isExpiring    ? ' <span style="font-size:10px;font-weight:800;padding:2px 6px;border-radius:999px;background:rgba(239,68,68,.18);color:#dc2626">EXPIRING</span>'
+			                  : isExpiringSoon ? ' <span style="font-size:10px;font-weight:800;padding:2px 6px;border-radius:999px;background:rgba(234,179,8,.18);color:#b45309">SOON</span>' : '';
+
+			// Qty cell — bold + coloured when low
+			const qtyDisplay = `<span style="font-weight:${isLow?'700':'400'};color:${isLow?'#c2410c':'inherit'}">${+Number(i.qty||0).toFixed(3)}</span>`;
+
+			// Expiry cell — days countdown coloured by urgency
+			const expiryDisplay = i.expiry
+				? `${i.expiry} <span style="font-size:11px;color:${days<=7?'#dc2626':days<=30?'#b45309':'var(--muted,#888)'}">(${days}d)</span>${expiryBadge}`
+				: '—';
+
+			return `<tr style="${rowBg}">
+        <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${i.id}</td>
+        <td style="padding:8px;border:1px solid rgba(0,0,0,.07);font-weight:600">${escapeHtml(i.name)}${lowBadge}</td>
+        <td style="padding:8px;border:1px solid rgba(0,0,0,.07);text-align:right">${+usedQty.toFixed(3)}</td>
+        <td style="padding:8px;border:1px solid rgba(0,0,0,.07);text-align:right">${qtyDisplay}</td>
+        <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${escapeHtml(i.unit||'')}</td>
+        <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${minVal != null ? minVal : ''}</td>
+        <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${escapeHtml(i.type||'')}</td>
+        <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${expiryDisplay}</td>
       </tr>`;
 		}).filter(Boolean).join('') || `<tr><td colspan="8" style="padding:12px" class="muted">No items match the selected filter/range</td></tr>`;
-
 		summaryEl.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
         <div>
@@ -2958,7 +2981,13 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
         </div>
       </div>
 
-      <div style="margin-top:12px;overflow:auto">
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:14px;margin-bottom:6px;font-size:12px;align-items:center">
+        <span style="font-weight:700;color:var(--muted,#888)">Legend:</span>
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:12px;height:12px;border-radius:3px;background:rgba(239,68,68,.18);display:inline-block"></span>Expiring within 7 days</span>
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:12px;height:12px;border-radius:3px;background:rgba(249,115,22,.18);display:inline-block"></span>Low stock</span>
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:12px;height:12px;border-radius:3px;background:rgba(234,179,8,.18);display:inline-block"></span>Expiring within 30 days</span>
+      </div>
+      <div style="margin-top:4px;overflow:auto">
         <table style="width:100%;border-collapse:collapse">
           <thead><tr>
             <th style="padding:8px;border:1px solid #eee">ID</th>
@@ -8487,20 +8516,18 @@ async function populateUserMenu() {
 		}
 	}
 
-	// Update badge text
-	if (q('userBadgeText')) q('userBadgeText').textContent = s.name || s.username || 'User';
+	// Show the menu
+	if (userMenu) userMenu.classList.remove('hidden');
 
 	// Wire buttons (use the real function names that exist in this file)
 	const btnProfile = q('userMenuProfile');
 	if (btnProfile) btnProfile.onclick = () => {
-		populateProfile();
-		showView('profile');
-		if (userMenu) { userMenu.classList.add('hidden'); userMenu.setAttribute('aria-hidden', 'true'); }
+		showProfileModal(); // your existing profile modal function
 	};
 
 	const btnLogout = q('userMenuLogout');
 	if (btnLogout) btnLogout.onclick = () => {
-		performLogout();
+		logoutUser(); // your existing logout function
 	};
 }
 
