@@ -64,11 +64,15 @@ try {
 	nodemailer = null;
 }
 
-const SMTP_HOST = process.env.SMTP_HOST;
-const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
-const SMTP_USER = process.env.SMTP_USER;
-const SMTP_PASS = process.env.SMTP_PASS;
-const EMAIL_FROM = process.env.EMAIL_FROM || `"Eric's Bakery" <archlinux@google.com>`;
+const SMTP_HOST = (process.env.SMTP_HOST || '').trim();
+const SMTP_PORT = Number((process.env.SMTP_PORT || '587').trim());
+const SMTP_USER = (process.env.SMTP_USER || '').trim();
+const SMTP_PASS = (process.env.SMTP_PASS || '').trim();
+// EMAIL_FROM must use the authenticated SMTP_USER address for Gmail.
+// Fall back to SMTP_USER if EMAIL_FROM is missing or still uses a placeholder.
+const _rawFrom = (process.env.EMAIL_FROM || '').trim();
+const _fromHasPlaceholder = _rawFrom.includes('archlinux@google.com') || !_rawFrom;
+const EMAIL_FROM = (!_fromHasPlaceholder ? _rawFrom : `"Eric's Bakery" <${SMTP_USER}>`);
 
 // FIX #2 — Rate limiting on sensitive auth endpoints
 const loginLimiter = rateLimit({
@@ -1200,13 +1204,12 @@ async function sendResetEmail(toEmail, code) {
 		if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
 			const nodemailer = require('nodemailer');
 			const transporter = nodemailer.createTransport({
-				host: process.env.SMTP_HOST,
-				port: Number(process.env.SMTP_PORT || 587),
-				secure: (String(process.env.SMTP_PORT || '587') === '465'), 
-
+				host: (process.env.SMTP_HOST || '').trim(),
+				port: Number((process.env.SMTP_PORT || '587').trim()),
+				secure: ((process.env.SMTP_PORT || '587').trim() === '465'),
 				auth: {
-					user: process.env.SMTP_USER,
-					pass: process.env.SMTP_PASS
+					user: (process.env.SMTP_USER || '').trim(),
+					pass: (process.env.SMTP_PASS || '').trim()
 				}
 			});
 
