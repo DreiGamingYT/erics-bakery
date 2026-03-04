@@ -154,7 +154,8 @@
 	// ── Render panel ──────────────────────────────────────────────────────────
 
 	async function renderAdminPanel() {
-		const container = document.getElementById('usersList');
+		// prefer the new usersPanel container, fall back to old usersList for backwards compatibility
+		const container = document.getElementById('usersPanel') || document.getElementById('usersList');
 		if (!container) return;
 		if (!isAdminOrOwner()) { container.style.display = ''; return; }
 
@@ -164,8 +165,13 @@
 		if (!panel) {
 			panel = document.createElement('div');
 			panel.id = 'umaPanel';
-			container.parentElement.insertBefore(panel, container);
-			container.style.display = 'none';
+			// if the container has a parent, insert into it; otherwise append to body
+			if (container.parentElement) {
+				container.parentElement.insertBefore(panel, container);
+				container.style.display = 'none';
+			} else {
+				document.body.appendChild(panel);
+			}
 		}
 
 		panel.innerHTML = `
@@ -298,7 +304,6 @@
 		});
 	}
 
-    
 	// ── UA parser (minimal) ──────────────────────────────────────────────────
 
 	function parseUA(ua) {
@@ -380,13 +385,15 @@
 		});
 	}
 
-	// ── Watch settings ────────────────────────────────────────────────────────
+	// ── Watch nav/view ────────────────────────────────────────────────────────
 
-	function watchSettingsNav() {
+	function watchNav() {
+		// render when user clicks the Users nav-item
 		document.addEventListener('click', e => {
-			if (e.target.closest('[data-view="settings"]')) setTimeout(tryRender, 100);
+			if (e.target.closest('[data-view="users"]')) setTimeout(tryRender, 100);
 		});
-		const section = document.getElementById('view-settings');
+		// watch the view-users section for visibility changes
+		const section = document.getElementById('view-users');
 		if (section && window.MutationObserver) {
 			new MutationObserver(() => {
 				if (!section.classList.contains('hidden')) tryRender();
@@ -400,9 +407,12 @@
 	}
 
 	function init() {
-		watchSettingsNav();
-		const section = document.getElementById('view-settings');
+		watchNav();
+		const section = document.getElementById('view-users');
 		if (section && !section.classList.contains('hidden')) tryRender();
+		// backwards compatibility: if usersPanel exists already (rendered earlier), ensure it renders
+		const existingPanel = document.getElementById('usersPanel') || document.getElementById('usersList');
+		if (existingPanel && !existingPanel.closest('.hidden')) tryRender();
 	}
 
 	if (document.readyState === 'loading') {
