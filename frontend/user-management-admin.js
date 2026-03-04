@@ -283,40 +283,38 @@
 
 	// ── Nav + view wiring ────────────────────────────────────────────────────
 
-	function showNavBtn(show) {
-		const btn = document.getElementById('navUsers');
-		if (btn) btn.style.display = show ? '' : 'none';
-	}
+	function init() {
+		if (!isOwnerOrAdmin()) return;
 
-	function patchShowView() {
-		// Inject 'users' into app.js's views array so showView hides/shows it correctly
+		// Show the Users nav button
+		const navBtn = document.getElementById('navUsers');
+		if (navBtn) navBtn.style.display = '';
+
+		// Inject 'users' into app.js's views array so showView() hides all other
+		// sections correctly when navigating to Users
 		if (typeof views !== 'undefined' && Array.isArray(views) && !views.includes('users')) {
 			views.push('users');
 		}
 
-		// Listen for the Users nav button click
-		document.getElementById('navUsers')?.addEventListener('click', () => {
-			if (typeof showView === 'function') showView('users');
-			renderUsersView();
-		});
-	}
-
-	function init() {
-		if (!isOwnerOrAdmin()) return;
-		showNavBtn(true);
-
-		// Patch showView once app.js has loaded it
-		if (typeof showView === 'function') {
-			patchShowView();
-		} else {
-			document.addEventListener('DOMContentLoaded', patchShowView);
+		// Wire the nav button — use onclick so repeated calls don't stack listeners
+		if (navBtn) {
+			navBtn.onclick = () => {
+				if (typeof showView === 'function') showView('users');
+				renderUsersView();
+			};
 		}
+
+		// If view-users is already visible on load, render immediately
+		const section = document.getElementById('view-users');
+		if (section && !section.classList.contains('hidden')) renderUsersView();
 	}
 
+	// Wait for full DOM + app.js to be ready before wiring
 	if (document.readyState === 'loading') {
 		document.addEventListener('DOMContentLoaded', init);
 	} else {
-		init();
+		// app.js loads after us — defer so it has time to define showView & views
+		setTimeout(init, 0);
 	}
 
 })();
