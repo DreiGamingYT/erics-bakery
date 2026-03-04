@@ -1,10 +1,13 @@
 (function () {
 	'use strict';
 
-	// ── API ──────────────────────────────────────────────────────────────────
+	// ── API ───────────────────────────────────────────────────────────────────
 
 	async function apiFetch(url, opts = {}) {
-		const res = await fetch(url, Object.assign({ credentials: 'include', headers: { 'Content-Type': 'application/json' } }, opts));
+		const res = await fetch(url, Object.assign({
+			credentials: 'include',
+			headers: { 'Content-Type': 'application/json' }
+		}, opts));
 		const data = await res.json().catch(() => ({}));
 		if (!res.ok) throw new Error(data.error || data.message || `HTTP ${res.status}`);
 		return data;
@@ -14,7 +17,10 @@
 		try {
 			const d = await apiFetch('/api/notifications/prefs');
 			return d.prefs || {};
-		} catch { return {}; }
+		} catch (e) {
+			console.warn('[notif] loadPrefs failed:', e.message);
+			return {};
+		}
 	}
 
 	async function savePrefs(prefs) {
@@ -29,11 +35,11 @@
 		return apiFetch('/api/notifications/send-email', { method: 'POST', body: JSON.stringify({ type }) });
 	}
 
-	// ── Browser Notification permission ──────────────────────────────────────
+	// ── Browser notification helpers ──────────────────────────────────────────
 
 	function permissionStatus() {
 		if (!('Notification' in window)) return 'unsupported';
-		return Notification.permission; // 'default' | 'granted' | 'denied'
+		return Notification.permission;
 	}
 
 	async function requestPermission() {
@@ -42,123 +48,172 @@
 		return Notification.requestPermission();
 	}
 
-	function showBrowserNotif(title, body, icon = '🍞') {
+	function showBrowserNotif(title, body) {
 		if (permissionStatus() !== 'granted') return;
-		try { new Notification(title, { body, icon: '/favicon.ico' }); } catch {}
+		try { new Notification(title, { body, icon: '/favicon.ico' }); } catch (e) {}
 	}
 
-	// ── Check & fire alerts ──────────────────────────────────────────────────
+	// ── Core alert checker ────────────────────────────────────────────────────
 
 	let lastAlertKey = '';
+	let pollTimer = null;
+	let currentPrefs = {};
+	// Tracks whether we already auto-emailed for the current low-stock/expiring set
+	let lastEmailKey = '';
 
-	async function checkAndFireAlerts(prefs) {
-		if (!prefs.pushEnabled) return;
-		if (permissionStatus() !== 'granted') return;
+	async function checkAndFireAlerts(prefs, opts = {}) {
+		const { forceRecheck = false } = opts;
 
 		let alerts;
 		try { alerts = await fetchAlerts(); } catch { return; }
 
-		const alertKey = JSON.stringify({ l: alerts.lowStock?.map(i => i.id), e: alerts.expiringSoon?.map(i => i.id) });
-		if (alertKey === lastAlertKey) return; // already notified for this exact state
+		const alertKey = JSON.stringify({
+			l: (alerts.lowStock || []).map(i => i.id).sort(),
+			e: (alerts.expiringSoon || []).map(i => i.id).sort()
+		});
+
+		const isNewAlert = alertKey !== lastAlertKey;
+		if (!isNewAlert && !forceRecheck) return;
 		lastAlertKey = alertKey;
 
-		if (prefs.pushLowStock && alerts.lowStock?.length) {
-			const names = alerts.lowStock.slice(0, 3).map(i => i.name).join(', ');
-			const more = alerts.lowStock.length > 3 ? ` +${alerts.lowStock.length - 3} more` : '';
-			showBrowserNotif(
-				`⚠️ Low stock — ${alerts.lowStock.length} item${alerts.lowStock.length > 1 ? 's' : ''}`,
-				`${names}${more} need restocking`
-			);
+		// ── Browser (in-app) push ─────────────────────────────────────────────
+		if (prefs.pushEnabled && permissionStatus() === 'granted') {
+			if (prefs.pushLowStock && alerts.lowStock?.length) {
+				const names = alerts.lowStock.slice(0, 3).map(i => i.name).join(', ');
+				const more  = alerts.lowStock.length > 3 ? ` +${alerts.lowStock.length - 3} more` : '';
+				showBrowserNotif(
+					`⚠️ Low stock — ${alerts.lowStock.length} item${alerts.lowStock.length > 1 ? 's' : ''}`,
+					`${names}${more} need restocking`
+				);
+			}
+			if (prefs.pushExpiring && alerts.expiringSoon?.length) {
+				const names = alerts.expiringSoon.slice(0, 3).map(i => i.name).join(', ');
+				const more  = alerts.expiringSoon.length > 3 ? ` +${alerts.expiringSoon.length - 3} more` : '';
+				showBrowserNotif(
+					`🕐 Expiring soon — ${alerts.expiringSoon.length} item${alerts.expiringSoon.length > 1 ? 's' : ''}`,
+					`${names}${more} expire within 7 days`
+				);
+			}
 		}
 
-		if (prefs.pushExpiring && alerts.expiringSoon?.length) {
-			const names = alerts.expiringSoon.slice(0, 3).map(i => i.name).join(', ');
-			const more = alerts.expiringSoon.length > 3 ? ` +${alerts.expiringSoon.length - 3} more` : '';
-			showBrowserNotif(
-				`🕐 Expiring soon — ${alerts.expiringSoon.length} item${alerts.expiringSoon.length > 1 ? 's' : ''}`,
-				`${names}${more} expire within 7 days`
-			);
+		// ── Auto email (only when alert set changes to avoid spam) ────────────
+		if (prefs.emailEnabled && isNewAlert && alertKey !== lastEmailKey) {
+			lastEmailKey = alertKey;
+			if (prefs.emailLowStock && alerts.lowStock?.length) {
+				sendEmail('low_stock').catch(e => console.warn('[notif] auto low-stock email failed:', e.message));
+			}
+			if (prefs.emailExpiring && alerts.expiringSoon?.length) {
+				sendEmail('expiring').catch(e => console.warn('[notif] auto expiry email failed:', e.message));
+			}
 		}
 	}
+
+	function restartPoll(prefs) {
+		clearInterval(pollTimer);
+		if (!prefs.pushEnabled && !prefs.emailEnabled) return;
+		// Fire immediately then every 5 minutes
+		checkAndFireAlerts(prefs);
+		pollTimer = setInterval(() => checkAndFireAlerts(prefs), 5 * 60 * 1000);
+	}
+
+	// ── Fetch interceptor — trigger instant check on any stock update ─────────
+
+	const _origFetch = window.fetch.bind(window);
+	const STOCK_RE = /\/api\/ingredients\/\d+\/stock/;
+
+	window.fetch = async function (input, init) {
+		const url = typeof input === 'string' ? input : (input?.url || '');
+		const res = await _origFetch(input, init);
+
+		if (STOCK_RE.test(url) && res.ok) {
+			// Clone so the original response body is still readable by the caller
+			const resClone = res.clone();
+			resClone.json().then(() => {
+				// Reset lastAlertKey so even identical IDs fire again if qty changed
+				lastAlertKey = '';
+				checkAndFireAlerts(currentPrefs, { forceRecheck: true });
+			}).catch(() => {});
+		}
+
+		return res;
+	};
 
 	// ── UI helpers ────────────────────────────────────────────────────────────
 
 	function q(id) { return document.getElementById(id); }
 
-	function setBanner(msg, type = 'info') {
+	function setBanner(msg, type) {
 		const el = q('notifStatusBanner');
 		if (!el) return;
 		el.textContent = msg;
 		el.style.display = 'block';
 		el.style.background = type === 'error' ? 'rgba(239,68,68,.1)' : type === 'success' ? 'rgba(34,197,94,.1)' : 'rgba(99,102,241,.1)';
-		el.style.color = type === 'error' ? '#dc2626' : type === 'success' ? '#15803d' : '#4338ca';
-		clearTimeout(el._timer);
-		el._timer = setTimeout(() => { el.style.display = 'none'; }, 4000);
+		el.style.color      = type === 'error' ? '#dc2626'            : type === 'success' ? '#15803d'            : '#4338ca';
+		clearTimeout(el._t);
+		el._t = setTimeout(() => el.style.display = 'none', 4500);
 	}
 
-	function updatePermUI(perm) {
-		const statusEl = q('pushPermStatus');
-		if (!statusEl) return;
-		if (perm === 'granted') {
-			statusEl.textContent = '✅ Browser permission granted';
-			statusEl.style.color = '#15803d';
-		} else if (perm === 'denied') {
-			statusEl.textContent = '🚫 Blocked — enable in browser site settings';
-			statusEl.style.color = '#dc2626';
-		} else if (perm === 'unsupported') {
-			statusEl.textContent = '⚠️ Browser does not support notifications';
-			statusEl.style.color = '#d97706';
-		} else {
-			statusEl.textContent = 'Permission not yet granted — click the toggle to request';
-			statusEl.style.color = 'var(--muted,#888)';
-		}
+	function updatePermUI() {
+		const el = q('pushPermStatus');
+		if (!el) return;
+		const p = permissionStatus();
+		if (p === 'granted')          { el.textContent = '✅ Browser permission granted';               el.style.color = '#15803d'; }
+		else if (p === 'denied')      { el.textContent = '🚫 Blocked — allow in browser site settings'; el.style.color = '#dc2626'; }
+		else if (p === 'unsupported') { el.textContent = '⚠️ Browser does not support notifications';   el.style.color = '#d97706'; }
+		else                          { el.textContent = 'Permission not yet granted — enable the toggle to request'; el.style.color = 'var(--muted,#888)'; }
 	}
 
 	function syncSubOptions(prefs) {
-		const pushOpts = q('pushSubOptions');
+		const pushOpts  = q('pushSubOptions');
 		const emailOpts = q('emailSubOptions');
-		if (pushOpts) pushOpts.style.display = prefs.pushEnabled ? 'flex' : 'none';
-		if (emailOpts) emailOpts.style.display = prefs.emailEnabled ? 'flex' : 'none';
+		if (pushOpts)  { pushOpts.style.display  = prefs.pushEnabled  ? 'flex' : 'none'; pushOpts.style.flexDirection  = 'column'; }
+		if (emailOpts) { emailOpts.style.display = prefs.emailEnabled ? 'flex' : 'none'; emailOpts.style.flexDirection = 'column'; }
 	}
 
 	function prefsFromUI() {
 		return {
-			pushEnabled:    !!q('prefPushNotif')?.checked,
-			pushLowStock:   !!q('pushNotifLowStock')?.checked,
-			pushExpiring:   !!q('pushNotifExpiring')?.checked,
-			emailEnabled:   !!q('prefEmailNotif')?.checked,
-			emailLowStock:  !!q('emailNotifLowStock')?.checked,
-			emailExpiring:  !!q('emailNotifExpiring')?.checked,
-			emailDigest:    !!q('emailNotifDigest')?.checked,
+			pushEnabled:   !!q('prefPushNotif')?.checked,
+			pushLowStock:  !!q('pushNotifLowStock')?.checked,
+			pushExpiring:  !!q('pushNotifExpiring')?.checked,
+			emailEnabled:  !!q('prefEmailNotif')?.checked,
+			emailLowStock: !!q('emailNotifLowStock')?.checked,
+			emailExpiring: !!q('emailNotifExpiring')?.checked,
+			emailDigest:   !!q('emailNotifDigest')?.checked,
 		};
 	}
 
 	function applyPrefsToUI(prefs) {
 		if (q('prefPushNotif'))      q('prefPushNotif').checked      = !!prefs.pushEnabled;
-		if (q('pushNotifLowStock'))  q('pushNotifLowStock').checked  = prefs.pushLowStock !== false;
-		if (q('pushNotifExpiring'))  q('pushNotifExpiring').checked  = prefs.pushExpiring !== false;
+		if (q('pushNotifLowStock'))  q('pushNotifLowStock').checked  = prefs.pushLowStock  !== false;
+		if (q('pushNotifExpiring'))  q('pushNotifExpiring').checked  = prefs.pushExpiring  !== false;
 		if (q('prefEmailNotif'))     q('prefEmailNotif').checked     = !!prefs.emailEnabled;
 		if (q('emailNotifLowStock')) q('emailNotifLowStock').checked = prefs.emailLowStock !== false;
 		if (q('emailNotifExpiring')) q('emailNotifExpiring').checked = prefs.emailExpiring !== false;
 		if (q('emailNotifDigest'))   q('emailNotifDigest').checked   = !!prefs.emailDigest;
 		syncSubOptions(prefs);
-		updatePermUI(permissionStatus());
+		updatePermUI();
 	}
 
-	// ── Wire settings UI ──────────────────────────────────────────────────────
-
-	let currentPrefs = {};
-	let pollTimer = null;
+	// ── Settings UI wiring ────────────────────────────────────────────────────
 
 	async function initNotifSettings() {
+		const saveBtn      = q('saveNotifPrefs');
+		const pushToggle   = q('prefPushNotif');
+		const emailToggle  = q('prefEmailNotif');
+		const testPushBtn  = q('testPushNotif');
+		const testEmailBtn = q('testEmailNotif');
+
+		if (!saveBtn || saveBtn._notifWired) return;
+		saveBtn._notifWired = true;
+
 		currentPrefs = await loadPrefs();
 		applyPrefsToUI(currentPrefs);
 
-		// Push toggle
-		q('prefPushNotif')?.addEventListener('change', async (e) => {
+		// Push master toggle
+		pushToggle?.addEventListener('change', async (e) => {
 			if (e.target.checked) {
 				const perm = await requestPermission();
-				updatePermUI(perm);
+				updatePermUI();
 				if (perm !== 'granted') {
 					e.target.checked = false;
 					setBanner('Browser permission denied — cannot enable in-app notifications.', 'error');
@@ -168,144 +223,110 @@
 			syncSubOptions(prefsFromUI());
 		});
 
-		// Email toggle
-		q('prefEmailNotif')?.addEventListener('change', () => syncSubOptions(prefsFromUI()));
+		// Email master toggle
+		emailToggle?.addEventListener('change', () => syncSubOptions(prefsFromUI()));
 
-		// Save button
-		q('saveNotifPrefs')?.addEventListener('click', async () => {
-			const btn = q('saveNotifPrefs');
-			btn.disabled = true;
-			btn.textContent = 'Saving…';
+		// Save
+		saveBtn.addEventListener('click', async () => {
+			saveBtn.disabled = true;
+			saveBtn.textContent = 'Saving…';
 			try {
-				const prefs = prefsFromUI();
-
-				// If push is being enabled, ensure we have permission
+				let prefs = prefsFromUI();
 				if (prefs.pushEnabled && permissionStatus() !== 'granted') {
 					const perm = await requestPermission();
-					updatePermUI(perm);
+					updatePermUI();
 					if (perm !== 'granted') {
-						if (q('prefPushNotif')) q('prefPushNotif').checked = false;
+						if (pushToggle) pushToggle.checked = false;
 						prefs.pushEnabled = false;
 						setBanner('Browser permission denied — push notifications disabled.', 'error');
 					}
 				}
-
 				await savePrefs(prefs);
 				currentPrefs = prefs;
 				syncSubOptions(prefs);
-				setBanner('Notification preferences saved!', 'success');
+				// Reset keys so the next check fires fresh with the new prefs
+				lastAlertKey = '';
+				lastEmailKey = '';
 				restartPoll(prefs);
+				setBanner('Notification preferences saved!', 'success');
 			} catch (err) {
 				setBanner(`Save failed: ${err.message}`, 'error');
 			} finally {
-				btn.disabled = false;
-				btn.textContent = 'Save notification preferences';
+				saveBtn.disabled = false;
+				saveBtn.textContent = 'Save notification preferences';
 			}
 		});
 
 		// Test push
-		q('testPushNotif')?.addEventListener('click', async () => {
-			const btn = q('testPushNotif');
-			btn.disabled = true;
+		testPushBtn?.addEventListener('click', async () => {
+			testPushBtn.disabled = true;
 			try {
 				const perm = await requestPermission();
-				updatePermUI(perm);
-				if (perm !== 'granted') {
-					setBanner('Browser permission not granted.', 'error');
-					return;
-				}
-				showBrowserNotif("🍞 Test notification", "In-app notifications are working correctly!");
-				setBanner('Test notification sent!', 'success');
+				updatePermUI();
+				if (perm !== 'granted') { setBanner('Browser permission not granted.', 'error'); return; }
+				showBrowserNotif('🍞 Test notification', 'In-app notifications are working correctly!');
+				setBanner('Test notification fired — check your browser!', 'success');
 			} finally {
-				btn.disabled = false;
+				testPushBtn.disabled = false;
 			}
 		});
 
 		// Test email
-		q('testEmailNotif')?.addEventListener('click', async () => {
-			const btn = q('testEmailNotif');
-			btn.disabled = true;
-			btn.textContent = 'Sending…';
+		testEmailBtn?.addEventListener('click', async () => {
+			testEmailBtn.disabled = true;
+			testEmailBtn.textContent = 'Sending…';
 			try {
 				const data = await sendEmail('test');
-				setBanner(data.sent ? `Test email sent to ${data.to}` : 'Skipped — nothing to report', 'success');
+				setBanner(data.sent ? `✅ Test email sent to ${data.to}` : 'Skipped', 'success');
 			} catch (err) {
-				setBanner(`${err.message}`, 'error');
+				setBanner(`❌ ${err.message}`, 'error');
 			} finally {
-				btn.disabled = false;
-				btn.textContent = 'Test';
+				testEmailBtn.disabled = false;
+				testEmailBtn.textContent = 'Test';
 			}
 		});
-
-		// Start polling if push is already enabled
-		restartPoll(currentPrefs);
 	}
 
-	// ── Background polling (every 15 min) ────────────────────────────────────
-
-	function restartPoll(prefs) {
-		clearInterval(pollTimer);
-		if (!prefs.pushEnabled) return;
-		// Fire once immediately then every 15 minutes
-		checkAndFireAlerts(prefs);
-		pollTimer = setInterval(() => checkAndFireAlerts(prefs), 15 * 60 * 1000);
-	}
-
-	// ── Email digest trigger (on login, once per day) ─────────────────────────
+	// ── Daily digest ──────────────────────────────────────────────────────────
 
 	async function maybeSendDailyDigest(prefs) {
 		if (!prefs.emailEnabled || !prefs.emailDigest) return;
 		const today = new Date().toISOString().slice(0, 10);
-		const sess = typeof getSession === 'function' ? getSession() : null;
+		const sess  = typeof getSession === 'function' ? getSession() : null;
 		if (!sess) return;
-		const key = `notif_digest_sent_${sess.username}_${today}`;
-		if (localStorage.getItem(key)) return; // already sent today
-		try {
-			await sendEmail('digest');
-			localStorage.setItem(key, '1');
-		} catch {}
+		const key = `notif_digest_${sess.username}_${today}`;
+		if (localStorage.getItem(key)) return;
+		try { await sendEmail('digest'); localStorage.setItem(key, '1'); } catch {}
 	}
 
-	// ── Watch settings nav ────────────────────────────────────────────────────
+	// ── Patch populateSettings so our UI re-wires after each settings open ────
 
-	let settingsInited = false;
-
-	function watchSettingsNav() {
-		document.addEventListener('click', e => {
-			if (e.target.closest('[data-view="settings"]')) {
-				setTimeout(() => {
-					if (!settingsInited) { settingsInited = true; initNotifSettings(); }
-				}, 80);
-			}
-		});
-		const section = document.getElementById('view-settings');
-		if (section && window.MutationObserver) {
-			new MutationObserver(() => {
-				if (!section.classList.contains('hidden') && !settingsInited) {
-					settingsInited = true;
-					initNotifSettings();
-				}
-			}).observe(section, { attributes: true, attributeFilter: ['class'] });
-		}
+	function patchPopulateSettings() {
+		const orig = window.populateSettings;
+		if (typeof orig !== 'function' || orig._notifPatched) return;
+		window.populateSettings = function () {
+			orig.apply(this, arguments);
+			setTimeout(initNotifSettings, 0);
+		};
+		window.populateSettings._notifPatched = true;
 	}
 
-	// ── Init on load ──────────────────────────────────────────────────────────
+	// ── Init ──────────────────────────────────────────────────────────────────
 
 	async function init() {
-		watchSettingsNav();
-
-		// If settings already visible on load
-		const section = document.getElementById('view-settings');
-		if (section && !section.classList.contains('hidden')) {
-			settingsInited = true;
-			initNotifSettings();
+		if (typeof window.populateSettings === 'function') {
+			patchPopulateSettings();
+		} else {
+			document.addEventListener('DOMContentLoaded', patchPopulateSettings);
 		}
 
-		// On login: load prefs, start polling, maybe send digest
 		const prefs = await loadPrefs();
 		currentPrefs = prefs;
 		restartPoll(prefs);
 		await maybeSendDailyDigest(prefs);
+
+		const section = document.getElementById('view-settings');
+		if (section && !section.classList.contains('hidden')) initNotifSettings();
 	}
 
 	if (document.readyState === 'loading') {
@@ -313,4 +334,5 @@
 	} else {
 		init();
 	}
+
 })();
