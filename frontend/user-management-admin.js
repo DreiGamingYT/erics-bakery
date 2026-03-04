@@ -262,7 +262,7 @@
 				font-size: 13px;
 			}
 			.uma2-table thead tr {
-				background: var(--deep-navy, #1a2744);
+				background: var(--blue-700, #063da2);
 				color: #fff;
 			}
 			.uma2-table thead th {
@@ -651,11 +651,7 @@
 		}
 
 		wrap.innerHTML = `
-			<div class="uma2-hero">
-				<h2>User Management</h2>
-				<p>Manage all users in one place. Control access, assign roles, and monitor activity across your platform.</p>
-			</div>
-
+		
 			<div class="uma2-toolbar">
 				<div class="uma2-search-wrap">
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
