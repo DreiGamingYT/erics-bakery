@@ -279,6 +279,16 @@
             </div>
             <div class="card settings-grid">
               <div>
+                <style>
+                  .ntog{position:relative;display:inline-block;width:40px;height:22px;flex-shrink:0}
+                  .ntog input{opacity:0;width:0;height:0;position:absolute}
+                  .ntog-track{position:absolute;inset:0;border-radius:999px;background:rgba(0,0,0,.15);transition:background .2s;cursor:pointer}
+                  .ntog input:checked~.ntog-track{background:var(--accent,#1b85ec)}
+                  .ntog-track::after{content:'';position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .2s;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+                  .ntog input:checked~.ntog-track::after{transform:translateX(18px)}
+                  .nsub-row{display:flex;align-items:center;justify-content:space-between;font-size:13px;padding:3px 0}
+                  .nsub-row span{color:var(--text,#111)}
+                </style>
                 <div class="card" style="margin-bottom:12px">
                   <h3>Notifications</h3>
                   <div id="notifStatusBanner" style="display:none;margin-bottom:10px;padding:8px 10px;border-radius:8px;font-size:12px;font-weight:700"></div>
