@@ -2928,9 +2928,16 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
 			const used = (agg.raw || []).find(r => r.id === i.id);
 			const usedQty = used ? used.qty : 0;
 
-			return `<tr>
+			const isLowRow      = Number(i.qty || 0) <= Number(minVal || 0);
+			const isExpiringRow = String(i.type||'').toLowerCase()==='ingredient' && i.expiry && daysUntil(i.expiry)>=0 && daysUntil(i.expiry)<=30;
+			const rowBg  = (filter==='all' && isLowRow)     ? 'background:rgba(239,68,68,.07);'  :
+			               (filter==='all' && isExpiringRow) ? 'background:rgba(249,115,22,.07);' : '';
+			const rowTag = (filter==='all' && isLowRow)     ? ' <span style="font-size:10px;font-weight:800;color:#dc2626;background:rgba(239,68,68,.12);padding:2px 6px;border-radius:999px;margin-left:4px">Low</span>' :
+			               (filter==='all' && isExpiringRow) ? ' <span style="font-size:10px;font-weight:800;color:#ea580c;background:rgba(249,115,22,.12);padding:2px 6px;border-radius:999px;margin-left:4px">Expiring</span>' : '';
+
+			return `<tr style="${rowBg}">
         <td style="padding:8px;border:1px solid #eee">${i.id}</td>
-        <td style="padding:8px;border:1px solid #eee">${escapeHtml(i.name)}</td>
+        <td style="padding:8px;border:1px solid #eee">${escapeHtml(i.name)}${rowTag}</td>
         <td style="padding:8px;border:1px solid #eee;text-align:right">${+usedQty.toFixed(3)}</td>
         <td style="padding:8px;border:1px solid #eee;text-align:right">${+Number(i.qty || 0).toFixed(3)}</td>
         <td style="padding:8px;border:1px solid #eee">${escapeHtml(i.unit||'')}</td>
@@ -2947,7 +2954,16 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
           <div class="muted small">Period: ${start.toISOString().slice(0,10)} to ${end.toISOString().slice(0,10)} • Total used: ${+totalUsed.toFixed(3)} • Low items: ${lowCount} • Expiring: ${expiringCount} • Top used: ${best}</div>
         </div>
         <div id="summarybtns" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <select id="reportFilter" title="Filter report">
+          <label style="display:flex;align-items:center;gap:5px"><span class="small muted">From</span><input id="reportStart" type="date" value="${startInput || ''}" style="padding:5px 8px;border-radius:7px;border:1px solid rgba(0,0,0,.12);font-size:13px" /></label>
+          <label style="display:flex;align-items:center;gap:5px"><span class="small muted">To</span><input id="reportEnd" type="date" value="${endInput || ''}" style="padding:5px 8px;border-radius:7px;border:1px solid rgba(0,0,0,.12);font-size:13px" /></label>
+          <select id="reportPreset" style="padding:5px 8px;border-radius:7px;border:1px solid rgba(0,0,0,.12);font-size:13px">
+            <option value="7">Last 7 days</option>
+            <option value="14">Last 14 days</option>
+            <option value="30">Last 30 days</option>
+            <option value="90">Last 90 days</option>
+          </select>
+          <button id="applyReportRange" class="btn small" type="button">Apply</button>
+          <select id="reportFilter" title="Filter report" style="padding:5px 8px;border-radius:7px;border:1px solid rgba(0,0,0,.12);font-size:13px">
             <option value="all">All items</option>
             <option value="usage">Ingredient usage</option>
             <option value="low">Low stock</option>
@@ -2984,6 +3000,25 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
 		if (filterSel) {
 			filterSel.value = filter;
 			filterSel.onchange = () => renderReports(q('reportStart')?.value || null, q('reportEnd')?.value || null, filterSel.value);
+		}
+		// Wire the date range controls now that they live in the dynamic summary
+		const applyBtn = q('applyReportRange');
+		if (applyBtn) {
+			applyBtn.onclick = () => {
+				renderReports(q('reportStart')?.value || null, q('reportEnd')?.value || null, q('reportFilter')?.value || 'usage');
+				// notify reports-enhancements stock chart to re-render with new range
+				if (typeof window.__reportRangeChanged === 'function') window.__reportRangeChanged();
+			};
+		}
+		const presetSel = q('reportPreset');
+		if (presetSel) {
+			presetSel.onchange = () => {
+				// Clear manual dates so parseDateInputs() falls back to preset
+				const rStart = q('reportStart'); if (rStart) rStart.value = '';
+				const rEnd   = q('reportEnd');   if (rEnd)   rEnd.value   = '';
+				renderReports(null, null, q('reportFilter')?.value || 'usage');
+				if (typeof window.__reportRangeChanged === 'function') window.__reportRangeChanged();
+			};
 		}
 	}
 
@@ -5006,17 +5041,12 @@ function startApp() {
 	if (applyBtn) {
 		applyBtn.removeEventListener?.('click', () => {});
 		applyBtn.addEventListener('click', () => {
-			// Use manual date inputs if both are set; otherwise compute from preset
-			const manualStart = q('reportStart')?.value;
-			const manualEnd   = q('reportEnd')?.value;
-			if (!manualStart || !manualEnd) {
-				const presetDays = Number(q('reportPreset')?.value || 30);
-				const end   = new Date();
-				const start = new Date();
-				start.setDate(end.getDate() - (presetDays - 1));
-				if (q('reportStart')) q('reportStart').value = start.toISOString().slice(0, 10);
-				if (q('reportEnd'))   q('reportEnd').value   = end.toISOString().slice(0, 10);
-			}
+			const presetDays = Number(q('reportPreset')?.value || 30);
+			const end = new Date();
+			const start = new Date();
+			start.setDate(end.getDate() - (presetDays - 1));
+			q('reportStart').value = start.toISOString().slice(0, 10);
+			q('reportEnd').value = end.toISOString().slice(0, 10);
 			const filter = q('reportFilter')?.value || 'usage';
 			renderReports(q('reportStart').value, q('reportEnd').value, filter);
 			renderStockChart(q('reportStart').value, q('reportEnd').value);
@@ -8492,20 +8522,18 @@ async function populateUserMenu() {
 		}
 	}
 
-	// Update badge text
-	if (q('userBadgeText')) q('userBadgeText').textContent = s.name || s.username || 'User';
+	// Show the menu
+	if (userMenu) userMenu.classList.remove('hidden');
 
-	// Wire buttons (use the real function names that exist in this file)
+	// Wire buttons
 	const btnProfile = q('userMenuProfile');
 	if (btnProfile) btnProfile.onclick = () => {
-		populateProfile();
-		showView('profile');
-		if (userMenu) { userMenu.classList.add('hidden'); userMenu.setAttribute('aria-hidden', 'true'); }
+		showProfileModal(); // your existing profile modal function
 	};
 
 	const btnLogout = q('userMenuLogout');
 	if (btnLogout) btnLogout.onclick = () => {
-		performLogout();
+		logoutUser(); // your existing logout function
 	};
 }
 

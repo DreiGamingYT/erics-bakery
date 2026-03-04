@@ -42,79 +42,31 @@
 		renderList();
 	}
 
-	// ── Highlight helpers ─────────────────────────────────────────────────────
-	function isLowStock(it) {
-		const min = Number(it.min_qty || it.min || 0);
-		return Number(it.qty || 0) <= min;
-	}
-
-	function daysUntilExpiry(it) {
-		if (!it.expiry) return null;
-		const diff = new Date(it.expiry).getTime() - Date.now();
-		return Math.ceil(diff / (1000 * 60 * 60 * 24));
-	}
-
-	function isExpiringSoon(it) {
-		const d = daysUntilExpiry(it);
-		return d !== null && d >= 0 && d <= 7;
-	}
-
-	function getReportFilter() {
-		return document.getElementById('reportFilter')?.value || 'all';
-	}
-
-	// ── Inject highlight styles once ───────────────────────────────────────────
-	function injectHighlightStyles() {
-		if (document.getElementById('rpt-highlight-styles')) return;
-		const s = document.createElement('style');
-		s.id = 'rpt-highlight-styles';
-		s.textContent = `
-			.rpt-row-low     { background: rgba(239,68,68,.07)  !important; border-left: 3px solid #ef4444 !important; }
-			.rpt-row-expiring{ background: rgba(234,179,8,.09)  !important; border-left: 3px solid #eab308 !important; }
-			.rpt-row-both    { background: rgba(249,115,22,.09) !important; border-left: 3px solid #f97316 !important; }
-			.rpt-badge {
-				display: inline-block; font-size: 10px; font-weight: 700;
-				padding: 1px 6px; border-radius: 999px; margin-left: 5px; vertical-align: middle;
-			}
-			.rpt-badge-low      { background: rgba(239,68,68,.15); color: #dc2626; }
-			.rpt-badge-expiring { background: rgba(234,179,8,.18); color: #a16207; }
-		`;
-		document.head.appendChild(s);
-	}
-
 	function attachUIEvents() {
-		injectHighlightStyles();
-
 		if (searchInput) {
 			searchInput.addEventListener('input', () => renderList(searchInput.value.trim()));
 		}
 		if (exportInventoryBtn) exportInventoryBtn.addEventListener('click', exportIngredientsCSV);
 		if (exportStockBtn) exportStockBtn.addEventListener('click', exportSelectedStockCSV);
 
-		// Apply button — sync list, chart, and summary table
-		const applyBtn = document.getElementById('applyReportRange');
-		if (applyBtn) {
-			applyBtn.addEventListener('click', () => {
-				renderList(searchInput?.value.trim() || '');
-				renderStockForSelected();
+		// applyReportRange and reportPreset now live inside the dynamically re-rendered
+		// reportSummary, so use event delegation on the stable view-reports container.
+		const reportsSection = document.getElementById('view-reports');
+		if (reportsSection) {
+			reportsSection.addEventListener('click', (e) => {
+				if (e.target && e.target.id === 'applyReportRange') {
+					renderStockForSelected();
+				}
 			});
-		}
-
-		// Preset change
-		const preset = document.getElementById('reportPreset');
-		if (preset) {
-			preset.addEventListener('change', () => {
-				renderList(searchInput?.value.trim() || '');
-				renderStockForSelected();
-			});
-		}
-
-		// Delegated listener for reportFilter (injected dynamically by renderReports in app.js)
-		document.addEventListener('change', (e) => {
-			if (e.target && e.target.id === 'reportFilter') {
-				renderList(searchInput?.value.trim() || '');
-			}
+			reportsSection.addEventListener('change', (e) => {
+				if (e.target && e.target.id === 'reportPreset') {
+			renderStockForSelected();
+				}
 		});
+		}
+
+		// Allow app.js to notify reports-enhancements when the range changes
+		window.__reportRangeChanged = () => renderStockForSelected();
 	}
 
 	async function loadIngredients() {
@@ -139,106 +91,62 @@
 		}
 	}
 
-	function renderList(searchFilter = '') {
+	function renderList(filter = '') {
 		if (!listWrap) return;
-		const reportFilter = getReportFilter();
-
-		// Apply both search filter and report filter
 		const items = ingredientsCache.filter(it => {
-			// Search
-			if (searchFilter) {
-				const q = searchFilter.toLowerCase();
-				if (!(
-					(it.name || '').toLowerCase().includes(q) ||
-					(it.supplier || '').toLowerCase().includes(q) ||
-					(String(it.id || '')).includes(q)
-				)) return false;
-			}
-			// Report filter
-			if (reportFilter === 'low')      return isLowStock(it);
-			if (reportFilter === 'expiring') return isExpiringSoon(it);
-			// 'all' and 'usage' — show everything
-			return true;
+			if (!filter) return true;
+			const q = filter.toLowerCase();
+			return (it.name || '').toLowerCase().includes(q) || (it.supplier || '').toLowerCase().includes(q) || (String(it.id || '')).includes(q);
 		});
-
 		if (items.length === 0) {
 			listWrap.innerHTML = '<div class="muted small" style="padding:12px">No ingredients found.</div>';
 			return;
 		}
-
 		const el = document.createElement('div');
 		el.style.display = 'grid';
 		el.style.gap = '8px';
-
 		items.forEach(it => {
-			const low      = isLowStock(it);
-			const expiring = isExpiringSoon(it);
-			const shouldHighlight = reportFilter === 'all' || reportFilter === 'low' || reportFilter === 'expiring';
-
 			const row = document.createElement('div');
 			row.className = 'small-card';
-			row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px;transition:background .15s,border-left .15s;border-left:3px solid transparent;border-radius:8px;';
-
-			// Highlight class
-			if (shouldHighlight) {
-				if (low && expiring) row.classList.add('rpt-row-both');
-				else if (low)        row.classList.add('rpt-row-low');
-				else if (expiring)   row.classList.add('rpt-row-expiring');
-			}
-
+			row.style.display = 'flex';
+			row.style.justifyContent = 'space-between';
+			row.style.alignItems = 'center';
+			row.style.padding = '8px';
 			const left = document.createElement('div');
-			left.style.cssText = 'display:flex;flex-direction:column;gap:4px;flex:1;min-width:0;';
-
+			left.style.display = 'flex';
+			left.style.flexDirection = 'column';
+			left.style.gap = '4px';
 			const title = document.createElement('div');
 			title.style.fontWeight = '800';
 			title.textContent = `${it.name} ${it.unit ? '· '+it.unit : ''}`;
-
-			// Append status badges next to title
-			if (shouldHighlight) {
-				if (low) {
-					const b = document.createElement('span');
-					b.className = 'rpt-badge rpt-badge-low';
-					b.textContent = 'Low stock';
-					title.appendChild(b);
-				}
-				if (expiring) {
-					const d = daysUntilExpiry(it);
-					const b = document.createElement('span');
-					b.className = 'rpt-badge rpt-badge-expiring';
-					b.textContent = d === 0 ? 'Expires today' : `Expires in ${d}d`;
-					title.appendChild(b);
-				}
-			}
-
 			const meta = document.createElement('div');
 			meta.className = 'muted small';
 			meta.textContent = `Qty: ${it.qty} · Min: ${it.min_qty || 0} · Supplier: ${it.supplier || '—'}`;
-
 			left.appendChild(title);
 			left.appendChild(meta);
 
 			const actions = document.createElement('div');
-			actions.style.cssText = 'display:flex;gap:8px;flex-shrink:0;';
-
+			actions.style.display = 'flex';
+			actions.style.gap = '8px';
 			const viewBtn = document.createElement('button');
 			viewBtn.className = 'btn small';
 			viewBtn.type = 'button';
 			viewBtn.textContent = 'View stock';
-			viewBtn.addEventListener('click', () => selectIngredient(it));
-
+			viewBtn.addEventListener('click', () => {
+				selectIngredient(it);
+			});
 			const csvBtn = document.createElement('button');
 			csvBtn.className = 'btn ghost small';
 			csvBtn.type = 'button';
 			csvBtn.textContent = 'Export';
 			csvBtn.addEventListener('click', () => exportStockCSVForIngredient(it.id));
-
 			actions.appendChild(viewBtn);
 			actions.appendChild(csvBtn);
+
 			row.appendChild(left);
 			row.appendChild(actions);
 			el.appendChild(row);
 		});
-
 		listWrap.innerHTML = '';
 		listWrap.appendChild(el);
 	}

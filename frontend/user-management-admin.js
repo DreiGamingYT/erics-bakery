@@ -197,7 +197,7 @@
 				border: 1.5px solid var(--border, rgba(0,0,0,.1));
 				border-radius: 8px;
 				background: var(--blue-700, #063da2);
-				color: var(--text, #111);
+				color: #fff;
 				font-size: 13px;
 				font-weight: 600;
 				cursor: pointer;
