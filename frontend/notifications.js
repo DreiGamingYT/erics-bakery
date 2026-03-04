@@ -55,11 +55,10 @@
 
 	// ── Core alert checker ────────────────────────────────────────────────────
 
-	let lastAlertKey = '';
-	let pollTimer = null;
-	let currentPrefs = {};
-	// Tracks whether we already auto-emailed for the current low-stock/expiring set
-	let lastEmailKey = '';
+	let lastAlertKey  = '';
+	let lastEmailKey  = '';
+	let pollTimer     = null;
+	let currentPrefs  = {};
 
 	async function checkAndFireAlerts(prefs, opts = {}) {
 		const { forceRecheck = false } = opts;
@@ -68,15 +67,15 @@
 		try { alerts = await fetchAlerts(); } catch { return; }
 
 		const alertKey = JSON.stringify({
-			l: (alerts.lowStock || []).map(i => i.id).sort(),
-			e: (alerts.expiringSoon || []).map(i => i.id).sort()
+			l: (alerts.lowStock    || []).map(i => i.id).sort(),
+			e: (alerts.expiringSoon|| []).map(i => i.id).sort()
 		});
 
 		const isNewAlert = alertKey !== lastAlertKey;
 		if (!isNewAlert && !forceRecheck) return;
 		lastAlertKey = alertKey;
 
-		// ── Browser (in-app) push ─────────────────────────────────────────────
+		// Browser push
 		if (prefs.pushEnabled && permissionStatus() === 'granted') {
 			if (prefs.pushLowStock && alerts.lowStock?.length) {
 				const names = alerts.lowStock.slice(0, 3).map(i => i.name).join(', ');
@@ -96,14 +95,14 @@
 			}
 		}
 
-		// ── Auto email (only when alert set changes to avoid spam) ────────────
+		// Auto email — only when the alert set actually changes to avoid spam
 		if (prefs.emailEnabled && isNewAlert && alertKey !== lastEmailKey) {
 			lastEmailKey = alertKey;
 			if (prefs.emailLowStock && alerts.lowStock?.length) {
-				sendEmail('low_stock').catch(e => console.warn('[notif] auto low-stock email failed:', e.message));
+				sendEmail('low_stock').catch(e => console.warn('[notif] auto low-stock email:', e.message));
 			}
 			if (prefs.emailExpiring && alerts.expiringSoon?.length) {
-				sendEmail('expiring').catch(e => console.warn('[notif] auto expiry email failed:', e.message));
+				sendEmail('expiring').catch(e => console.warn('[notif] auto expiry email:', e.message));
 			}
 		}
 	}
@@ -111,30 +110,24 @@
 	function restartPoll(prefs) {
 		clearInterval(pollTimer);
 		if (!prefs.pushEnabled && !prefs.emailEnabled) return;
-		// Fire immediately then every 5 minutes
-		checkAndFireAlerts(prefs);
+		checkAndFireAlerts(prefs); // fire immediately on load / pref change
 		pollTimer = setInterval(() => checkAndFireAlerts(prefs), 5 * 60 * 1000);
 	}
 
-	// ── Fetch interceptor — trigger instant check on any stock update ─────────
+	// ── Fetch interceptor — instant check after any stock change ─────────────
 
 	const _origFetch = window.fetch.bind(window);
-	const STOCK_RE = /\/api\/ingredients\/\d+\/stock/;
+	const STOCK_RE   = /\/api\/ingredients\/\d+\/stock/;
 
 	window.fetch = async function (input, init) {
 		const url = typeof input === 'string' ? input : (input?.url || '');
 		const res = await _origFetch(input, init);
-
 		if (STOCK_RE.test(url) && res.ok) {
-			// Clone so the original response body is still readable by the caller
-			const resClone = res.clone();
-			resClone.json().then(() => {
-				// Reset lastAlertKey so even identical IDs fire again if qty changed
-				lastAlertKey = '';
+			res.clone().json().then(() => {
+				lastAlertKey = ''; // force recheck even if same items
 				checkAndFireAlerts(currentPrefs, { forceRecheck: true });
 			}).catch(() => {});
 		}
-
 		return res;
 	};
 
@@ -147,8 +140,10 @@
 		if (!el) return;
 		el.textContent = msg;
 		el.style.display = 'block';
-		el.style.background = type === 'error' ? 'rgba(239,68,68,.1)' : type === 'success' ? 'rgba(34,197,94,.1)' : 'rgba(99,102,241,.1)';
-		el.style.color      = type === 'error' ? '#dc2626'            : type === 'success' ? '#15803d'            : '#4338ca';
+		el.style.background = type === 'error'   ? 'rgba(239,68,68,.1)'  :
+		                      type === 'success'  ? 'rgba(34,197,94,.1)'  : 'rgba(99,102,241,.1)';
+		el.style.color      = type === 'error'   ? '#dc2626'              :
+		                      type === 'success'  ? '#15803d'              : '#4338ca';
 		clearTimeout(el._t);
 		el._t = setTimeout(() => el.style.display = 'none', 4500);
 	}
@@ -157,7 +152,7 @@
 		const el = q('pushPermStatus');
 		if (!el) return;
 		const p = permissionStatus();
-		if (p === 'granted')          { el.textContent = '✅ Browser permission granted';               el.style.color = '#15803d'; }
+		if      (p === 'granted')     { el.textContent = '✅ Browser permission granted';               el.style.color = '#15803d'; }
 		else if (p === 'denied')      { el.textContent = '🚫 Blocked — allow in browser site settings'; el.style.color = '#dc2626'; }
 		else if (p === 'unsupported') { el.textContent = '⚠️ Browser does not support notifications';   el.style.color = '#d97706'; }
 		else                          { el.textContent = 'Permission not yet granted — enable the toggle to request'; el.style.color = 'var(--muted,#888)'; }
@@ -197,19 +192,18 @@
 	// ── Settings UI wiring ────────────────────────────────────────────────────
 
 	async function initNotifSettings() {
-		const saveBtn      = q('saveNotifPrefs');
-		const pushToggle   = q('prefPushNotif');
-		const emailToggle  = q('prefEmailNotif');
-		const testPushBtn  = q('testPushNotif');
-		const testEmailBtn = q('testEmailNotif');
+		const saveBtn     = q('saveNotifPrefs');
+		const pushToggle  = q('prefPushNotif');
+		const emailToggle = q('prefEmailNotif');
 
 		if (!saveBtn || saveBtn._notifWired) return;
 		saveBtn._notifWired = true;
 
+		// Always pull latest from server when settings opens
 		currentPrefs = await loadPrefs();
 		applyPrefsToUI(currentPrefs);
 
-		// Push master toggle
+		// Push master toggle — request browser permission on enable
 		pushToggle?.addEventListener('change', async (e) => {
 			if (e.target.checked) {
 				const perm = await requestPermission();
@@ -223,15 +217,15 @@
 			syncSubOptions(prefsFromUI());
 		});
 
-		// Email master toggle
 		emailToggle?.addEventListener('change', () => syncSubOptions(prefsFromUI()));
 
-		// Save
+		// Save button — persist to DB and restart poll immediately
 		saveBtn.addEventListener('click', async () => {
 			saveBtn.disabled = true;
 			saveBtn.textContent = 'Saving…';
 			try {
 				let prefs = prefsFromUI();
+				// Re-check permission if push is being enabled
 				if (prefs.pushEnabled && permissionStatus() !== 'granted') {
 					const perm = await requestPermission();
 					updatePermUI();
@@ -244,50 +238,20 @@
 				await savePrefs(prefs);
 				currentPrefs = prefs;
 				syncSubOptions(prefs);
-				// Reset keys so the next check fires fresh with the new prefs
 				lastAlertKey = '';
 				lastEmailKey = '';
 				restartPoll(prefs);
-				setBanner('Notification preferences saved!', 'success');
+				setBanner('Preferences saved!', 'success');
 			} catch (err) {
 				setBanner(`Save failed: ${err.message}`, 'error');
 			} finally {
 				saveBtn.disabled = false;
-				saveBtn.textContent = 'Save notification preferences';
-			}
-		});
-
-		// Test push
-		testPushBtn?.addEventListener('click', async () => {
-			testPushBtn.disabled = true;
-			try {
-				const perm = await requestPermission();
-				updatePermUI();
-				if (perm !== 'granted') { setBanner('Browser permission not granted.', 'error'); return; }
-				showBrowserNotif('🍞 Test notification', 'In-app notifications are working correctly!');
-				setBanner('Test notification fired — check your browser!', 'success');
-			} finally {
-				testPushBtn.disabled = false;
-			}
-		});
-
-		// Test email
-		testEmailBtn?.addEventListener('click', async () => {
-			testEmailBtn.disabled = true;
-			testEmailBtn.textContent = 'Sending…';
-			try {
-				const data = await sendEmail('test');
-				setBanner(data.sent ? `✅ Test email sent to ${data.to}` : 'Skipped', 'success');
-			} catch (err) {
-				setBanner(`❌ ${err.message}`, 'error');
-			} finally {
-				testEmailBtn.disabled = false;
-				testEmailBtn.textContent = 'Test';
+				saveBtn.textContent = 'Save preferences';
 			}
 		});
 	}
 
-	// ── Daily digest ──────────────────────────────────────────────────────────
+	// ── Daily digest (once per day on login) ──────────────────────────────────
 
 	async function maybeSendDailyDigest(prefs) {
 		if (!prefs.emailEnabled || !prefs.emailDigest) return;
@@ -299,7 +263,7 @@
 		try { await sendEmail('digest'); localStorage.setItem(key, '1'); } catch {}
 	}
 
-	// ── Patch populateSettings so our UI re-wires after each settings open ────
+	// ── Patch populateSettings to re-wire after each settings open ────────────
 
 	function patchPopulateSettings() {
 		const orig = window.populateSettings;
@@ -311,20 +275,25 @@
 		window.populateSettings._notifPatched = true;
 	}
 
-	// ── Init ──────────────────────────────────────────────────────────────────
+	// ── Init: runs on every page load ─────────────────────────────────────────
 
 	async function init() {
+		// Wire into populateSettings as early as possible
 		if (typeof window.populateSettings === 'function') {
 			patchPopulateSettings();
 		} else {
 			document.addEventListener('DOMContentLoaded', patchPopulateSettings);
 		}
 
+		// Load prefs from DB and immediately start polling / sending alerts
+		// This is the key fix: prefs load and poll start on every page refresh
+		// without needing the settings tab to be opened first.
 		const prefs = await loadPrefs();
 		currentPrefs = prefs;
-		restartPoll(prefs);
+		restartPoll(prefs);           // fires check immediately + starts interval
 		await maybeSendDailyDigest(prefs);
 
+		// Wire settings UI if the settings view is already visible on load
 		const section = document.getElementById('view-settings');
 		if (section && !section.classList.contains('hidden')) initNotifSettings();
 	}
