@@ -375,7 +375,13 @@ app.get('/api/admin/users', authMiddleware, async (req, res) => {
 	}
 	try {
 		const [rows] = await pool.query(
-			'SELECT id, username, role, name, email, phone, created_at FROM users ORDER BY created_at ASC'
+			`SELECT u.id, u.username, u.role, u.name, u.email, u.phone, u.created_at,
+				CASE WHEN s.user_id IS NOT NULL THEN 1 ELSE 0 END AS is_online
+			 FROM users u
+			 LEFT JOIN (
+				 SELECT DISTINCT user_id FROM user_sessions WHERE logged_out_at IS NULL
+			 ) s ON s.user_id = u.id
+			 ORDER BY u.created_at ASC`
 		);
 		return res.json({ users: rows });
 	} catch (err) {

@@ -347,16 +347,24 @@
 				border-radius: 50%;
 				flex-shrink: 0;
 			}
-			.uma2-badge-active    { background: rgba(34,197,94,.12);  color: #15803d; }
-			.uma2-badge-active::before    { background: #22c55e; }
-			.uma2-badge-inactive  { background: rgba(148,163,184,.15); color: #64748b; }
-			.uma2-badge-inactive::before  { background: #94a3b8; }
-			.uma2-badge-banned    { background: rgba(239,68,68,.12); color: #dc2626; }
-			.uma2-badge-banned::before    { background: #ef4444; }
-			.uma2-badge-pending   { background: rgba(30,41,59,.12);  color: #1e293b; }
-			.uma2-badge-pending::before   { background: #1e293b; }
-			.uma2-badge-suspended { background: rgba(249,115,22,.12); color: #ea580c; }
-			.uma2-badge-suspended::before { background: #f97316; }
+			.uma2-badge-online  { background: rgba(34,197,94,.12);  color: #15803d; }
+			.uma2-badge-online::before  { background: #22c55e; animation: uma2-pulse 1.8s ease-in-out infinite; }
+			.uma2-badge-offline { background: rgba(148,163,184,.15); color: #64748b; }
+			.uma2-badge-offline::before { background: #94a3b8; }
+			@keyframes uma2-pulse {
+				0%, 100% { opacity: 1; transform: scale(1); }
+				50%       { opacity: .5; transform: scale(1.3); }
+			}
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
 
 			/* Actions */
 			.uma2-actions-cell { display: flex; gap: 6px; align-items: center; }
@@ -480,22 +488,16 @@
 	let rowsPerPage = 10;
 	let searchQ     = '';
 	let filterRole  = '';
-	let filterStatus= '';
-	let selected    = new Set();
+		let selected    = new Set();
 
 	// ── Status badge ──────────────────────────────────────────────────────────
 
 	function statusKey(user) {
-		const s = String(user.status || user.active || '').toLowerCase();
-		if (s === 'banned')    return 'banned';
-		if (s === 'inactive' || s === 'false' || s === '0') return 'inactive';
-		if (s === 'pending')   return 'pending';
-		if (s === 'suspended') return 'suspended';
-		return 'active';
+		return (user.is_online === 1 || user.is_online === true || user.is_online === '1') ? 'online' : 'offline';
 	}
 
 	function statusLabel(key) {
-		return key.charAt(0).toUpperCase() + key.slice(1);
+		return key === 'online' ? 'Online' : 'Offline';
 	}
 
 	function statusBadge(user) {
@@ -513,10 +515,7 @@
 				if (!hay.includes(q)) return false;
 			}
 			if (filterRole && String(u.role||'').toLowerCase() !== filterRole.toLowerCase()) return false;
-			if (filterStatus) {
-				if (statusKey(u) !== filterStatus) return false;
-			}
-			return true;
+				return true;
 		});
 
 		if (sortCol) {
@@ -567,7 +566,6 @@
 
 		// Build unique role list for filter
 		const roles = [...new Set(allUsers.map(u => u.role).filter(Boolean))];
-		const statuses = ['active','inactive','banned','pending','suspended'];
 
 		// Table rows
 		let rowsHtml = '';
@@ -677,19 +675,6 @@
 					</div>
 				</div>
 
-				<div style="position:relative">
-					<button class="uma2-filter-btn ${filterStatus ? 'active' : ''}" id="uma2StatusBtn">
-						<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
-						${filterStatus ? statusLabel(filterStatus) : 'Status'}
-						<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
-					</button>
-					<div class="uma2-dropdown hidden" id="uma2StatusDrop">
-						<div class="uma2-drop-item ${!filterStatus?'selected':''}" data-status="">All statuses</div>
-						<div class="uma2-drop-sep"></div>
-						${statuses.map(s => `<div class="uma2-drop-item ${filterStatus===s?'selected':''}" data-status="${s}">${statusLabel(s)}</div>`).join('')}
-					</div>
-				</div>
-
 				<div class="uma2-spacer"></div>
 
 				<button class="uma2-btn-export" id="uma2ExportBtn">
@@ -751,12 +736,12 @@
 		}
 
 		// Dropdowns toggle
-		['uma2RoleBtn', 'uma2StatusBtn'].forEach(id => {
+		['uma2RoleBtn'].forEach(id => {
 			const btn = wrap.querySelector(`#${id}`);
 			if (!btn) return;
 			btn.addEventListener('click', (e) => {
 				e.stopPropagation();
-				const dropId = id === 'uma2RoleBtn' ? 'uma2RoleDrop' : 'uma2StatusDrop';
+				const dropId = 'uma2RoleDrop';
 				const drop = wrap.querySelector(`#${dropId}`);
 				if (!drop) return;
 				const isHidden = drop.classList.contains('hidden');
@@ -774,16 +759,6 @@
 			item.addEventListener('click', (e) => {
 				e.stopPropagation();
 				filterRole = item.dataset.role;
-				applyFilters();
-				render();
-			});
-		});
-
-		// Status filter
-		wrap.querySelectorAll('#uma2StatusDrop .uma2-drop-item').forEach(item => {
-			item.addEventListener('click', (e) => {
-				e.stopPropagation();
-				filterStatus = item.dataset.status;
 				applyFilters();
 				render();
 			});
@@ -893,7 +868,7 @@
 		const rows = [['ID','Full Name','Username','Email','Role','Status','Joined']];
 		filtered.forEach(u => rows.push([
 			u.id, u.name||u.username, u.username, u.email||'',
-			u.role||'', statusKey(u), u.created_at||''
+			u.role||'', statusLabel(statusKey(u)), u.created_at||''
 		]));
 		const csv = '\uFEFF' + rows.map(r => r.map(csvCell).join(',')).join('\r\n');
 		const a   = document.createElement('a');
