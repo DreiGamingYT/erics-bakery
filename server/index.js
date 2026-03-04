@@ -375,23 +375,21 @@ app.put('/api/users/me', authMiddleware, async (req, res) => {
 	}
 });
 
-app.post('/api/auth/logout', authMiddleware, async (req, res) => {
-	// Close the open session row in user_sessions
-	if (req.user && req.user.id) {
-		(async () => {
-			try {
-				// Close the most recent open session for this user
-				await pool.query(
-					`UPDATE user_sessions
-					 SET logged_out_at = CURRENT_TIMESTAMP
-					 WHERE user_id = ? AND logged_out_at IS NULL
-					 ORDER BY logged_in_at DESC
-					 LIMIT 1`,
-					[req.user.id]
-				);
-			} catch (e) { console.warn('[sessions] logout update failed', e && e.message); }
-		})();
-	}
+app.post('/api/auth/logout', async (req, res) => {
+	// Always clear the cookie — logout must never require a valid token.
+	// Try to record the session end if the token is still readable (non-blocking).
+	try {
+		const token = req.cookies[TOKEN_NAME] || (req.headers.authorization?.split(' ')[1]);
+		if (token) {
+			const data = jwt.verify(token, JWT_SECRET);
+			if (data && data.id) {
+				pool.query(
+					`UPDATE user_sessions SET logged_out_at = CURRENT_TIMESTAMP WHERE user_id = ? AND logged_out_at IS NULL ORDER BY logged_in_at DESC LIMIT 1`,
+					[data.id]
+				).catch(e => console.warn('[sessions] logout update failed', e && e.message));
+			}
+		}
+	} catch {} // expired / missing token — that's fine, just clear the cookie
 	res.clearCookie(TOKEN_NAME, { httpOnly: true });
 	res.json({ ok: true });
 });
