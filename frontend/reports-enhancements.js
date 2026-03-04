@@ -128,7 +128,16 @@
 			csvBtn.className = 'btn ghost small';
 			csvBtn.type = 'button';
 			csvBtn.textContent = 'Export';
-			csvBtn.addEventListener('click', () => exportStockCSVForIngredient(it.id));
+			csvBtn.addEventListener('click', async () => {
+				csvBtn.disabled = true;
+				csvBtn.textContent = 'Exporting…';
+				try {
+					await exportStockCSVForIngredient(it.id, it);
+				} finally {
+					csvBtn.disabled = false;
+					csvBtn.textContent = 'Export';
+				}
+			});
 			actions.appendChild(viewBtn);
 			actions.appendChild(csvBtn);
 
@@ -290,15 +299,19 @@
 		downloadCSV([headers].concat(rows), `inventory_${new Date().toISOString().slice(0,10)}.csv`);
 	}
 
-	function exportSelectedStockCSV() {
+	async function exportSelectedStockCSV() {
 		if (!selectedIngredient) {
 			alert('Select an ingredient first to export stock history');
 			return;
 		}
-		exportStockCSVForIngredient(selectedIngredient.id);
+		await exportStockCSVForIngredient(selectedIngredient.id, selectedIngredient);
 	}
 
-	function exportStockCSVForIngredient(id) {
+	async function exportStockCSVForIngredient(id, ingredientObj) {
+		// Ensure activity data is loaded before filtering
+		if (!activityCache || activityCache.length === 0) {
+			await loadActivity();
+		}
 		const {
 			start,
 			end
@@ -308,7 +321,10 @@
 			['time', 'action', 'text']
 		];
 		rows.forEach(r => csvRows.push([r.time, r.action || '', r.text || '']));
-		downloadCSV(csvRows, `${(selectedIngredient && selectedIngredient.name ? selectedIngredient.name.replace(/\s+/g,'_') : 'ingredient')}_stock_${start}_to_${end}.csv`);
+		// Use the passed ingredient object first, then selectedIngredient, then fall back to cache lookup
+		const ing = ingredientObj || selectedIngredient || ingredientsCache.find(x => Number(x.id) === Number(id));
+		const safeName = ing && ing.name ? ing.name.replace(/\s+/g, '_') : `ingredient_${id}`;
+		downloadCSV(csvRows, `${safeName}_stock_${start}_to_${end}.csv`);
 	}
 
 	function sanitizeCellValue(v) {
