@@ -151,6 +151,24 @@
 		return 'uma-role-default';
 	}
 
+    function updateUsersNav() {
+    const navBtn = document.querySelector('[data-view="users"]');
+    if (!navBtn) return;
+        try {
+            // show only if current session is owner or admin
+            if (isAdminOrOwner()) {
+            navBtn.style.display = '';
+            navBtn.removeAttribute('aria-hidden');
+            } else {
+            navBtn.style.display = 'none';
+            navBtn.setAttribute('aria-hidden', 'true');
+            }
+        } catch (e) {
+            navBtn.style.display = 'none';
+            navBtn.setAttribute('aria-hidden', 'true');
+        }
+    }
+
 	// ── Render panel ──────────────────────────────────────────────────────────
 
 	async function renderAdminPanel() {
@@ -407,17 +425,27 @@
 	}
 
 	function init() {
-		watchNav();
-		const section = document.getElementById('view-users');
-		if (section && !section.classList.contains('hidden')) tryRender();
-		// backwards compatibility: if usersPanel exists already (rendered earlier), ensure it renders
-		const existingPanel = document.getElementById('usersPanel') || document.getElementById('usersList');
-		if (existingPanel && !existingPanel.closest('.hidden')) tryRender();
-	}
+  watchNav();
 
-	if (document.readyState === 'loading') {
-		document.addEventListener('DOMContentLoaded', init);
-	} else {
-		init();
-	}
-})();
+  // existing render logic (keeps current behaviour)
+  const section = document.getElementById('view-users');
+  if (section && !section.classList.contains('hidden')) tryRender();
+  const existingPanel = document.getElementById('usersPanel') || document.getElementById('usersList');
+  if (existingPanel && !existingPanel.closest('.hidden')) tryRender();
+
+  // run once now to hide/show the Users nav item
+  updateUsersNav();
+
+  // keep it responsive to SPA-style auth changes:
+  // If your app changes session without page reload, dispatch `window.dispatchEvent(new Event('sessionchange'))`
+  // after login/logout to force UI update.
+  window.addEventListener('sessionchange', updateUsersNav);
+
+  // also ensure after DOMContentLoaded it runs (defensive)
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', updateUsersNav);
+  } else {
+    setTimeout(updateUsersNav, 0);
+  }
+}}
+)();
