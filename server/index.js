@@ -3,7 +3,6 @@ const path = require('path');
 const express = require('express');
 const pool = require('./db');
 const bcrypt = require('bcryptjs');
-const rateLimit = require('express-rate-limit');
 
 const {
 	promisify
@@ -74,30 +73,7 @@ const _rawFrom = (process.env.EMAIL_FROM || '').trim();
 const _fromHasPlaceholder = _rawFrom.includes('archlinux@google.com') || !_rawFrom;
 const EMAIL_FROM = (!_fromHasPlaceholder ? _rawFrom : `"Eric's Bakery" <${SMTP_USER}>`);
 
-// FIX #2 — Rate limiting on sensitive auth endpoints
-const loginLimiter = rateLimit({
-	windowMs: 15 * 60 * 1000,    // 15-minute window
-	max: 10,                       // max 10 attempts per window per IP
-	standardHeaders: true,
-	legacyHeaders: false,
-	message: { message: 'Too many login attempts. Please try again in 15 minutes.' }
-});
 
-const signupLimiter = rateLimit({
-	windowMs: 60 * 60 * 1000,    // 1-hour window
-	max: 5,                        // max 5 accounts per hour per IP
-	standardHeaders: true,
-	legacyHeaders: false,
-	message: { message: 'Too many accounts created from this IP. Please try again later.' }
-});
-
-const forgotLimiter = rateLimit({
-	windowMs: 60 * 60 * 1000,    // 1-hour window
-	max: 5,                        // max 5 reset requests per hour per IP
-	standardHeaders: true,
-	legacyHeaders: false,
-	message: { message: 'Too many password reset requests. Please try again in an hour.' }
-});
 
 app.all(['/api/products', '/api/products/*', '/api/product', '/api/product/*', '/api/orders', '/api/orders/*', '/api/order', '/api/order/*'], (req, res) => {
 	return res.status(404).json({
@@ -173,7 +149,7 @@ if (process.env.MAIL_HOST && process.env.MAIL_USER && process.env.MAIL_PASS) {
 	});
 }
 
-app.post('/api/auth/signup', signupLimiter, async (req, res) => {
+app.post('/api/auth/signup', async (req, res) => {
 	try {
 		const {
 			username,
@@ -216,7 +192,7 @@ app.post('/api/auth/signup', signupLimiter, async (req, res) => {
 	}
 });
 
-app.post('/api/auth/login', loginLimiter, async (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
 	try {
 		const {
 			username,
@@ -241,19 +217,17 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
 
 		res.cookie(TOKEN_NAME, token, buildCookieOptions());
 
-		// Record session start in user_sessions
-		(async () => {
+		// Record session start in user_sessions (non-blocking, best-effort)
+		setImmediate(async () => {
 			try {
 				const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || null;
 				const ua = req.headers['user-agent']?.slice(0, 255) || null;
-				const [result] = await pool.query(
+				await pool.query(
 					'INSERT INTO user_sessions (user_id, ip_address, user_agent) VALUES (?, ?, ?)',
 					[user.id, ip, ua]
 				);
-				// Pass session id back via a short-lived header so logout can close it
-				res.setHeader('X-Session-Row-Id', String(result.insertId));
 			} catch (e) { console.warn('[sessions] login insert failed', e && e.message); }
-		})();
+		});
 
 		return res.json({
 			user: {
@@ -938,7 +912,7 @@ app.get('/api/ingredients/export/csv', authMiddleware, async (req, res) => {
 	}
 });
 
-app.post('/api/auth/forgot', forgotLimiter, async (req, res) => {
+app.post('/api/auth/forgot', async (req, res) => {
 	try {
 		const emailOrUsername = (req.body && (req.body.email || '')).toString().trim();
 		if (!emailOrUsername) return res.status(400).json({
@@ -996,7 +970,7 @@ app.post('/api/auth/forgot', forgotLimiter, async (req, res) => {
 	}
 });
 
-app.post('/api/auth/forgot/verify', forgotLimiter, async (req, res) => {
+app.post('/api/auth/forgot/verify', async (req, res) => {
 	try {
 		const email = (req.body && (req.body.email || '')).trim();
 		const code = (req.body && (req.body.code || '')).trim();
@@ -1040,7 +1014,7 @@ app.post('/api/auth/forgot/verify', forgotLimiter, async (req, res) => {
 	}
 });
 
-app.post('/api/auth/forgot/reset', forgotLimiter, async (req, res) => {
+app.post('/api/auth/forgot/reset', async (req, res) => {
 	try {
 		const email = (req.body && (req.body.email || '')).trim();
 		const code = (req.body && (req.body.code || '')).trim();
@@ -1426,27 +1400,12 @@ app.post('/api/notifications/send-email', authMiddleware, async (req, res) => {
 
 // ── Ensure user_sessions table exists before accepting traffic
 // ── Ensure user_sessions table exists before accepting traffic ─────────────
-async function ensureNotifPrefsColumn() {
+// ── Run all startup DB migrations using a SINGLE pooled connection ──────────
+async function runStartupMigrations() {
+	const conn = await pool.getConnection();
 	try {
-		// Check if column exists first (works on all MySQL/MariaDB versions)
-		const [cols] = await pool.query(
-			`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-			 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'notif_prefs'`
-		);
-		if (cols.length === 0) {
-			await pool.query(`ALTER TABLE users ADD COLUMN notif_prefs JSON DEFAULT NULL`);
-			console.log('[startup] notif_prefs column created');
-		} else {
-			console.log('[startup] notif_prefs column already exists');
-		}
-	} catch (err) {
-		console.error('[startup] notif_prefs column error:', err && err.message ? err.message : err);
-	}
-}
-
-async function ensureUserSessionsTable() {
-	try {
-		await pool.query(`
+		// 1. user_sessions table
+		await conn.query(`
 			CREATE TABLE IF NOT EXISTS user_sessions (
 				id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
 				user_id       INT NOT NULL,
@@ -1459,11 +1418,21 @@ async function ensureUserSessionsTable() {
 			)
 		`);
 		console.log('[startup] user_sessions table ready');
+
+		// 2. notif_prefs column (ER_DUP_FIELDNAME = already exists, safe to ignore)
+		try {
+			await conn.query(`ALTER TABLE users ADD COLUMN notif_prefs JSON DEFAULT NULL`);
+			console.log('[startup] notif_prefs column added');
+		} catch (e) {
+			if (e.code !== 'ER_DUP_FIELDNAME') console.warn('[startup] notif_prefs:', e.message);
+		}
 	} catch (err) {
-		console.error('[startup] failed to create user_sessions table:', err && err.message ? err.message : err);
+		console.error('[startup] migration error:', err && err.message ? err.message : err);
+	} finally {
+		conn.release();
 	}
 }
 
-Promise.all([ensureUserSessionsTable(), ensureNotifPrefsColumn()]).then(() => {
+runStartupMigrations().then(() => {
 	app.listen(PORT, () => console.log('API + static server listening on', PORT));
 });
