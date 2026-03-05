@@ -214,42 +214,8 @@
               </div>
             </div>
             <div class="card" style="margin-top:12px">
-              <div class="summary-toolbar">
-                <h3 style="margin:0;white-space:nowrap">Summary</h3>
-                <div class="summary-controls">
-                  <div class="sum-ctrl-group">
-                    <label class="sum-ctrl-label">From</label>
-                    <input id="reportStart" type="date" class="sum-ctrl-input" />
-                  </div>
-                  <div class="sum-ctrl-group">
-                    <label class="sum-ctrl-label">To</label>
-                    <input id="reportEnd" type="date" class="sum-ctrl-input" />
-                  </div>
-                  <div class="sum-ctrl-group">
-                    <label class="sum-ctrl-label">Quick range</label>
-                    <select id="reportPreset" class="sum-ctrl-select">
-                      <option value="7">Last 7 days</option>
-                      <option value="30" selected>Last 30 days</option>
-                      <option value="60">Last 60 days</option>
-                      <option value="90">Last 90 days</option>
-                      <option value="180">Last 6 months</option>
-                      <option value="365">Last year</option>
-                    </select>
-                  </div>
-                  <div class="sum-ctrl-group">
-                    <label class="sum-ctrl-label">Category</label>
-                    <select id="reportFilter" class="sum-ctrl-select">
-                      <option value="all">All items</option>
-                      <option value="usage">Ingredient usage</option>
-                      <option value="low">Low stock</option>
-                      <option value="expiring">Expiring</option>
-                    </select>
-                  </div>
-                  <button id="applyReportRange" class="btn small primary sum-ctrl-btn" type="button"><i class="fa fa-rotate-right"></i> Apply</button>
-                  <button id="exportReportsCsvBtn" class="btn small sum-ctrl-btn" type="button"><i class="fa fa-download"></i> Export CSV</button>
-                </div>
-              </div>
-              <div id="reportSummary" style="margin-top:14px"></div>
+              <h3>Summary</h3>
+              <div id="reportSummary" class="muted small" style="margin-top:8px"></div>
             </div>
           </section>
           <section id="view-activity" class="view hidden">
