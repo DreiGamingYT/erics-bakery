@@ -3735,6 +3735,303 @@ function printInventoryTable() {
 let currentCalendarYear = (new Date()).getFullYear();
 let currentCalendarMonth = (new Date()).getMonth();
 
+/* ================================================================
+   SCHEDULING ENGINE  (localStorage-backed)
+   ================================================================ */
+const SCHED_KEY = 'bakery_schedules_v1';
+
+function getAllSchedules() {
+	try { return JSON.parse(localStorage.getItem(SCHED_KEY) || '[]'); } catch(e) { return []; }
+}
+function saveAllSchedules(arr) {
+	localStorage.setItem(SCHED_KEY, JSON.stringify(arr));
+}
+function getSchedulesForDate(dateStr) {
+	return getAllSchedules().filter(s => s.date === dateStr);
+}
+function addSchedule(sched) {
+	const all = getAllSchedules();
+	sched.id = Date.now() + '_' + Math.random().toString(36).slice(2);
+	sched.createdAt = new Date().toISOString();
+	sched.notified  = false;
+	all.push(sched);
+	saveAllSchedules(all);
+	return sched;
+}
+function deleteSchedule(id) {
+	saveAllSchedules(getAllSchedules().filter(s => s.id !== id));
+}
+
+/* ── Reminder checker — runs every 30 s ── */
+function checkScheduleReminders() {
+	const now      = new Date();
+	const todayStr = now.toISOString().slice(0, 10);
+	const all      = getAllSchedules();
+	let changed    = false;
+	all.forEach(s => {
+		if (s.notified || s.date !== todayStr || !s.time) return;
+		const [hh, mm] = (s.time || '00:00').split(':').map(Number);
+		const target   = new Date(now); target.setHours(hh, mm, 0, 0);
+		const diff     = target - now;            // ms until scheduled time
+		if (diff <= 0 && diff > -120000) {        // within 2-min window after
+			s.notified = true; changed = true;
+			pushInAppNotif({
+				type: 'reminder',
+				title: `🔔 Reminder: ${s.title}`,
+				sub:   s.note || `Scheduled at ${s.time}`,
+				icon:  'fa-bell',
+			});
+			if (typeof notify === 'function') notify(`🔔 ${s.title}`);
+		}
+	});
+	if (changed) saveAllSchedules(all);
+}
+setInterval(checkScheduleReminders, 30000);
+document.addEventListener('DOMContentLoaded', () => setTimeout(checkScheduleReminders, 2000));
+
+/* ── Open schedule modal for a date ── */
+function openScheduleModal(dateStr) {
+	const scheds = getSchedulesForDate(dateStr);
+	const displayDate = new Date(dateStr + 'T00:00:00').toLocaleDateString(undefined, {
+		weekday:'long', month:'long', day:'numeric', year:'numeric'
+	});
+
+	const listHtml = scheds.length
+		? scheds.map(s => `
+			<div class="sched-modal-item" style="display:flex;align-items:center;gap:8px;border-bottom:1px solid rgba(0,0,0,0.05)">
+				<div style="flex:1;min-width:0">
+					<div style="font-weight:700;font-size:13px">${escapeHtml(s.title)}</div>
+					${s.time ? `<div class="muted small"><i class="fa fa-clock" style="margin-right:3px;opacity:.6"></i>${escapeHtml(s.time)}</div>` : ''}
+					${s.note ? `<div class="muted small">${escapeHtml(s.note)}</div>` : ''}
+				</div>
+				<button class="btn small danger sched-delete-btn" data-id="${s.id}" type="button" title="Remove"><i class="fa fa-trash"></i></button>
+			</div>`).join('')
+		: `<div class="muted small" style="padding:8px 0 12px">No schedules yet for this day.</div>`;
+
+	if (typeof openModalHTML === 'function') {
+		openModalHTML(`
+			<div style="padding:4px">
+				<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+					<i class="fa fa-calendar-check" style="color:var(--accent);font-size:18px"></i>
+					<h3 style="margin:0;font-size:15px">${escapeHtml(displayDate)}</h3>
+				</div>
+				<div id="schedModalList" style="margin-bottom:16px">${listHtml}</div>
+				<div style="background:var(--surface,#f6f7fb);border-radius:10px;padding:12px">
+					<div style="font-weight:800;font-size:13px;margin-bottom:10px"><i class="fa fa-plus" style="margin-right:5px;opacity:.7"></i>Add new schedule</div>
+					<label class="field"><span class="field-label">Title <span style="color:#e11d6a">*</span></span><input id="newSchedTitle" type="text" placeholder="e.g. Bread baking batch" /></label>
+					<label class="field" style="margin-top:6px"><span class="field-label">Time</span><input id="newSchedTime" type="time" /></label>
+					<label class="field" style="margin-top:6px"><span class="field-label">Note</span><input id="newSchedNote" type="text" placeholder="Optional note…" /></label>
+					<div style="display:flex;gap:8px;margin-top:12px">
+						<button id="saveSchedBtn" class="btn primary small" type="button"><i class="fa fa-check" style="margin-right:4px"></i>Add Schedule</button>
+						<button id="closeSchedBtn" class="btn ghost small" type="button">Close</button>
+					</div>
+				</div>
+			</div>
+		`);
+	}
+
+	document.querySelectorAll('.sched-delete-btn').forEach(btn => {
+		btn.addEventListener('click', e => {
+			e.stopPropagation();
+			if (!confirm('Remove this schedule?')) return;
+			deleteSchedule(btn.dataset.id);
+			pushInAppNotif({ type: 'info', title: 'Schedule removed', sub: displayDate, icon: 'fa-calendar-xmark' });
+			closeModal();
+			refreshCalendarCell(dateStr);
+		});
+	});
+
+	const saveBtn = document.getElementById('saveSchedBtn');
+	if (saveBtn) {
+		saveBtn.addEventListener('click', () => {
+			const title = (document.getElementById('newSchedTitle')?.value || '').trim();
+			if (!title) { if (typeof notify === 'function') notify('Title is required'); return; }
+			const time  = document.getElementById('newSchedTime')?.value  || '';
+			const note  = (document.getElementById('newSchedNote')?.value || '').trim();
+			addSchedule({ date: dateStr, title, time, note });
+			pushInAppNotif({
+				type:  'schedule',
+				title: `Scheduled: ${title}`,
+				sub:   displayDate + (time ? ' at ' + time : ''),
+				icon:  'fa-calendar-plus',
+			});
+			if (typeof notify === 'function') notify(`Schedule added`);
+			closeModal();
+			refreshCalendarCell(dateStr);
+		});
+	}
+	const closeBtn = document.getElementById('closeSchedBtn');
+	if (closeBtn) closeBtn.addEventListener('click', closeModal);
+}
+
+/* ── Refresh just one cell after schedule change ── */
+function refreshCalendarCell(dateStr) {
+	document.querySelectorAll(`.calendar-cell[data-date="${dateStr}"]`).forEach(cell => {
+		renderScheduleChipsInCell(cell, dateStr);
+	});
+}
+
+/* ── Render schedule chips inside a cell ── */
+const CAL_SHOW_MAX = 2;   // show first 2 items, then "+N more"
+
+function renderScheduleChipsInCell(cell, dateStr) {
+	cell.querySelectorAll('.sched-chip, .cal-more-pill, .cell-add-btn, .sched-section').forEach(el => el.remove());
+	const scheds = getSchedulesForDate(dateStr);
+
+	// Quick-add "+" button (appears on hover via CSS)
+	const addBtn = document.createElement('button');
+	addBtn.className = 'cell-add-btn';
+	addBtn.title = 'Add schedule';
+	addBtn.innerHTML = '<i class="fa fa-plus" style="font-size:10px"></i>';
+	addBtn.addEventListener('click', e => { e.stopPropagation(); openScheduleModal(dateStr); });
+	cell.appendChild(addBtn);
+
+	if (!scheds.length) return;
+
+	const section = document.createElement('div');
+	section.className = 'sched-section';
+	section.style.cssText = 'display:flex;flex-direction:column;gap:3px;margin-top:3px;width:100%';
+
+	scheds.slice(0, CAL_SHOW_MAX).forEach(s => {
+		const chip = document.createElement('div');
+		chip.className = 'sched-chip';
+		chip.innerHTML = `<i class="fa fa-clock" style="font-size:9px;opacity:.6;flex-shrink:0"></i><span style="overflow:hidden;text-overflow:ellipsis">${escapeHtml(s.title)}</span>${s.time ? `<span class="sched-chip-time">${escapeHtml(s.time)}</span>` : ''}`;
+		chip.title = s.title + (s.note ? ' — ' + s.note : '');
+		chip.addEventListener('click', e => { e.stopPropagation(); openScheduleModal(dateStr); });
+		section.appendChild(chip);
+	});
+
+	if (scheds.length > CAL_SHOW_MAX) {
+		const pill = document.createElement('button');
+		pill.className = 'cal-more-pill';
+		pill.type = 'button';
+		pill.textContent = `+${scheds.length - CAL_SHOW_MAX} more`;
+		pill.addEventListener('click', e => { e.stopPropagation(); openScheduleModal(dateStr); });
+		section.appendChild(pill);
+	}
+
+	cell.appendChild(section);
+}
+
+/* ── Apply today highlight to a cell ── */
+function applyTodayHighlight(cell, dateStr) {
+	const todayStr = new Date().toISOString().slice(0, 10);
+	if (dateStr === todayStr) cell.classList.add('is-today');
+}
+
+/* ================================================================
+   IN-APP NOTIFICATION PANEL
+   Integrates with notifications.js alerts; also used by schedule system
+   ================================================================ */
+const INAPP_KEY     = 'bakery_inapp_notifs_v1';
+const INAPP_MAX     = 50;
+let   _notifPanelOpen = false;
+
+function _getNotifs()     { try { return JSON.parse(localStorage.getItem(INAPP_KEY) || '[]'); } catch(e) { return []; } }
+function _saveNotifs(arr) { localStorage.setItem(INAPP_KEY, JSON.stringify(arr.slice(0, INAPP_MAX))); }
+
+function pushInAppNotif({ type = 'info', title = '', sub = '', icon = 'fa-bell' }) {
+	const n = { id: Date.now() + '_' + Math.random().toString(36).slice(2), type, title, sub, icon, time: new Date().toISOString(), read: false };
+	_saveNotifs([n, ..._getNotifs()]);
+	_renderNotifPanel();
+}
+window.pushInAppNotif = pushInAppNotif;   // expose for notifications.js
+
+function _relTime(iso) {
+	const diff = Date.now() - new Date(iso).getTime();
+	const m = Math.floor(diff / 60000);
+	if (m < 1)  return 'just now';
+	if (m < 60) return `${m}m ago`;
+	const h = Math.floor(m / 60);
+	if (h < 24) return `${h}h ago`;
+	return `${Math.floor(h / 24)}d ago`;
+}
+
+function _iconClass(type) {
+	return ({ schedule:'notif-icon--schedule', reminder:'notif-icon--reminder',
+	          alert:'notif-icon--alert', info:'notif-icon--info' })[type] || 'notif-icon--info';
+}
+
+function _renderNotifPanel() {
+	const list  = document.getElementById('notifList');
+	const empty = document.getElementById('notifEmpty');
+	const badge = document.getElementById('notifBadge');
+	if (!list) return;
+
+	const notifs = _getNotifs();
+	const unread = notifs.filter(n => !n.read).length;
+
+	// badge
+	if (badge) {
+		if (unread > 0) {
+			badge.textContent = unread > 99 ? '99+' : unread;
+			badge.style.display = 'block';
+		} else {
+			badge.style.display = 'none';
+		}
+	}
+
+	// list
+	if (!notifs.length) {
+		list.innerHTML = '';
+		if (empty) empty.style.display = 'block';
+		return;
+	}
+	if (empty) empty.style.display = 'none';
+
+	list.innerHTML = notifs.map(n => `
+		<li class="notif-item${n.read ? '' : ' unread'}" data-id="${n.id}">
+			<div class="notif-icon ${_iconClass(n.type)}"><i class="fa ${escapeHtml(n.icon)}"></i></div>
+			<div class="notif-item-body">
+				<div class="notif-item-title">${escapeHtml(n.title)}</div>
+				${n.sub ? `<div class="notif-item-sub">${escapeHtml(n.sub)}</div>` : ''}
+			</div>
+			<div class="notif-item-time">${_relTime(n.time)}</div>
+		</li>`).join('');
+}
+
+function _initNotifBell() {
+	const btn   = document.getElementById('notifBellBtn');
+	const panel = document.getElementById('notifPanel');
+	const clear = document.getElementById('notifClearAll');
+	if (!btn || !panel) return;
+
+	btn.addEventListener('click', e => {
+		e.stopPropagation();
+		_notifPanelOpen = !_notifPanelOpen;
+		panel.style.display = _notifPanelOpen ? 'block' : 'none';
+		btn.setAttribute('aria-expanded', _notifPanelOpen);
+		if (_notifPanelOpen) {
+			// mark all read
+			const notifs = _getNotifs().map(n => ({ ...n, read: true }));
+			_saveNotifs(notifs);
+			_renderNotifPanel();
+		}
+	});
+
+	document.addEventListener('click', e => {
+		if (_notifPanelOpen && !document.getElementById('notifBellWrap')?.contains(e.target)) {
+			_notifPanelOpen = false;
+			panel.style.display = 'none';
+			btn.setAttribute('aria-expanded', 'false');
+		}
+	});
+
+	if (clear) {
+		clear.addEventListener('click', e => {
+			e.stopPropagation();
+			_saveNotifs([]);
+			_renderNotifPanel();
+		});
+	}
+
+	// Re-render every 60 s to keep relative timestamps fresh
+	setInterval(_renderNotifPanel, 60000);
+	_renderNotifPanel();
+}
+
+document.addEventListener('DOMContentLoaded', _initNotifBell);
+
 function isAgendaMode() {
 	return window.matchMedia('(max-width: 640px)').matches;
 }
@@ -3746,14 +4043,13 @@ async function renderCalendarForMonth(year, month) {
 	grid.innerHTML = '';
 
 	const isMobile = window.matchMedia && window.matchMedia('(max-width:640px)').matches;
+	const todayStr = new Date().toISOString().slice(0, 10);
 
 	const first = new Date(year, month, 1);
-	const last = new Date(year, month + 1, 0);
-	const daysInMonth = last.getDate();
-	const startWeekday = first.getDay();
-
+	const last  = new Date(year, month + 1, 0);
+	const daysInMonth   = last.getDate();
+	const startWeekday  = first.getDay();
 	const pad = n => String(n).padStart(2, '0');
-
 	const totalCells = isAgendaMode() ? daysInMonth : 42;
 
 	const cells = [];
@@ -3761,149 +4057,132 @@ async function renderCalendarForMonth(year, month) {
 		const dayIndex = i - startWeekday + 1;
 		const cell = document.createElement('div');
 		cell.className = 'calendar-cell';
-		cell.style.minHeight = '72px';
-		cell.style.padding = '8px';
-		cell.style.boxSizing = 'border-box';
+		cell.style.minHeight   = '80px';
+		cell.style.padding     = '8px';
+		cell.style.boxSizing   = 'border-box';
 		cell.style.borderRadius = '8px';
-		cell.style.background = 'var(--card, #fff)';
-		cell.style.border = '1px solid rgba(0,0,0,0.04)';
-		cell.style.cursor = 'pointer';
-		cell.style.display = 'flex';
+		cell.style.background  = 'var(--card, #fff)';
+		cell.style.border      = '1px solid rgba(0,0,0,0.04)';
+		cell.style.cursor      = 'pointer';
+		cell.style.display     = 'flex';
 		cell.style.flexDirection = 'column';
-		cell.style.justifyContent = 'flex-start';
-		cell.style.alignItems = 'flex-start';
-		cell.style.overflow = 'hidden';
+		cell.style.overflow    = 'hidden';
 
 		if (dayIndex >= 1 && dayIndex <= daysInMonth) {
 			const date = new Date(year, month, dayIndex);
-			const iso = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+			const iso  = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 			cell.dataset.date = iso;
 
 			const dateNum = document.createElement('div');
-			dateNum.className = 'date-num';
+			dateNum.className   = 'date-num';
 			dateNum.textContent = dayIndex;
-			dateNum.style.fontWeight = '800';
-			dateNum.style.marginBottom = '6px';
 			cell.appendChild(dateNum);
 
 			const eventListWrap = document.createElement('div');
 			eventListWrap.className = 'calendar-events';
-			eventListWrap.id = 'event';
-			eventListWrap.style.display = 'flex';
-			eventListWrap.style.flexDirection = 'column';
-			eventListWrap.style.gap = '6px';
-			eventListWrap.style.marginTop = '4px';
-			eventListWrap.style.width = '100%';
-			eventListWrap.style.flex = '1 1 auto';
-			eventListWrap.style.overflow = 'hidden';
+			eventListWrap.style.cssText = 'display:flex;flex-direction:column;gap:3px;margin-top:4px;width:100%;overflow:hidden;flex:1 1 auto';
 			cell.appendChild(eventListWrap);
+
+			// Today ring
+			if (iso === todayStr) cell.classList.add('is-today');
 		} else {
-			cell.style.visibility = 'hidden';
+			cell.style.visibility    = 'hidden';
 			cell.style.pointerEvents = 'none';
 		}
 		grid.appendChild(cell);
 		cells.push(cell);
 	}
 
-	function showDayEventsModal(dateIso, items, bottom = false) {
-		let html = `<h3>Events — ${new Date(dateIso).toLocaleDateString()}</h3>`;
+	// ── Shared day-events modal ──
+	function showDayEventsModal(dateIso, items) {
+		const displayDate = new Date(dateIso + 'T00:00:00').toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric' });
+		let html = `<div style="padding:4px">
+			<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+				<i class="fa fa-calendar-day" style="color:var(--accent);font-size:18px"></i>
+				<h3 style="margin:0;font-size:15px">${escapeHtml(displayDate)}</h3>
+			</div>`;
+
 		if (!items || items.length === 0) {
-			html += `<div class="muted small" style="padding:12px">No events for ${dateIso}</div>`;
+			html += `<div class="muted small" style="padding:8px 0">No activity for this day.</div>`;
 		} else {
-			html += `<div style="max-height:60vh;overflow:auto;margin-top:8px">`;
+			html += `<div style="max-height:52vh;overflow-y:auto">`;
 			html += items.map(it => {
-				const time = it.time ? new Date(it.time).toLocaleString() : '';
-				const who = it.username ? escapeHtml(it.username) : (it.user_id ? `User ${escapeHtml(String(it.user_id))}` : 'system');
-				const ing = it.ingredient_name ? `<div><strong>Ingredient:</strong> ${escapeHtml(it.ingredient_name)}</div>` : '';
-				const action = it.action ? `<div><strong>Action:</strong> ${escapeHtml(it.action)}</div>` : '';
-				return `<div style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06);margin-bottom:6px">
-                  <div style="font-weight:800">${escapeHtml(it.text || '').slice(0,120)}</div>
+				const time   = it.time ? new Date(it.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
+				const who    = it.username ? escapeHtml(it.username) : (it.user_id ? `User ${escapeHtml(String(it.user_id))}` : 'system');
+				const ing    = it.ingredient_name ? `<div style="font-size:12px"><strong>Item:</strong> ${escapeHtml(it.ingredient_name)}</div>` : '';
+				const action = it.action ? `<span style="font-size:10px;font-weight:800;text-transform:uppercase;opacity:.7">${escapeHtml(it.action)}</span> ` : '';
+				return `<div style="padding:8px 0;border-bottom:1px solid rgba(0,0,0,0.05)">
+					<div style="font-weight:700;font-size:13px">${action}${escapeHtml((it.text||'').slice(0,120))}</div>
                   ${ing}
-                  ${action}
-                  <div class="muted small" style="margin-top:6px">By: ${who} • ${escapeHtml(time)}</div>
+					<div class="muted small" style="margin-top:4px">By ${who}${time ? ' · ' + time : ''}</div>
                 </div>`;
 			}).join('');
 			html += `</div>`;
 		}
-		html += `<div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end"><button class="btn ghost" id="closeDayEvents" type="button">Close</button></div>`;
+		// Schedule section inside modal
+		const scheds = getSchedulesForDate(dateIso);
+		if (scheds.length) {
+			html += `<div style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(0,0,0,0.07)">
+				<div style="font-weight:800;font-size:12px;text-transform:uppercase;opacity:.6;margin-bottom:8px">Schedules</div>`;
+			html += scheds.map(s => `<div style="display:flex;gap:6px;align-items:center;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.04)">
+				<i class="fa fa-clock" style="color:var(--accent);opacity:.7;font-size:11px"></i>
+				<span style="font-weight:700;font-size:13px">${escapeHtml(s.title)}</span>
+				${s.time ? `<span class="muted small">${escapeHtml(s.time)}</span>` : ''}
+			</div>`).join('');
+			html += `</div>`;
+		}
+		html += `<div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
+			<button class="btn small primary" id="modalAddSched" type="button"><i class="fa fa-plus" style="margin-right:4px"></i>Add Schedule</button>
+			<button class="btn ghost small" id="closeDayEvents" type="button">Close</button>
+		</div></div>`;
 
 		openModalHTML(html);
 
-		const modalCard = document.querySelector('.modal-card');
-		if (!modalCard) return;
-
-		modalCard.classList.remove('modal-bottom-sheet');
-		modalCard.classList.add('modal-enter');
-
-		modalCard.style = '';
-
-		if (bottom) {
-			modalCard.classList.add('modal-bottom-sheet');
-		}
-
-		modalCard.offsetHeight;
-
-		requestAnimationFrame(() => {
-			modalCard.classList.remove('modal-enter');
-		});
-
-		q('closeDayEvents')?.addEventListener('click', () => {
-
-			const modalCard = document.querySelector('.modal-card');
-			if (modalCard) {
-				modalCard.classList.remove('modal-bottom-sheet');
-				modalCard.style = '';
-				modalCard.style.right = '';
-				modalCard.style.bottom = '';
-				modalCard.style.top = '';
-				modalCard.style.maxHeight = '';
-				modalCard.style.borderRadius = '';
-				modalCard.style.overflow = '';
-				modalCard.style.boxShadow = '';
-			}
-			closeModal();
-		}, {
-			once: true
-		});
+		document.getElementById('closeDayEvents')?.addEventListener('click', closeModal, { once: true });
+		document.getElementById('modalAddSched')?.addEventListener('click', () => { closeModal(); openScheduleModal(dateIso); });
 	}
 
+	// ── Fetch activity events per cell ──
 	const dayCells = Array.from(grid.querySelectorAll('.calendar-cell[data-date]'));
 	await Promise.all(dayCells.map(async (cell) => {
 		const d = cell.dataset.date;
 		try {
-			const res = await (typeof apiFetch === 'function' ?
-				apiFetch(`/api/events?date=${d}`) :
-				fetch(`/api/events?date=${d}`, {
-					credentials: 'include'
-				}).then(r => r.json()));
-
+			const res   = await (typeof apiFetch === 'function'
+				? apiFetch(`/api/events?date=${d}`)
+				: fetch(`/api/events?date=${d}`, { credentials:'include' }).then(r => r.json()));
 			const items = Array.isArray(res) ? res : ((res && res.items) ? res.items : []);
 			const listWrap = cell.querySelector('.calendar-events');
+			if (!listWrap) return;
 
-			if (items.length > 0 && listWrap) {
-				const btn = document.createElement('button');
-				btn.className = 'btn small';
-				btn.type = 'button';
-				btn.style.width = '100%';
-				btn.setAttribute('aria-expanded', 'false');
-				btn.textContent = `Expand (${items.length})`;
-				btn.addEventListener('click', (e) => {
-					e.stopPropagation();
+			// Show first CAL_SHOW_MAX items as chips, then "+N more" pill
+			const visItems = items.slice(0, CAL_SHOW_MAX);
+			const extra    = items.length - visItems.length;
 
-					showDayEventsModal(d, items, isMobile);
-					btn.setAttribute('aria-expanded', 'true');
-				});
-				listWrap.appendChild(btn);
+			visItems.forEach(it => {
+				const chip = document.createElement('div');
+				chip.className   = 'event-chip';
+				chip.textContent = (it.action || it.text || '').slice(0, 38);
+				chip.title       = it.text || '';
+				listWrap.appendChild(chip);
+			});
+
+			if (extra > 0) {
+				const pill = document.createElement('button');
+				pill.className   = 'cal-more-pill';
+				pill.type        = 'button';
+				pill.textContent = `+${extra} more`;
+				pill.addEventListener('click', e => { e.stopPropagation(); showDayEventsModal(d, items); });
+				listWrap.appendChild(pill);
 			}
 
-			cell.addEventListener('click', (e) => {
-				e.stopPropagation();
-				showDayEventsModal(d, items, isMobile);
-			});
+			cell.addEventListener('click', e => { e.stopPropagation(); showDayEventsModal(d, items); });
 
 		} catch (err) {
 			console.warn('calendar fetch day err', d, err);
 		}
+
+		// Render schedule chips after activity chips
+		renderScheduleChipsInCell(cell, d);
 	}));
 }
 
@@ -4099,105 +4378,148 @@ function renderCalendar() {
 				openDayEvents(dStr, cellDate);
 			});
 
-			cell.setAttribute('data-date', toYYYYMMDD(cellDate));
+			const dStr = toYYYYMMDD(cellDate);
+			cell.setAttribute('data-date', dStr);
+
+			// Today ring
+			if (dStr === new Date().toISOString().slice(0, 10)) cell.classList.add('is-today');
+
 			calendarGrid.appendChild(cell);
 		}
 
 		prefetchMonthEvents(year, month);
+
+		// Render schedule chips after grid is built
+		calendarGrid.querySelectorAll('.calendar-cell[data-date]').forEach(c => {
+			renderScheduleChipsInCell(c, c.dataset.date);
+		});
 	}
 
 	async function prefetchMonthEvents(year, month) {
-
+		const todayStr = new Date().toISOString().slice(0, 10);
 		const days = new Date(year, month + 1, 0).getDate();
 		for (let d = 1; d <= days; d++) {
 			const dateObj = new Date(year, month, d);
 			const dateStr = toYYYYMMDD(dateObj);
 
-			fetch(`/api/events?date=${dateStr}`, {
-					credentials: 'include'
-				})
+			fetch(`/api/events?date=${dateStr}`, { credentials: 'include' })
 				.then(r => r.json())
 				.then(payload => {
 					if (!payload || !Array.isArray(payload.items)) return;
-					const items = payload.items.slice(0, 2);
-
-					const cell = calendarGrid.querySelector(`[data-date="${dateStr}"]`);
+					const items    = payload.items;
+					const cell     = calendarGrid.querySelector(`[data-date="${dateStr}"]`);
 					if (!cell) return;
-					const eventsCont = cell.querySelector('.day-events');
-					eventsCont.innerHTML = '';
-					for (const it of items) {
-						const chip = document.createElement('div');
-						chip.className = 'event-chip';
-						const who = it.username || (it.user_id ? `user:${it.user_id}` : 'unknown');
 
-						const txt = it.action ? `${it.action}` : (it.text || '');
-						chip.textContent = `${txt}`.slice(0, 40);
+					// Today ring
+					if (dateStr === todayStr) cell.classList.add('is-today');
+
+					const eventsCont = cell.querySelector('.day-events');
+					if (!eventsCont) return;
+					eventsCont.innerHTML = '';
+
+					// First CAL_SHOW_MAX chips, then "+N more" pill
+					const visItems = items.slice(0, CAL_SHOW_MAX);
+					const extra    = items.length - visItems.length;
+
+					visItems.forEach(it => {
+						const chip = document.createElement('div');
+						chip.className   = 'event-chip';
+						chip.textContent = (it.action || it.text || '').slice(0, 38);
+						chip.title       = it.text || '';
 						eventsCont.appendChild(chip);
+					});
+
+					if (extra > 0) {
+						const pill = document.createElement('button');
+						pill.className   = 'cal-more-pill';
+						pill.type        = 'button';
+						pill.textContent = `+${extra} more`;
+						pill.addEventListener('click', e => { e.stopPropagation(); openDayEvents(dateStr, dateObj); });
+						eventsCont.appendChild(pill);
 					}
+
+					// Schedule chips below activity chips
+					renderScheduleChipsInCell(cell, dateStr);
 				})
-				.catch(() => {});
+				.catch(() => {
+					// Still render schedule chips even if events fail
+					const cell = calendarGrid.querySelector(`[data-date="${dateStr}"]`);
+					if (cell) renderScheduleChipsInCell(cell, dateStr);
+				});
 		}
 	}
 
 	async function openDayEvents(dateStr, dateObj) {
-
 		try {
-			const res = await fetch(`/api/events?date=${dateStr}`, {
-				credentials: 'include'
-			});
-			if (!res.ok) {
-				const text = await res.text().catch(() => 'Server error');
-				return showModal(`Could not load events: ${text}`);
-			}
-			const data = await res.json();
+			const res = await fetch(`/api/events?date=${dateStr}`, { credentials: 'include' });
+			if (!res.ok) { const t = await res.text().catch(() => 'Server error'); return showModal(`Could not load events: ${t}`); }
+			const data  = await res.json();
 			const items = data.items || [];
 
+			const displayDate = dateObj.toLocaleDateString('en-US', { timeZone, weekday:'long', month:'long', day:'numeric' });
+
 			const content = document.createElement('div');
-			content.style.padding = '12px';
+			content.style.padding = '4px';
+
+			// Header
+			const hRow = document.createElement('div');
+			hRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:14px';
+			hRow.innerHTML = `<i class="fa fa-calendar-day" style="color:var(--accent);font-size:18px"></i>`;
 			const h = document.createElement('h3');
-			h.textContent = `Events — ${dateObj.toLocaleDateString('en-US', { timeZone })}`;
-			h.style.margin = '0 0 8px 0';
-			content.appendChild(h);
+			h.textContent = displayDate;
+			h.style.cssText = 'margin:0;font-size:15px';
+			hRow.appendChild(h);
+			content.appendChild(hRow);
 
 			if (items.length === 0) {
 				const p = document.createElement('div');
-				p.className = 'muted small';
-				p.textContent = 'No events';
+				p.className   = 'muted small';
+				p.textContent = 'No activity for this day.';
 				content.appendChild(p);
 			} else {
+				const listWrap = document.createElement('div');
+				listWrap.style.cssText = 'max-height:52vh;overflow-y:auto';
 				for (const it of items) {
 					const wrap = document.createElement('div');
-					wrap.style.padding = '8px';
-					wrap.style.borderBottom = '1px solid rgba(0,0,0,0.06)';
-					const titleLine = document.createElement('div');
-					titleLine.style.fontWeight = '800';
-					titleLine.style.marginBottom = '6px';
-					const who = (it.username && it.username !== 'unknown') ? it.username : (it.user_id ? `User ${it.user_id}` : 'unknown');
-					titleLine.textContent = `${it.action ? it.action : 'Activity'} — By: ${who}`;
-					wrap.appendChild(titleLine);
-
-					if (it.ingredient_name) {
-						const ing = document.createElement('div');
-						ing.innerHTML = `<strong>Ingredient:</strong> ${escapeHtml(it.ingredient_name)}`;
-						wrap.appendChild(ing);
-					}
-					if (it.time) {
-						const when = document.createElement('div');
-						const dt = new Date(it.time);
-						when.className = 'muted small';
-						when.textContent = `${dt.toLocaleString('en-US', { timeZone })}`;
-						wrap.appendChild(when);
-					}
-					const text = document.createElement('div');
-					text.style.marginTop = '6px';
-					text.textContent = it.text || '';
-					wrap.appendChild(text);
-
-					content.appendChild(wrap);
+					wrap.style.cssText = 'padding:8px 0;border-bottom:1px solid rgba(0,0,0,0.05)';
+					const who    = (it.username && it.username !== 'unknown') ? it.username : (it.user_id ? `User ${it.user_id}` : 'unknown');
+					const action = it.action ? `<span style="font-size:10px;font-weight:800;text-transform:uppercase;opacity:.7">${escapeHtml(it.action)} </span>` : '';
+					const time   = it.time ? new Date(it.time).toLocaleTimeString('en-US', { timeZone, hour:'2-digit', minute:'2-digit' }) : '';
+					wrap.innerHTML = `
+						<div style="font-weight:700;font-size:13px">${action}${escapeHtml(it.text || '')}</div>
+						${it.ingredient_name ? `<div style="font-size:12px"><strong>Item:</strong> ${escapeHtml(it.ingredient_name)}</div>` : ''}
+						<div class="muted small" style="margin-top:4px">By ${escapeHtml(who)}${time ? ' · ' + time : ''}</div>`;
+					listWrap.appendChild(wrap);
 				}
+				content.appendChild(listWrap);
+					}
+
+			// Schedule section
+			const scheds = getSchedulesForDate(dateStr);
+			if (scheds.length) {
+				const schedDiv = document.createElement('div');
+				schedDiv.style.cssText = 'margin-top:14px;padding-top:12px;border-top:1px solid rgba(0,0,0,0.07)';
+				schedDiv.innerHTML = `<div style="font-weight:800;font-size:11px;text-transform:uppercase;opacity:.6;margin-bottom:8px">Schedules</div>`
+					+ scheds.map(s => `<div style="display:flex;gap:6px;align-items:center;padding:5px 0;border-bottom:1px solid rgba(0,0,0,0.04)">
+						<i class="fa fa-clock" style="color:var(--accent);opacity:.7;font-size:11px"></i>
+						<span style="font-weight:700;font-size:13px">${escapeHtml(s.title)}</span>
+						${s.time ? `<span class="muted small">${escapeHtml(s.time)}</span>` : ''}
+					</div>`).join('');
+				content.appendChild(schedDiv);
 			}
 
+			// Actions
+			const actions = document.createElement('div');
+			actions.style.cssText = 'display:flex;gap:8px;margin-top:14px;justify-content:flex-end';
+			actions.innerHTML = `<button class="btn small primary" id="ddAddSched" type="button"><i class="fa fa-plus" style="margin-right:4px"></i>Add Schedule</button>
+				<button class="btn ghost small" id="ddClose" type="button">Close</button>`;
+			content.appendChild(actions);
+
 			showModalElement(content);
+
+			document.getElementById('ddClose')?.addEventListener('click', closeModal, { once: true });
+			document.getElementById('ddAddSched')?.addEventListener('click', () => { closeModal(); openScheduleModal(dateStr); });
+
 		} catch (err) {
 			console.error('openDayEvents err', err);
 			showModal('Failed to load events');
@@ -5099,6 +5421,11 @@ function startApp() {
 		currentCalendarYear = now.getFullYear();
 		currentCalendarMonth = now.getMonth();
 		renderCalendar();
+	});
+
+	on('addScheduleBtn', 'click', () => {
+		const todayStr = new Date().toISOString().slice(0, 10);
+		openScheduleModal(todayStr);
 	});
 
 	const hb = q('hamburger');
