@@ -82,6 +82,9 @@
 					`⚠️ Low stock — ${alerts.lowStock.length} item${alerts.lowStock.length > 1 ? 's' : ''}`,
 					`${names}${more} need restocking`
 				);
+				if (typeof window.pushInAppNotif === 'function') {
+					window.pushInAppNotif({ type:'alert', title:`Low stock: ${alerts.lowStock.length} item${alerts.lowStock.length>1?'s':''}`, sub:`${names}${more}`, icon:'fa-triangle-exclamation' });
+				}
 			}
 			if (prefs.pushExpiring && alerts.expiringSoon?.length) {
 				const names = alerts.expiringSoon.slice(0, 3).map(i => i.name).join(', ');
@@ -90,6 +93,9 @@
 					`🕐 Expiring soon — ${alerts.expiringSoon.length} item${alerts.expiringSoon.length > 1 ? 's' : ''}`,
 					`${names}${more} expire within 7 days`
 				);
+				if (typeof window.pushInAppNotif === 'function') {
+					window.pushInAppNotif({ type:'alert', title:`Expiring soon: ${alerts.expiringSoon.length} item${alerts.expiringSoon.length>1?'s':''}`, sub:`${names}${more}`, icon:'fa-clock' });
+				}
 			}
 		}
 
