@@ -700,6 +700,19 @@ const ACCOUNTS_KEY = 'bakery_accounts';
 const SESSION_KEY = 'bakery_session';
 const THEME_KEY = 'bakery_theme';
 
+// Apply theme early to avoid FOUC
+(function() {
+	const _t = localStorage.getItem('bakery_theme') || 'light';
+	const _darkIds = ['dark','forest','sunset','ocean','mocha','charcoal'];
+	const _all = ['theme-dark','theme-forest','theme-sunset','theme-ocean','theme-lavender','theme-rose','theme-mocha','theme-mint','theme-charcoal','theme-is-dark'];
+	document.documentElement.classList.remove(..._all);
+	if (_t === 'dark') document.documentElement.classList.add('theme-dark', 'theme-is-dark');
+	else if (_t !== 'light') {
+		document.documentElement.classList.add('theme-' + _t);
+		if (_darkIds.includes(_t)) document.documentElement.classList.add('theme-is-dark');
+	}
+})();
+
 function q(id) {
 	return document.getElementById(id) || null;
 }
@@ -1365,54 +1378,62 @@ function openResetPasswordModal(email = '', code = '') {
 	});
 }
 
+/* ── Color palette definitions ── */
+const COLOR_PALETTES = [
+	{ id: 'light',     label: 'Sky',      bg: '#eeeeee', accent: '#1b85ec', dark: false },
+	{ id: 'dark',      label: 'Night',    bg: '#06101a', accent: '#ffb366', dark: true  },
+	{ id: 'forest',    label: 'Forest',   bg: '#0b1a10', accent: '#3ecf6f', dark: true  },
+	{ id: 'sunset',    label: 'Sunset',   bg: '#1a0d0a', accent: '#f5824e', dark: true  },
+	{ id: 'ocean',     label: 'Ocean',    bg: '#071b26', accent: '#00c8dc', dark: true  },
+	{ id: 'lavender',  label: 'Lavender', bg: '#f0ecff', accent: '#7c3aed', dark: false },
+	{ id: 'rose',      label: 'Rose',     bg: '#fff0f3', accent: '#e11d6a', dark: false },
+	{ id: 'mocha',     label: 'Mocha',    bg: '#18110d', accent: '#c98a58', dark: true  },
+	{ id: 'mint',      label: 'Mint',     bg: '#edfaf5', accent: '#059669', dark: false },
+	{ id: 'charcoal',  label: 'Charcoal', bg: '#111214', accent: '#a0aec0', dark: true  },
+];
+
+const ALL_THEME_CLASSES = COLOR_PALETTES.map(p => p.id === 'light' ? null : (p.id === 'dark' ? 'theme-dark' : `theme-${p.id}`)).filter(Boolean);
+
 function applyTheme(theme) {
 	localStorage.setItem(THEME_KEY, theme);
-	document.documentElement.classList.remove('theme-dark', 'theme-custom');
-	const prevStyle = document.getElementById('custom-color-vars');
-	if (prevStyle) prevStyle.remove();
-
+	// Remove all theme classes, then apply the right one
+	document.documentElement.classList.remove(...ALL_THEME_CLASSES, 'theme-is-dark');
+	const palette = COLOR_PALETTES.find(p => p.id === theme);
 	if (theme === 'dark') {
-		document.documentElement.classList.add('theme-dark');
-	} else if (theme === 'custom') {
-		document.documentElement.classList.add('theme-custom');
-		applyCustomColorVars();
+		document.documentElement.classList.add('theme-dark', 'theme-is-dark');
+	} else if (theme !== 'light') {
+		document.documentElement.classList.add(`theme-${theme}`);
+		if (palette && palette.dark) document.documentElement.classList.add('theme-is-dark');
 	}
-
-	if (q('themeToggle')) q('themeToggle').checked = theme === 'dark';
-
-	document.querySelectorAll('.theme-preset-btn').forEach(btn => {
-		const isActive = btn.dataset.preset === theme;
-		btn.classList.toggle('active', isActive);
-		btn.style.fontWeight = isActive ? '700' : '';
+	// Keep hidden legacy checkbox in sync (dark = checked)
+	const tt = q('themeToggle');
+	if (tt) tt.checked = theme === 'dark';
+	// Update palette grid active state
+	document.querySelectorAll('.palette-swatch').forEach(sw => {
+		sw.classList.toggle('active', sw.dataset.palette === theme);
 	});
 }
 
-const CUSTOM_COLORS_KEY = 'bakery_custom_colors';
-const COLOR_SCHEME_DEFAULTS = {
-	'--bg':      { label: 'Background', light: '#eeeeee', dark: '#06101a' },
-	'--surface': { label: 'Surface',    light: '#f6f7fb', dark: '#081620' },
-	'--card':    { label: 'Card',       light: '#ffffff', dark: '#0f1a24' },
-	'--text':    { label: 'Text',       light: '#12202f', dark: '#e6f1fb' },
-	'--accent':  { label: 'Accent',     light: '#1b85ec', dark: '#ffb366' },
-};
-
-function loadCustomColors() {
-	try { return JSON.parse(localStorage.getItem(CUSTOM_COLORS_KEY) || 'null') || {}; } catch(e) { return {}; }
-}
-
-function saveCustomColors(obj) {
-	localStorage.setItem(CUSTOM_COLORS_KEY, JSON.stringify(obj));
-}
-
-function applyCustomColorVars() {
-	const stored = loadCustomColors();
-	const vars = Object.entries(COLOR_SCHEME_DEFAULTS).map(([varName, cfg]) => {
-		const val = stored[varName] || cfg.light;
-		return `${varName}: ${val};`;
-	}).join('\n  ');
-	let st = document.getElementById('custom-color-vars');
-	if (!st) { st = document.createElement('style'); st.id = 'custom-color-vars'; document.head.appendChild(st); }
-	st.textContent = `.theme-custom { ${vars} }`;
+function renderColorPaletteGrid() {
+	const grid = document.getElementById('colorPaletteGrid');
+	if (!grid) return;
+	const current = localStorage.getItem(THEME_KEY) || 'light';
+	grid.innerHTML = COLOR_PALETTES.map(p => `
+		<div class="palette-swatch${p.id === current ? ' active' : ''}" data-palette="${p.id}" title="${p.label}" role="button" tabindex="0" aria-label="${p.label} theme">
+			<div class="swatch-bg" style="background:${p.bg}"></div>
+			<div class="swatch-accent" style="background:${p.accent}"></div>
+			<div class="swatch-check">✓</div>
+			<div class="swatch-label">${p.label}</div>
+		</div>
+	`).join('');
+	grid.querySelectorAll('.palette-swatch').forEach(sw => {
+		const activate = () => {
+			applyTheme(sw.dataset.palette);
+			notify(`Theme: ${sw.title}`);
+		};
+		sw.addEventListener('click', activate);
+		sw.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); } });
+	});
 }
 
 const SEARCH_HISTORY_KEY = 'bakery_search_history_v1';
@@ -4759,80 +4780,19 @@ function populateSettings() {
 		window.notify._overrideBySettings = true;
 	}
 
-	// ── Appearance / Color Scheme ──────────────────────────────────────────
 	const currentTheme = localStorage.getItem(THEME_KEY) || 'light';
+	// Re-apply theme in case page reloaded
+	applyTheme(currentTheme);
 
-	// Wire up preset buttons
-	document.querySelectorAll('.theme-preset-btn').forEach(btn => {
-		const isActive = btn.dataset.preset === currentTheme;
-		btn.classList.toggle('active', isActive);
-		btn.style.fontWeight = isActive ? '700' : '';
-		btn.addEventListener('click', () => {
-			const preset = btn.dataset.preset;
-			applyTheme(preset);
-			const panel = document.getElementById('customColorPanel');
-			if (panel) panel.style.display = preset === 'custom' ? 'block' : 'none';
-			if (preset === 'custom') buildColorPickers();
-			notify(`Theme: ${preset.charAt(0).toUpperCase() + preset.slice(1)}`);
-		});
+	// Render the color palette grid (replaces old dark-mode toggle)
+	renderColorPaletteGrid();
+
+	// Also re-render grid whenever the settings view is shown
+	document.querySelectorAll('.nav-item').forEach(btn => {
+		if (btn.dataset && btn.dataset.view === 'settings') {
+			btn.addEventListener('click', () => setTimeout(renderColorPaletteGrid, 60));
+		}
 	});
-
-	// Show/hide custom panel on load
-	const customPanel = document.getElementById('customColorPanel');
-	if (customPanel) {
-		customPanel.style.display = currentTheme === 'custom' ? 'block' : 'none';
-		if (currentTheme === 'custom') buildColorPickers();
-	}
-
-	function buildColorPickers() {
-		const container = document.getElementById('colorPickerRows');
-		if (!container) return;
-		const stored = loadCustomColors();
-		container.innerHTML = '';
-		Object.entries(COLOR_SCHEME_DEFAULTS).forEach(([varName, cfg]) => {
-			const currentVal = stored[varName] || cfg.light;
-			const row = document.createElement('div');
-			row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;';
-			row.innerHTML = `
-				<span style="font-size:13px;font-weight:500;flex:1">${cfg.label}</span>
-				<div style="display:flex;align-items:center;gap:6px">
-					<input type="color" data-var="${varName}" value="${currentVal}"
-						style="width:36px;height:28px;border:none;border-radius:6px;cursor:pointer;padding:2px;background:transparent" />
-					<span class="color-hex-label" style="font-size:11px;font-family:monospace;opacity:.65;min-width:52px">${currentVal}</span>
-				</div>`;
-			container.appendChild(row);
-			const picker = row.querySelector('input[type=color]');
-			const hexLabel = row.querySelector('.color-hex-label');
-			picker.addEventListener('input', () => {
-				hexLabel.textContent = picker.value;
-			});
-		});
-	}
-
-	// Apply button
-	const applyBtn = document.getElementById('applyCustomColors');
-	if (applyBtn) {
-		applyBtn.addEventListener('click', () => {
-			const pickers = document.querySelectorAll('#colorPickerRows input[type=color]');
-			const colors = {};
-			pickers.forEach(p => { colors[p.dataset.var] = p.value; });
-			saveCustomColors(colors);
-			applyCustomColorVars();
-			applyTheme('custom');
-			notify('Custom colors applied!');
-		});
-	}
-
-	// Reset button
-	const resetBtn = document.getElementById('resetCustomColors');
-	if (resetBtn) {
-		resetBtn.addEventListener('click', () => {
-			localStorage.removeItem(CUSTOM_COLORS_KEY);
-			buildColorPickers();
-			applyCustomColorVars();
-			notify('Colors reset to defaults');
-		});
-	}
 
 	if (!document.getElementById('customCursorToggle')) {
 		const container = q('settingsControls') || q('usersList')?.parentElement;
@@ -4843,6 +4803,8 @@ function populateSettings() {
 			container.insertBefore(row, container.firstChild);
 		}
 	}
+
+	// themeToggle is now a hidden legacy element; palette swatches handle theme changes.
 
 	const curToggle = document.getElementById('customCursorToggle');
 	if (curToggle) {
@@ -5092,6 +5054,7 @@ function startApp() {
 		if (e.key === 'Escape') closeModal();
 	});
 
+	// themeToggle is now hidden; color palette swatches handle theme switching.
 	if (q('addIngredientBtn')) q('addIngredientBtn').addEventListener('click', openAddIngredient);
 	if (q('addProductBtn')) q('addProductBtn').addEventListener('click', openAddProduct);
 
