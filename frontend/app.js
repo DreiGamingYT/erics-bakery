@@ -3116,14 +3116,29 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
         <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${expiryDisplay}</td>
       </tr>`;
 		}).filter(Boolean).join('') || `<tr><td colspan="8" style="padding:12px" class="muted">No items match the selected filter/range</td></tr>`;
+		const startISO = start.toISOString().slice(0,10);
+		const endISO   = end.toISOString().slice(0,10);
 		summaryEl.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap">
         <div>
           <div style="font-weight:800">Reports — ${filter === 'usage' ? 'Ingredient Usage' : filter === 'low' ? 'Low stock' : filter === 'expiring' ? 'Expiring items' : 'All items'}</div>
-          <div class="muted small">Period: ${start.toISOString().slice(0,10)} to ${end.toISOString().slice(0,10)} • Total used: ${+totalUsed.toFixed(3)} • Low items: ${lowCount} • Expiring: ${expiringCount} • Top used: ${best}</div>
+          <div class="muted small" id="summaryPeriodLabel">Period: ${startISO} to ${endISO} • Total used: ${+totalUsed.toFixed(3)} • Low items: ${lowCount} • Expiring: ${expiringCount} • Top used: ${best}</div>
         </div>
-        <div id="summarybtns" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <select id="reportFilter" title="Filter report">
+        <div id="summarybtns" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <div style="display:flex;gap:4px;align-items:center;background:rgba(0,0,0,0.03);border:1px solid rgba(0,0,0,0.08);border-radius:8px;padding:4px 8px;flex-wrap:wrap">
+            <label style="font-size:11px;font-weight:700;color:var(--muted,#888);white-space:nowrap">From</label>
+            <input id="reportStart" type="date" value="${startISO}" style="height:30px;padding:0 6px;border-radius:6px;border:1px solid rgba(0,0,0,0.12);font-size:12px;background:var(--bg,#fff)" />
+            <label style="font-size:11px;font-weight:700;color:var(--muted,#888);white-space:nowrap">To</label>
+            <input id="reportEnd" type="date" value="${endISO}" style="height:30px;padding:0 6px;border-radius:6px;border:1px solid rgba(0,0,0,0.12);font-size:12px;background:var(--bg,#fff)" />
+            <select id="reportPreset" style="height:30px;padding:0 6px;border-radius:6px;border:1px solid rgba(0,0,0,0.12);font-size:12px;background:var(--bg,#fff)">
+              <option value="7">Last 7 days</option>
+              <option value="30">Last 30 days</option>
+              <option value="90">Last 90 days</option>
+              <option value="365">Last year</option>
+            </select>
+            <button id="applyReportRange" class="btn small" type="button" style="height:30px;white-space:nowrap">Apply</button>
+          </div>
+          <select id="reportFilter" title="Filter report" style="height:30px;padding:0 6px;border-radius:6px;border:1px solid rgba(0,0,0,0.12);font-size:12px;background:var(--bg,#fff)">
             <option value="all">All items</option>
             <option value="usage">Ingredient usage</option>
             <option value="low">Low stock</option>
@@ -3145,7 +3160,7 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
           <thead><tr>
             <th style="padding:8px;border:1px solid #eee">ID</th>
             <th style="padding:8px;border:1px solid #eee">Name</th>
-            <th style="padding:8px;border:1px solid #eee">Used</th>
+            <th style="padding:8px;border:1px solid #eee">Used (${startISO} – ${endISO})</th>
             <th style="padding:8px;border:1px solid #eee">Current Qty</th>
             <th style="padding:8px;border:1px solid #eee">Unit</th>
             <th style="padding:8px;border:1px solid #eee">Min</th>
@@ -3161,11 +3176,40 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
 		if (prBtn) prBtn.onclick = () => printReports(start.toISOString(), end.toISOString(), filter);
 		const exBtn = q('exportReportsCsvBtn');
 		if (exBtn) exBtn.onclick = () => exportReportsCSVReport(start.toISOString(), end.toISOString(), filter);
-		// Restore filter select to the value used for this render, and wire change handler
+
+		// Restore filter select and wire change handler
 		const filterSel = q('reportFilter');
 		if (filterSel) {
 			filterSel.value = filter;
 			filterSel.onchange = () => renderReports(q('reportStart')?.value || null, q('reportEnd')?.value || null, filterSel.value);
+		}
+
+		// Restore preset select to the closest matching value
+		const presetSel = q('reportPreset');
+		if (presetSel) {
+			presetSel.value = String(presetDays);
+			// Preset change: update date inputs and re-render
+			presetSel.onchange = () => {
+				const days = Number(presetSel.value || 30);
+				const eDate = new Date();
+				const sDate = new Date(Date.now() - (days - 1) * 24 * 60 * 60 * 1000);
+				const sEl = q('reportStart'), eEl = q('reportEnd');
+				if (sEl) sEl.value = sDate.toISOString().slice(0, 10);
+				if (eEl) eEl.value = eDate.toISOString().slice(0, 10);
+				renderReports(sEl?.value || null, eEl?.value || null, q('reportFilter')?.value || filter);
+			};
+		}
+
+		// Apply button: re-render with the manually chosen dates
+		const applyBtn = q('applyReportRange');
+		if (applyBtn) {
+			applyBtn.onclick = () => {
+				const sVal = q('reportStart')?.value || null;
+				const eVal = q('reportEnd')?.value || null;
+				renderReports(sVal, eVal, q('reportFilter')?.value || filter);
+				if (typeof renderStockChart === 'function') renderStockChart(sVal, eVal);
+				if (typeof window.__reportRangeChanged === 'function') window.__reportRangeChanged();
+			};
 		}
 	}
 
