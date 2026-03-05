@@ -43,6 +43,19 @@
   --shadow: 0 12px 30px rgba(0, 0, 0, 0.55);
 }
 
+/* Custom color scheme — colors injected via JS as .theme-custom { --var: val } */
+.theme-custom {
+  --muted: rgba(32, 44, 67, 0.56);
+  --shadow: 0 12px 30px rgba(19, 28, 38, 0.06);
+}
+
+/* Active state for theme preset buttons */
+.theme-preset-btn.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
 * {
   box-sizing: border-box;
 }
