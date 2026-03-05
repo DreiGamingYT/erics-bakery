@@ -43,19 +43,6 @@
   --shadow: 0 12px 30px rgba(0, 0, 0, 0.55);
 }
 
-/* Custom color scheme — colors injected via JS as .theme-custom { --var: val } */
-.theme-custom {
-  --muted: rgba(32, 44, 67, 0.56);
-  --shadow: 0 12px 30px rgba(19, 28, 38, 0.06);
-}
-
-/* Active state for theme preset buttons */
-.theme-preset-btn.active {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-}
-
 * {
   box-sizing: border-box;
 }
@@ -3507,4 +3494,288 @@ html {
   visibility: visible !important;
   opacity: 1 !important;
   pointer-events: auto !important;
+}
+/* ============================================================
+   COLOR PALETTE THEMES
+   ============================================================ */
+
+/* --- Night (existing dark, kept as-is for compat) ---------- */
+/* .theme-dark is already defined above */
+
+/* --- Forest ------------------------------------------------- */
+.theme-forest {
+  --bg: #0b1a10;
+  --surface: #0e2016;
+  --card: #122318;
+  --muted: rgba(190, 230, 200, 0.55);
+  --text: #d0f0de;
+  --accent: #3ecf6f;
+  --primary: #2da85a;
+  --accent-strong: #3ecf6f;
+  --chip-bg: rgba(255,255,255,0.03);
+  --chip-active-bg: #2da85a;
+  --chip-active-color: #fff;
+  --shadow: 0 12px 30px rgba(0,0,0,0.55);
+  --topbar-bg: rgba(8,20,12,0.9);
+  --modal-bg: #0e1f14;
+}
+
+/* --- Sunset ------------------------------------------------- */
+.theme-sunset {
+  --bg: #1a0d0a;
+  --surface: #1f1209;
+  --card: #26160e;
+  --muted: rgba(240, 200, 175, 0.56);
+  --text: #f5e3d4;
+  --accent: #f5824e;
+  --primary: #d95f2b;
+  --accent-strong: #f5824e;
+  --chip-bg: rgba(255,255,255,0.03);
+  --chip-active-bg: #d95f2b;
+  --chip-active-color: #fff;
+  --shadow: 0 12px 30px rgba(0,0,0,0.55);
+  --topbar-bg: rgba(18,8,4,0.9);
+  --modal-bg: #1a1008;
+}
+
+/* --- Ocean -------------------------------------------------- */
+.theme-ocean {
+  --bg: #071b26;
+  --surface: #08202f;
+  --card: #0b2535;
+  --muted: rgba(160, 220, 245, 0.55);
+  --text: #c0eaf8;
+  --accent: #00c8dc;
+  --primary: #0094ad;
+  --accent-strong: #00c8dc;
+  --chip-bg: rgba(255,255,255,0.03);
+  --chip-active-bg: #0094ad;
+  --chip-active-color: #fff;
+  --shadow: 0 12px 30px rgba(0,0,0,0.55);
+  --topbar-bg: rgba(4,14,20,0.9);
+  --modal-bg: #081a25;
+}
+
+/* --- Lavender ----------------------------------------------- */
+.theme-lavender {
+  --bg: #f0ecff;
+  --surface: #e8e2ff;
+  --card: #ffffff;
+  --muted: rgba(55, 30, 120, 0.48);
+  --text: #2d1f5e;
+  --accent: #7c3aed;
+  --primary: #6d28d9;
+  --accent-strong: #7c3aed;
+  --chip-bg: rgba(124,58,237,0.06);
+  --chip-active-bg: #7c3aed;
+  --chip-active-color: #fff;
+  --shadow: 0 12px 30px rgba(80,40,180,0.10);
+  --topbar-bg: rgba(240,236,255,0.92);
+  --modal-bg: #f0ecff;
+}
+
+/* --- Rose --------------------------------------------------- */
+.theme-rose {
+  --bg: #fff0f3;
+  --surface: #ffe4ea;
+  --card: #ffffff;
+  --muted: rgba(120, 30, 55, 0.48);
+  --text: #3d1520;
+  --accent: #e11d6a;
+  --primary: #be185d;
+  --accent-strong: #e11d6a;
+  --chip-bg: rgba(225,29,106,0.06);
+  --chip-active-bg: #e11d6a;
+  --chip-active-color: #fff;
+  --shadow: 0 12px 30px rgba(180,40,80,0.10);
+  --topbar-bg: rgba(255,240,243,0.92);
+  --modal-bg: #fff0f3;
+}
+
+/* --- Mocha -------------------------------------------------- */
+.theme-mocha {
+  --bg: #18110d;
+  --surface: #1e1510;
+  --card: #251a13;
+  --muted: rgba(235, 205, 180, 0.55);
+  --text: #f0e4d8;
+  --accent: #c98a58;
+  --primary: #a86b38;
+  --accent-strong: #c98a58;
+  --chip-bg: rgba(255,255,255,0.03);
+  --chip-active-bg: #a86b38;
+  --chip-active-color: #fff;
+  --shadow: 0 12px 30px rgba(0,0,0,0.55);
+  --topbar-bg: rgba(14,9,5,0.9);
+  --modal-bg: #18110d;
+}
+
+/* --- Mint --------------------------------------------------- */
+.theme-mint {
+  --bg: #edfaf5;
+  --surface: #d8f4ec;
+  --card: #ffffff;
+  --muted: rgba(10, 80, 55, 0.48);
+  --text: #0d3327;
+  --accent: #059669;
+  --primary: #047857;
+  --accent-strong: #059669;
+  --chip-bg: rgba(5,150,105,0.06);
+  --chip-active-bg: #059669;
+  --chip-active-color: #fff;
+  --shadow: 0 12px 30px rgba(0,120,70,0.10);
+  --topbar-bg: rgba(237,250,245,0.92);
+  --modal-bg: #edfaf5;
+}
+
+/* --- Charcoal ---------------------------------------------- */
+.theme-charcoal {
+  --bg: #111214;
+  --surface: #181a1d;
+  --card: #1f2226;
+  --muted: rgba(195, 200, 210, 0.55);
+  --text: #d8dce4;
+  --accent: #a0aec0;
+  --primary: #718096;
+  --accent-strong: #a0aec0;
+  --chip-bg: rgba(255,255,255,0.03);
+  --chip-active-bg: #718096;
+  --chip-active-color: #fff;
+  --shadow: 0 12px 30px rgba(0,0,0,0.6);
+  --topbar-bg: rgba(10,11,12,0.9);
+  --modal-bg: #111214;
+}
+
+/* ============================================================
+   COLOR PALETTE PICKER WIDGET
+   ============================================================ */
+.color-palette-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+
+.palette-swatch {
+  position: relative;
+  border-radius: 10px;
+  overflow: hidden;
+  cursor: pointer;
+  border: 2.5px solid transparent;
+  transition: border-color .18s, transform .15s, box-shadow .18s;
+  aspect-ratio: 1 / 1;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.10);
+}
+.palette-swatch:hover {
+  transform: scale(1.07);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.18);
+}
+.palette-swatch.active {
+  border-color: var(--accent, #1b85ec);
+  box-shadow: 0 0 0 3px rgba(27,133,236,0.28);
+}
+.palette-swatch .swatch-bg {
+  width: 100%;
+  height: 60%;
+}
+.palette-swatch .swatch-accent {
+  width: 100%;
+  height: 40%;
+}
+.palette-swatch .swatch-check {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity .18s;
+  font-size: 18px;
+  color: #fff;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+}
+.palette-swatch.active .swatch-check {
+  opacity: 1;
+}
+.palette-swatch .swatch-label {
+  position: absolute;
+  bottom: 0;
+  left: 0; right: 0;
+  font-size: 9px;
+  font-weight: 700;
+  text-align: center;
+  padding: 2px 2px 3px;
+  background: rgba(0,0,0,0.30);
+  color: #fff;
+  letter-spacing: .3px;
+}
+
+
+/* ============================================================
+   DARK-VARIANT SHARED OVERRIDES
+   Applies to all dark-background themes via .theme-is-dark
+   ============================================================ */
+
+.theme-is-dark .auth-card { background: var(--card); }
+
+.theme-is-dark .auth-form input[type="text"],
+.theme-is-dark .auth-form input[type="password"],
+.theme-is-dark .auth-form select {
+  background: var(--card);
+  border-color: rgba(255,255,255,0.08);
+  color: var(--text);
+}
+
+.theme-is-dark .modal-card input,
+.theme-is-dark .modal-card textarea,
+.theme-is-dark .modal-card select { background: var(--surface); color: var(--text); }
+.theme-is-dark .modal-close { color: var(--text); }
+
+.theme-is-dark .topbar {
+  background: var(--topbar-bg, rgba(10,15,20,0.9));
+  border-bottom-color: rgba(255,255,255,0.05);
+}
+
+.theme-is-dark .meta-btn { color: var(--text); }
+
+.theme-is-dark .top-search input {
+  background: var(--card);
+  color: var(--text);
+  border-color: rgba(255,255,255,0.08);
+}
+
+.theme-is-dark .search-suggestions {
+  background: var(--card);
+  border-color: rgba(255,255,255,0.07);
+}
+
+.theme-is-dark .sidebar .nav-item:hover { background: rgba(255,255,255,0.06); }
+
+.theme-is-dark #bakeryProfileForm input,
+.theme-is-dark #profileForm input,
+.theme-is-dark #bakeryProfileForm textarea,
+.theme-is-dark #bakeryProfileForm select {
+  background: var(--surface);
+  color: var(--text);
+  border-color: rgba(255,255,255,0.08);
+}
+
+.theme-is-dark .auth-title .small { color: var(--muted); }
+
+.theme-is-dark .page-header .page-actions #activityFilter,
+.theme-is-dark .page-header .page-actions #reportPreset {
+  background: var(--card);
+  color: var(--text);
+  border-color: rgba(255,255,255,0.08);
+}
+
+.theme-is-dark #ingredientList .inv-table tbody tr { background: var(--card); }
+.theme-is-dark #ingredientList .inv-table thead th { background: var(--surface); }
+
+.theme-is-dark #helpBtn { color: var(--text); }
+.theme-is-dark .btn .spinner { border-color: rgba(255,255,255,0.2); border-top-color: #fff; }
+
+/* Palette swatch active ring uses current accent color */
+.palette-swatch.active {
+  border-color: var(--accent, #1b85ec);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #1b85ec) 30%, transparent);
 }
