@@ -168,6 +168,34 @@ async function changeStockAPI(id, type, qty, note = '') {
 	return res.json();
 }
 
+async function deleteIngredientAPI(id) {
+	const res = await fetch(`/api/ingredients/${id}`, {
+		method: 'DELETE',
+		credentials: 'include'
+	});
+	if (!res.ok) {
+		const body = await res.json().catch(() => ({}));
+		throw new Error(body.error || body.message || 'Delete failed');
+	}
+	return res.json().catch(() => ({}));
+}
+
+/* ── Delete mode helpers ── */
+const DELETE_MODE_KEY = 'bakery_inv_delete_mode';
+function isDeleteModeEnabled() {
+	return localStorage.getItem(DELETE_MODE_KEY) === 'true';
+}
+function canUseDeleteMode() {
+	const role = (window.currentUser?.role || getSession()?.role || '').toLowerCase();
+	return role === 'owner' || role === 'admin';
+}
+
+/* ── Day-scoped inventory history key ── */
+const INV_HIST_DAY_KEY = 'bakery_inv_hist_day';
+function todayDateStr() {
+	return new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+}
+
 const sampleIngredients = [{
 		id: 1,
 		name: 'Flour',
@@ -2265,6 +2293,8 @@ async function renderIngredientCards(page = 1, limit = 5) {
       </div>
     `;
 
+		const showDelete = isDeleteModeEnabled() && canUseDeleteMode();
+
 		const tableHead = `
       <div class="inv-table-wrap">
       <table class="inv-table" style="width:100%;border-collapse:collapse" role="table" aria-label="Inventory table">
@@ -2280,6 +2310,7 @@ async function renderIngredientCards(page = 1, limit = 5) {
             <th style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06)">In</th>
             <th style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06)">Out</th>
             <th style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06)">Actions</th>
+            ${showDelete ? '<th style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06)"></th>' : ''}
           </tr>
         </thead>
       <tbody>
@@ -2308,8 +2339,9 @@ async function renderIngredientCards(page = 1, limit = 5) {
             <button class="btn small soft edit-btn" type="button">Edit</button>
           </div>
         </td>
+        ${showDelete ? `<td data-label="Delete" style="padding:10px;vertical-align:middle"><button class="btn small danger delete-row" data-id="${i.id}" data-name="${escapeHtml(i.name)}" type="button" title="Delete ${escapeHtml(i.name)}"><i class="fa fa-trash"></i></button></td>` : ''}
       </tr>`;
-		}).join('') || `<tr><td colspan="10" class="muted" style="padding:12px">No inventory items</td></tr>`;
+		}).join('') || `<tr><td colspan="${showDelete ? 11 : 10}" class="muted" style="padding:12px">No inventory items</td></tr>`;
 
 		const tableFooter = `</tbody></table></div>`;
 
@@ -2413,6 +2445,28 @@ async function renderIngredientCards(page = 1, limit = 5) {
 				if (!tr) return;
 				const id = Number(tr.dataset.id);
 				openEditIngredient(id);
+			});
+		});
+
+		// ── Delete row ──────────────────────────────────────
+		container.querySelectorAll('.delete-row').forEach(btn => {
+			btn.addEventListener('click', async (e) => {
+				const id = Number(btn.dataset.id);
+				const name = btn.dataset.name || `#${id}`;
+				if (!canUseDeleteMode()) { notify('Only Owners can delete items.'); return; }
+				if (!confirm(`Permanently delete "${name}"?\nThis cannot be undone.`)) return;
+				try {
+					btn.disabled = true;
+					btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i>';
+					await deleteIngredientAPI(id);
+					notify(`"${name}" deleted`);
+					await renderIngredientCards(meta.page || page, limit);
+					await renderInventoryActivity();
+				} catch (err) {
+					btn.disabled = false;
+					btn.innerHTML = '<i class="fa fa-trash"></i>';
+					notify(err.message || 'Delete failed');
+				}
 			});
 		});
 
@@ -2824,6 +2878,19 @@ async function renderInventoryActivity(limit = 20) {
 	const el = q('inventoryRecentActivity');
 	if (!el) return;
 
+	// ── Day-scope: clear history if the calendar day has rolled over ──
+	const today = todayDateStr();
+	// Show the date in the heading
+	const dateLabel = q('invHistoryDateLabel');
+	if (dateLabel) dateLabel.textContent = new Date().toLocaleDateString(undefined, {weekday:'short', month:'short', day:'numeric'});
+	const storedDay = localStorage.getItem(INV_HIST_DAY_KEY);
+	if (storedDay && storedDay !== today) {
+		// New day — wipe the cached day-history so it shows fresh for today
+		localStorage.removeItem(INV_HIST_DAY_KEY);
+	}
+	// Record today as the active history day
+	localStorage.setItem(INV_HIST_DAY_KEY, today);
+
 	const sess = getSession();
 	if (!sess || !sess.username) {
 		el.innerHTML = `
@@ -2847,14 +2914,31 @@ async function renderInventoryActivity(limit = 20) {
 	el.innerHTML = '<li class="muted">Loading…</li>';
 	try {
 		const resp = await apiFetch(`/api/activity?limit=${limit}`);
-		const items = (resp && resp.items) ? resp.items : [];
+		const allItems = (resp && resp.items) ? resp.items : [];
+
+		// ── Filter to today only ──
+		const todayStart = new Date(today + 'T00:00:00');
+		const todayEnd   = new Date(today + 'T23:59:59.999');
+		const items = allItems.filter(it => {
+			if (!it.time) return false;
+			const d = new Date(it.time);
+			return d >= todayStart && d <= todayEnd;
+		}).slice(0, limit);
+
 		if (!items.length) {
-			el.innerHTML = '<li class="muted">No recent inventory activity</li>';
+			el.innerHTML = `<li class="muted" style="padding:10px">No activity yet today — edits you make will appear here.</li>`;
 			return;
 		}
-		el.innerHTML = items.slice(0, limit).map(it => {
-			const time = it.time ? new Date(it.time).toLocaleString() : '';
-			return `<li tabindex="0" role="listitem"><div>${escapeHtml(it.text)}</div><div class="muted small">${escapeHtml(time)}</div></li>`;
+		el.innerHTML = items.map(it => {
+			const time = it.time ? new Date(it.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
+			const badge = it.action ? `<span class="inv-hist-badge inv-hist-badge--${(it.action||'').toLowerCase().replace(/\s+/g,'-')}">${escapeHtml(it.action)}</span>` : '';
+			return `<li tabindex="0" role="listitem" style="padding:8px 0;border-bottom:1px solid rgba(0,0,0,0.05);display:flex;align-items:flex-start;gap:8px">
+				<div style="flex:1;min-width:0">
+					<div style="font-size:13px">${badge} ${escapeHtml(it.text)}</div>
+					${it.username ? `<div class="muted small" style="margin-top:2px">by <strong>${escapeHtml(it.username)}</strong></div>` : ''}
+				</div>
+				<div class="muted small" style="white-space:nowrap;padding-top:2px">${escapeHtml(time)}</div>
+			</li>`;
 		}).join('');
 	} catch (err) {
 		console.error('renderInventoryActivity err:', err);
@@ -2865,10 +2949,16 @@ async function renderInventoryActivity(limit = 20) {
 			return;
 		}
 
-		const fallback = (DB && Array.isArray(DB.activity)) ? DB.activity.slice(0, limit) : [];
+		const fallback = (DB && Array.isArray(DB.activity)) ? DB.activity.filter(it => {
+			if (!it.time) return false;
+			const d = new Date(it.time);
+			const ts = todayDateStr();
+			const s = new Date(ts + 'T00:00:00'), e2 = new Date(ts + 'T23:59:59.999');
+			return d >= s && d <= e2;
+		}).slice(0, limit) : [];
 		if (fallback.length) {
 			el.innerHTML = fallback.map(it => {
-				const time = it.time ? new Date(it.time).toLocaleString() : '';
+				const time = it.time ? new Date(it.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
 				return `<li tabindex="0" role="listitem"><div>${escapeHtml(it.text)}</div><div class="muted small">${escapeHtml(time)}</div></li>`;
 			}).join('');
 			notify('Showing local demo activity (server failed).');
@@ -4791,6 +4881,38 @@ function populateSettings() {
 	document.querySelectorAll('.nav-item').forEach(btn => {
 		if (btn.dataset && btn.dataset.view === 'settings') {
 			btn.addEventListener('click', () => setTimeout(renderColorPaletteGrid, 60));
+		}
+	});
+
+	// ── Delete mode toggle (Owner only) ──────────────────────────────
+	function initDeleteModeToggle() {
+		const wrap     = q('deleteToggleWrap');
+		const noAccess = q('deleteToggleNoAccess');
+		const tog      = q('allowDeleteToggle');
+		if (!wrap || !noAccess || !tog) return;
+
+		if (canUseDeleteMode()) {
+			wrap.style.display = 'block';
+			noAccess.style.display = 'none';
+			tog.checked = isDeleteModeEnabled();
+			tog.addEventListener('change', () => {
+				localStorage.setItem(DELETE_MODE_KEY, tog.checked ? 'true' : 'false');
+				notify('Delete mode ' + (tog.checked ? 'enabled' : 'disabled'));
+				// Refresh inventory table so delete buttons appear/disappear instantly
+				if (document.querySelector('#view-inventory:not(.hidden)')) {
+					renderIngredientCards();
+				}
+			});
+		} else {
+			wrap.style.display = 'none';
+			noAccess.style.display = 'block';
+		}
+	}
+	initDeleteModeToggle();
+	// Re-check role every time settings tab is opened (in case user just logged in)
+	document.querySelectorAll('.nav-item').forEach(btn => {
+		if (btn.dataset && btn.dataset.view === 'settings') {
+			btn.addEventListener('click', () => setTimeout(initDeleteModeToggle, 80));
 		}
 	});
 
