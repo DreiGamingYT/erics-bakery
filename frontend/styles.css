@@ -3845,3 +3845,188 @@ html {
 .theme-is-dark .inv-hist-badge--out  { background: rgba(220,38,38,0.22); color: #f87171; }
 .theme-is-dark .inv-hist-badge--edit,
 .theme-is-dark .inv-hist-badge--update { background: rgba(27,133,236,0.22); color: #60a5fa; }
+
+/* ============================================================
+   NOTIFICATION BELL & PANEL
+   ============================================================ */
+.notif-badge {
+  position: absolute;
+  top: 1px; right: 1px;
+  min-width: 16px; height: 16px;
+  border-radius: 999px;
+  background: #e11d6a;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 16px;
+  text-align: center;
+  padding: 0 4px;
+  pointer-events: none;
+  animation: nbadge-pop .25s cubic-bezier(.34,1.56,.64,1);
+}
+@keyframes nbadge-pop {
+  from { transform:scale(0); opacity:0; }
+  to   { transform:scale(1); opacity:1; }
+}
+.notif-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: 320px;
+  background: var(--card);
+  border: 1px solid rgba(0,0,0,0.09);
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.18);
+  z-index: 9999;
+  overflow: hidden;
+  animation: npanel-in .18s ease;
+}
+@keyframes npanel-in {
+  from { opacity:0; transform:translateY(-6px) scale(.97); }
+  to   { opacity:1; transform:translateY(0) scale(1); }
+}
+.notif-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+}
+.notif-list {
+  list-style: none;
+  margin: 0; padding: 0;
+  max-height: 340px;
+  overflow-y: auto;
+}
+.notif-item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(0,0,0,0.04);
+  cursor: default;
+  transition: background .14s;
+}
+.notif-item.unread { background: rgba(27,133,236,0.05); }
+.notif-item:last-child { border-bottom: none; }
+.notif-icon {
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.notif-icon--schedule { background: rgba(124,58,237,0.12); color: #7c3aed; }
+.notif-icon--reminder { background: rgba(249,115,22,0.14); color: #ea580c; }
+.notif-icon--alert    { background: rgba(220,38,38,0.12);  color: #dc2626; }
+.notif-icon--info     { background: rgba(5,150,105,0.12);  color: #059669; }
+.notif-item-body { flex:1; min-width:0; }
+.notif-item-title { font-size:13px; font-weight:700; line-height:1.3; }
+.notif-item-sub   { font-size:11px; color:var(--muted); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.notif-item-time  { font-size:10px; color:var(--muted); white-space:nowrap; padding-top:3px; flex-shrink:0; }
+.theme-dark .notif-panel,
+.theme-is-dark .notif-panel { border-color:rgba(255,255,255,0.07); }
+.theme-dark .notif-item.unread,
+.theme-is-dark .notif-item.unread { background:rgba(27,133,236,0.09); }
+
+/* ============================================================
+   CALENDAR ENHANCEMENTS
+   ============================================================ */
+.calendar-cell { position:relative; transition:box-shadow .15s, border-color .15s; }
+.calendar-cell:hover { box-shadow:0 4px 14px rgba(0,0,0,0.10); }
+
+/* Today highlight */
+.calendar-cell.is-today {
+  border-color: var(--accent,#1b85ec) !important;
+  box-shadow: 0 0 0 2px rgba(27,133,236,0.20);
+}
+.calendar-cell.is-today .date-num {
+  background: var(--accent,#1b85ec);
+  color: #fff;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+/* Quick-add button that appears on hover */
+.cell-add-btn {
+  position: absolute;
+  top: 5px; right: 5px;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0;
+  transition: opacity .15s, background .15s, color .15s;
+  padding: 0; line-height: 1;
+}
+.calendar-cell:hover .cell-add-btn { opacity: 1; }
+.cell-add-btn:hover { background: var(--accent,#1b85ec); color: #fff; }
+
+/* Schedule chips (purple) */
+.sched-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(124,58,237,0.10);
+  border: 1px solid rgba(124,58,237,0.16);
+  color: #7c3aed;
+  padding: 2px 6px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background .14s;
+}
+.sched-chip:hover { background: rgba(124,58,237,0.20); }
+.sched-chip-time { font-weight:400; font-size:10px; opacity:.7; }
+.theme-dark .sched-chip,
+.theme-is-dark .sched-chip { background:rgba(167,139,250,0.13); border-color:rgba(167,139,250,0.22); color:#c4b5fd; }
+
+/* Activity event chips (blue) */
+.event-chip {
+  display: block;
+  background: rgba(27,133,236,0.08);
+  border: 1px solid rgba(27,133,236,0.12);
+  padding: 2px 7px;
+  border-radius: 5px;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+/* "+N more" pill */
+.cal-more-pill {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--muted);
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.05);
+  cursor: pointer;
+  transition: background .14s;
+  margin-top: 2px;
+  border: none;
+}
+.cal-more-pill:hover { background: rgba(0,0,0,0.12); }
+.theme-dark .cal-more-pill,
+.theme-is-dark .cal-more-pill { background:rgba(255,255,255,0.07); }
+.theme-dark .cal-more-pill:hover,
+.theme-is-dark .cal-more-pill:hover { background:rgba(255,255,255,0.14); }
+
+/* Schedule modal item */
+.sched-modal-item { transition: background .14s; border-radius: 6px; padding: 8px !important; }
+.sched-modal-item:hover { background: rgba(0,0,0,0.03); }
