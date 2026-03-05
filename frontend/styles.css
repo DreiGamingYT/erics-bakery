@@ -3779,3 +3779,69 @@ html {
   border-color: var(--accent, #1b85ec);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #1b85ec) 30%, transparent);
 }
+
+
+/* ============================================================
+   INVENTORY DELETE BUTTON
+   ============================================================ */
+.btn.danger {
+  background: rgba(220, 38, 38, 0.12);
+  color: #dc2626;
+  border: 1px solid rgba(220, 38, 38, 0.20);
+}
+.btn.danger:hover {
+  background: rgba(220, 38, 38, 0.22);
+  border-color: rgba(220, 38, 38, 0.35);
+}
+.btn.danger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.theme-is-dark .btn.danger {
+  background: rgba(220, 38, 38, 0.16);
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.18);
+}
+.theme-is-dark .btn.danger:hover {
+  background: rgba(220, 38, 38, 0.28);
+}
+
+/* ============================================================
+   INVENTORY HISTORY BADGES
+   ============================================================ */
+.inv-hist-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 999px;
+  vertical-align: middle;
+  margin-right: 2px;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+}
+.inv-hist-badge--stock-in,
+.inv-hist-badge--in {
+  background: rgba(5,150,105,0.14);
+  color: #059669;
+}
+.inv-hist-badge--stock-out,
+.inv-hist-badge--out {
+  background: rgba(220,38,38,0.12);
+  color: #dc2626;
+}
+.inv-hist-badge--edit,
+.inv-hist-badge--update {
+  background: rgba(27,133,236,0.12);
+  color: #1b85ec;
+}
+.inv-hist-badge--delete {
+  background: rgba(220,38,38,0.16);
+  color: #dc2626;
+}
+.theme-is-dark .inv-hist-badge--stock-in,
+.theme-is-dark .inv-hist-badge--in   { background: rgba(5,150,105,0.22); color: #34d399; }
+.theme-is-dark .inv-hist-badge--stock-out,
+.theme-is-dark .inv-hist-badge--out  { background: rgba(220,38,38,0.22); color: #f87171; }
+.theme-is-dark .inv-hist-badge--edit,
+.theme-is-dark .inv-hist-badge--update { background: rgba(27,133,236,0.22); color: #60a5fa; }
