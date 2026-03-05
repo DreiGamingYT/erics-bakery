@@ -161,9 +161,12 @@
               <div id="ingredientList" class="inv-left"></div>
               <aside id="inventoryActivity" class="inv-right" aria-label="Recent inventory activity">
                 <div class="card">
-                  <h3>Recent Inventory History</h3>
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px">
+                    <h3 style="margin:0">Recent Inventory History</h3>
+                    <span id="invHistoryDateLabel" class="muted small" style="white-space:nowrap"></span>
+                  </div>
+                  <div class="muted small" style="margin-bottom:8px">Today's stock changes only — resets each new day.</div>
                   <ul id="inventoryRecentActivity" class="timeline" aria-live="polite" aria-atomic="true" style="margin-top:8px;max-height:56vh;overflow:auto;padding-right:6px"></ul>
-                  <div class="muted small" style="margin-top:8px">Shows latest stock in / stock out and edits. Tap an item to view details in History.</div>
                 </div>
               </aside>
             </div>
@@ -329,6 +332,19 @@
                   <div id="colorPaletteGrid" class="color-palette-grid"></div>
                   <!-- hidden checkbox kept for backward-compat JS that reads #themeToggle -->
                   <input id="themeToggle" type="checkbox" style="display:none" aria-hidden="true" />
+                </div>
+                <div class="card small-card" id="inventorySettingsCard" style="margin-top:12px">
+                  <h3 style="margin:0 0 6px 0">Inventory</h3>
+                  <div id="deleteToggleWrap" style="display:none">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0">
+                      <div>
+                        <div style="font-weight:700;font-size:13px">Delete items</div>
+                        <div class="muted small">Show delete button on each inventory row.</div>
+                      </div>
+                      <label class="ntog"><input id="allowDeleteToggle" type="checkbox" /><span class="ntog-track"></span></label>
+                    </div>
+                  </div>
+                  <div id="deleteToggleNoAccess" class="muted small" style="padding:6px 0">Only Owners can enable item deletion.</div>
                 </div>
                 <div class="card small-card" style="margin-top:12px">
                   <div id="usersList" class="users-list"></div>
