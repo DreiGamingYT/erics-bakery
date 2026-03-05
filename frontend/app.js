@@ -2970,187 +2970,15 @@ async function renderInventoryActivity(limit = 20) {
 
 function renderReports(rangeStart, rangeEnd, reportFilter) {
 	const startInput = rangeStart || q('reportStart')?.value || null;
-	const endInput   = rangeEnd   || q('reportEnd')?.value   || null;
+	const endInput = rangeEnd || q('reportEnd')?.value || null;
 	const presetDays = Number(q('reportPreset')?.value || 30);
-	const end   = endInput   ? new Date(endInput)   : new Date();
+	const end = endInput ? new Date(endInput) : new Date();
 	const start = startInput ? new Date(startInput) : new Date(end);
 	if (!startInput) start.setDate(end.getDate() - (presetDays - 1));
 	start.setHours(0, 0, 0, 0);
 	end.setHours(23, 59, 59, 999);
 
-	// Keep persistent inputs in sync
-	if (q('reportStart')) q('reportStart').value = start.toISOString().slice(0, 10);
-	if (q('reportEnd'))   q('reportEnd').value   = end.toISOString().slice(0, 10);
-
 	const filter = reportFilter || q('reportFilter')?.value || 'usage';
-	if (q('reportFilter')) q('reportFilter').value = filter;
-
-	try {
-		const salesCard = q('salesTimelineChart') ? q('salesTimelineChart').closest('.card') : null;
-		if (salesCard && salesCard.parentElement) salesCard.remove();
-		try { chartSalesTimeline && chartSalesTimeline.destroy(); } catch (e) {}
-		chartSalesTimeline = null;
-	} catch (e) {}
-
-	let agg;
-	if (typeof aggregateUsageFromActivity === 'function') {
-		agg = aggregateUsageFromActivity(start.toISOString(), end.toISOString(), 50);
-	} else {
-		const usageMap = {};
-		(DB.ingredients || []).forEach(i => {
-			if (i && String(i.type || '').toLowerCase() === 'ingredient') usageMap[i.id] = 0;
-		});
-		(DB.activity || []).forEach(a => {
-			const t = new Date(a.time || a.date || null);
-			if (!t || t < start || t > end) return;
-			const iid = Number(a.ingredient_id || 0);
-			if (!iid || !(iid in usageMap)) return;
-			const text = String(a.text || '').toLowerCase();
-			if (!(text.includes('used') || text.includes('stock out') || text.includes('used for'))) return;
-			const m = String(a.text || '').match(/([0-9]*\.?[0-9]+)/g);
-			if (!m) return;
-			usageMap[iid] = (usageMap[iid] || 0) + (Number(m[0]) || 0);
-		});
-		const arr = Object.keys(usageMap).map(k => ({ id: Number(k), qty: usageMap[k] }))
-			.sort((a, b) => b.qty - a.qty).slice(0, 50);
-		agg = {
-			labels: arr.map(x => (DB.ingredients.find(i => i.id === x.id)?.name) || `#${x.id}`),
-			data:   arr.map(x => +(x.qty.toFixed(3))),
-			raw:    arr
-		};
-	}
-
-	const ingCtx = q('ingredientUsageChart')?.getContext('2d');
-	if (ingCtx) {
-		try { if (chartIngredientUsage) chartIngredientUsage.destroy(); } catch (e) {}
-		chartIngredientUsage = new Chart(ingCtx, {
-			type: 'bar',
-			data: {
-				labels: agg.labels,
-				datasets: [{ label: 'Units used', data: agg.data, backgroundColor: generateColors(agg.data.length) }]
-			},
-			options: {
-				indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-				scales: { x: { beginAtZero: true } },
-				plugins: { legend: { display: false } }
-			}
-		});
-	}
-
-	const summaryEl = q('reportSummary');
-	if (summaryEl) {
-		const totalUsed = (agg.raw || []).reduce((s, r) => s + (r.qty || 0), 0);
-
-		const lowCount = (DB.ingredients || []).filter(i => {
-			const minVal = (i && (i.min != null)) ? i.min : computeThresholdForIngredient(i);
-			return Number(i.qty || 0) <= Number(minVal || 0);
-		}).length;
-
-		const expiringCount = (DB.ingredients || []).filter(i =>
-			String(i.type || '').toLowerCase() === 'ingredient' &&
-			i.expiry && daysUntil(i.expiry) >= 0 && daysUntil(i.expiry) <= 30
-		).length;
-
-		const best = (agg.raw && agg.raw.length)
-			? (DB.ingredients.find(i => i.id === agg.raw[0].id)?.name || `#${agg.raw[0].id}`) : '—';
-
-		// Human-readable date labels
-		const fmt = d => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-		const startLabel = fmt(start);
-		const endLabel   = fmt(end);
-		const filterLabel = { all: 'All items', usage: 'Ingredient Usage', low: 'Low Stock', expiring: 'Expiring' }[filter] || filter;
-
-		let tableRows = (DB.ingredients || []).map(i => {
-			if (!i) return null;
-			const isIngredient   = String(i.type || '').toLowerCase() === 'ingredient';
-			const minVal         = (i.min != null) ? i.min : computeThresholdForIngredient(i);
-			const days           = i.expiry ? daysUntil(i.expiry) : null;
-			const isLow          = Number(i.qty || 0) <= Number(minVal || 0);
-			const isExpiring     = isIngredient && days !== null && days >= 0 && days <= 7;
-			const isExpiringSoon = isIngredient && days !== null && days > 7  && days <= 30;
-
-			if (filter === 'usage') {
-				if (!isIngredient || !((agg.raw || []).some(r => r.id === i.id))) return null;
-			} else if (filter === 'low') {
-				if (!isLow) return null;
-			} else if (filter === 'expiring') {
-				if (!isIngredient || !(i.expiry && days >= 0 && days <= 30)) return null;
-						}
-
-			const used    = (agg.raw || []).find(r => r.id === i.id);
-			const usedQty = used ? used.qty : 0;
-
-			const rowBg = isExpiring    ? 'background:rgba(239,68,68,.08);'
-			            : isLow         ? 'background:rgba(249,115,22,.08);'
-			            : isExpiringSoon ? 'background:rgba(234,179,8,.07);' : '';
-
-			const lowBadge    = isLow         ? ' <span style="font-size:10px;font-weight:800;padding:2px 6px;border-radius:999px;background:rgba(249,115,22,.18);color:#c2410c">LOW</span>' : '';
-			const expiryBadge = isExpiring    ? ' <span style="font-size:10px;font-weight:800;padding:2px 6px;border-radius:999px;background:rgba(239,68,68,.18);color:#dc2626">EXPIRING</span>'
-			                  : isExpiringSoon ? ' <span style="font-size:10px;font-weight:800;padding:2px 6px;border-radius:999px;background:rgba(234,179,8,.18);color:#b45309">SOON</span>' : '';
-
-			const qtyDisplay    = `<span style="font-weight:${isLow?'700':'400'};color:${isLow?'#c2410c':'inherit'}">${+Number(i.qty||0).toFixed(3)}</span>`;
-			const expiryDisplay = i.expiry
-				? `${i.expiry} <span style="font-size:11px;color:${days<=7?'#dc2626':days<=30?'#b45309':'var(--muted,#888)'}">(${days}d)</span>${expiryBadge}`
-				: '—';
-
-			return `<tr style="${rowBg}">
-        <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${i.id}</td>
-        <td style="padding:8px;border:1px solid rgba(0,0,0,.07);font-weight:600">${escapeHtml(i.name)}${lowBadge}</td>
-        <td style="padding:8px;border:1px solid rgba(0,0,0,.07);text-align:right">${+usedQty.toFixed(3)}</td>
-        <td style="padding:8px;border:1px solid rgba(0,0,0,.07);text-align:right">${qtyDisplay}</td>
-        <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${escapeHtml(i.unit||'')}</td>
-        <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${minVal != null ? minVal : ''}</td>
-        <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${escapeHtml(i.type||'')}</td>
-        <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${expiryDisplay}</td>
-      </tr>`;
-		}).filter(Boolean).join('') || `<tr><td colspan="8" style="padding:12px" class="muted">No items match the selected filter / date range</td></tr>`;
-
-		summaryEl.innerHTML = `
-      <div class="summary-stats-row">
-        <span class="summary-range-badge"><i class="fa fa-calendar-range"></i> ${escapeHtml(startLabel)} → ${escapeHtml(endLabel)}</span>
-        <span class="summary-stat-chip">${escapeHtml(filterLabel)}</span>
-        <span class="summary-stat-chip muted">Total used: <strong>${+totalUsed.toFixed(3)}</strong></span>
-        <span class="summary-stat-chip muted">Low stock: <strong style="color:#c2410c">${lowCount}</strong></span>
-        <span class="summary-stat-chip muted">Expiring ≤30d: <strong style="color:#b45309">${expiringCount}</strong></span>
-        ${agg.raw?.length ? `<span class="summary-stat-chip muted">Top used: <strong>${escapeHtml(best)}</strong></span>` : ''}
-        <button id="printReportsBtn" class="btn small" type="button" style="margin-left:auto"><i class="fa fa-print"></i> Print / PDF</button>
-      </div>
-
-      <div style="display:flex;gap:12px;flex-wrap:wrap;margin:10px 0 4px;font-size:12px;align-items:center">
-        <span style="font-weight:700;color:var(--muted,#888)">Legend:</span>
-        <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:3px;background:rgba(239,68,68,.25);display:inline-block"></span>Expiring ≤7d</span>
-        <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:3px;background:rgba(249,115,22,.25);display:inline-block"></span>Low stock</span>
-        <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:3px;background:rgba(234,179,8,.25);display:inline-block"></span>Expiring ≤30d</span>
-      </div>
-
-      <div style="overflow:auto;margin-top:4px">
-        <table style="width:100%;border-collapse:collapse;font-size:13px">
-          <thead><tr style="background:rgba(0,0,0,0.03)">
-            <th style="padding:8px;border:1px solid rgba(0,0,0,.09);font-weight:700;text-align:left">ID</th>
-            <th style="padding:8px;border:1px solid rgba(0,0,0,.09);font-weight:700;text-align:left">Name</th>
-            <th style="padding:8px;border:1px solid rgba(0,0,0,.09);font-weight:700;text-align:right;white-space:nowrap">
-              Used
-              <div style="font-size:10px;font-weight:400;color:var(--accent,#1b85ec);margin-top:1px">${escapeHtml(startLabel)} – ${escapeHtml(endLabel)}</div>
-            </th>
-            <th style="padding:8px;border:1px solid rgba(0,0,0,.09);font-weight:700;text-align:right">Current Qty</th>
-            <th style="padding:8px;border:1px solid rgba(0,0,0,.09);font-weight:700">Unit</th>
-            <th style="padding:8px;border:1px solid rgba(0,0,0,.09);font-weight:700">Min</th>
-            <th style="padding:8px;border:1px solid rgba(0,0,0,.09);font-weight:700">Type</th>
-            <th style="padding:8px;border:1px solid rgba(0,0,0,.09);font-weight:700">Expiry</th>
-          </tr></thead>
-          <tbody>${tableRows}</tbody>
-        </table>
-      </div>`;
-
-		q('printReportsBtn')?.addEventListener('click', () => printReports(start.toISOString(), end.toISOString(), filter));
-
-		// Wire Export CSV from persistent button each render (captures current start/end/filter)
-		const exBtn = q('exportReportsCsvBtn');
-		if (exBtn) exBtn.onclick = () => exportReportsCSVReport(start.toISOString(), end.toISOString(), filter);
-	}
-
-	try { chartIngredientUsage && chartIngredientUsage.resize && chartIngredientUsage.resize(); } catch (e) {}
-}
 
 	try {
 		const salesCard = q('salesTimelineChart') ? q('salesTimelineChart').closest('.card') : null;
@@ -3215,6 +3043,134 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
 		});
 	}
 
+	const summaryEl = q('reportSummary');
+	if (summaryEl) {
+		const totalUsed = (agg.raw || []).reduce((s, r) => s + (r.qty || 0), 0);
+
+		const lowCount = (DB.ingredients || []).filter(i => {
+			const minVal = (i && (i.min != null)) ? i.min : computeThresholdForIngredient(i);
+			return Number(i.qty || 0) <= Number(minVal || 0);
+		}).length;
+
+		const expiringCount = (DB.ingredients || []).filter(i =>
+			String(i.type || '').toLowerCase() === 'ingredient' &&
+			i.expiry && daysUntil(i.expiry) >= 0 && daysUntil(i.expiry) <= 30
+		).length;
+
+		const best = (agg.raw && agg.raw.length) ? (DB.ingredients.find(i => i.id === agg.raw[0].id)?.name || `#${agg.raw[0].id}`) : '—';
+
+		let tableRows = (DB.ingredients || []).map(i => {
+			if (!i) return null;
+
+			const isIngredient   = String(i.type || '').toLowerCase() === 'ingredient';
+			const minVal         = (i.min != null) ? i.min : computeThresholdForIngredient(i);
+			const days           = i.expiry ? daysUntil(i.expiry) : null;
+			const isLow          = Number(i.qty || 0) <= Number(minVal || 0);
+			const isExpiring     = isIngredient && days !== null && days >= 0 && days <= 7;
+			const isExpiringSoon = isIngredient && days !== null && days > 7 && days <= 30;
+
+			if (filter === 'usage') {
+				if (!isIngredient) return null;
+				if (!((agg.raw || []).some(r => r.id === i.id))) return null;
+			} else if (filter === 'low') {
+				if (!isLow) return null;
+			} else if (filter === 'expiring') {
+				if (!isIngredient) return null;
+				if (!(i.expiry && days >= 0 && days <= 30)) return null;
+			} else if (filter === 'all') {
+			} else {
+				if (!isIngredient) return null;
+				if (!((agg.raw || []).some(r => r.id === i.id))) return null;
+			}
+
+			const used    = (agg.raw || []).find(r => r.id === i.id);
+			const usedQty = used ? used.qty : 0;
+
+			// Row background: expiring urgent (red) > low stock (orange) > expiring soon (yellow)
+			const rowBg = isExpiring     ? 'background:rgba(239,68,68,.08);'
+			            : isLow          ? 'background:rgba(249,115,22,.08);'
+			            : isExpiringSoon  ? 'background:rgba(234,179,8,.07);'
+			            : '';
+
+			// Inline badges for name cell
+			const lowBadge    = isLow         ? ' <span style="font-size:10px;font-weight:800;padding:2px 6px;border-radius:999px;background:rgba(249,115,22,.18);color:#c2410c">LOW</span>' : '';
+			const expiryBadge = isExpiring    ? ' <span style="font-size:10px;font-weight:800;padding:2px 6px;border-radius:999px;background:rgba(239,68,68,.18);color:#dc2626">EXPIRING</span>'
+			                  : isExpiringSoon ? ' <span style="font-size:10px;font-weight:800;padding:2px 6px;border-radius:999px;background:rgba(234,179,8,.18);color:#b45309">SOON</span>' : '';
+
+			// Qty cell — bold + coloured when low
+			const qtyDisplay = `<span style="font-weight:${isLow?'700':'400'};color:${isLow?'#c2410c':'inherit'}">${+Number(i.qty||0).toFixed(3)}</span>`;
+
+			// Expiry cell — days countdown coloured by urgency
+			const expiryDisplay = i.expiry
+				? `${i.expiry} <span style="font-size:11px;color:${days<=7?'#dc2626':days<=30?'#b45309':'var(--muted,#888)'}">(${days}d)</span>${expiryBadge}`
+				: '—';
+
+			return `<tr style="${rowBg}">
+        <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${i.id}</td>
+        <td style="padding:8px;border:1px solid rgba(0,0,0,.07);font-weight:600">${escapeHtml(i.name)}${lowBadge}</td>
+        <td style="padding:8px;border:1px solid rgba(0,0,0,.07);text-align:right">${+usedQty.toFixed(3)}</td>
+        <td style="padding:8px;border:1px solid rgba(0,0,0,.07);text-align:right">${qtyDisplay}</td>
+        <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${escapeHtml(i.unit||'')}</td>
+        <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${minVal != null ? minVal : ''}</td>
+        <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${escapeHtml(i.type||'')}</td>
+        <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${expiryDisplay}</td>
+      </tr>`;
+		}).filter(Boolean).join('') || `<tr><td colspan="8" style="padding:12px" class="muted">No items match the selected filter/range</td></tr>`;
+		summaryEl.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+        <div>
+          <div style="font-weight:800">Reports — ${filter === 'usage' ? 'Ingredient Usage' : filter === 'low' ? 'Low stock' : filter === 'expiring' ? 'Expiring items' : 'All items'}</div>
+          <div class="muted small">Period: ${start.toISOString().slice(0,10)} to ${end.toISOString().slice(0,10)} • Total used: ${+totalUsed.toFixed(3)} • Low items: ${lowCount} • Expiring: ${expiringCount} • Top used: ${best}</div>
+        </div>
+        <div id="summarybtns" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select id="reportFilter" title="Filter report">
+            <option value="all">All items</option>
+            <option value="usage">Ingredient usage</option>
+            <option value="low">Low stock</option>
+            <option value="expiring">Expiring</option>
+          </select>
+          <button id="printReportsBtn" class="btn small">Print / Save PDF</button>
+          <button id="exportReportsCsvBtn" class="btn small">Export CSV</button>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:14px;margin-bottom:6px;font-size:12px;align-items:center">
+        <span style="font-weight:700;color:var(--muted,#888)">Legend:</span>
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:12px;height:12px;border-radius:3px;background:rgba(239,68,68,.18);display:inline-block"></span>Expiring within 7 days</span>
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:12px;height:12px;border-radius:3px;background:rgba(249,115,22,.18);display:inline-block"></span>Low stock</span>
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:12px;height:12px;border-radius:3px;background:rgba(234,179,8,.18);display:inline-block"></span>Expiring within 30 days</span>
+      </div>
+      <div style="margin-top:4px;overflow:auto">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr>
+            <th style="padding:8px;border:1px solid #eee">ID</th>
+            <th style="padding:8px;border:1px solid #eee">Name</th>
+            <th style="padding:8px;border:1px solid #eee">Used</th>
+            <th style="padding:8px;border:1px solid #eee">Current Qty</th>
+            <th style="padding:8px;border:1px solid #eee">Unit</th>
+            <th style="padding:8px;border:1px solid #eee">Min</th>
+            <th style="padding:8px;border:1px solid #eee">Type</th>
+            <th style="padding:8px;border:1px solid #eee">Expiry</th>
+          </tr></thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+      </div>
+    `;
+
+		const prBtn = q('printReportsBtn');
+		if (prBtn) prBtn.onclick = () => printReports(start.toISOString(), end.toISOString(), filter);
+		const exBtn = q('exportReportsCsvBtn');
+		if (exBtn) exBtn.onclick = () => exportReportsCSVReport(start.toISOString(), end.toISOString(), filter);
+		// Restore filter select to the value used for this render, and wire change handler
+		const filterSel = q('reportFilter');
+		if (filterSel) {
+			filterSel.value = filter;
+			filterSel.onchange = () => renderReports(q('reportStart')?.value || null, q('reportEnd')?.value || null, filterSel.value);
+		}
+	}
+
+	try { chartIngredientUsage && chartIngredientUsage.resize && chartIngredientUsage.resize(); } catch (e) {}
+}
 
 function printReports(rangeStartISO, rangeEndISO, filter) {
 	try {
@@ -5432,26 +5388,7 @@ function startApp() {
 	on('reportPeriod', 'change', () => renderReports());
 	on('searchOrder', 'input', () => renderOrders());
 
-	on('applyReportRange', 'click', () => {
-		renderReports(q('reportStart')?.value || null, q('reportEnd')?.value || null, q('reportFilter')?.value || 'usage');
-	});
-
-	// Preset changes → update date inputs then re-render
-	on('reportPreset', 'change', () => {
-		const days  = Number(q('reportPreset')?.value || 30);
-		const eDate = new Date();
-		const sDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-		if (q('reportStart')) q('reportStart').value = sDate.toISOString().slice(0, 10);
-		if (q('reportEnd'))   q('reportEnd').value   = eDate.toISOString().slice(0, 10);
-		renderReports(q('reportStart').value, q('reportEnd').value, q('reportFilter')?.value || 'usage');
-	});
-
-	// Date input changes → re-render immediately
-	on('reportStart', 'change', () => renderReports(q('reportStart')?.value, q('reportEnd')?.value, q('reportFilter')?.value || 'usage'));
-	on('reportEnd',   'change', () => renderReports(q('reportStart')?.value, q('reportEnd')?.value, q('reportFilter')?.value || 'usage'));
-
-	// Category filter change → re-render
-	on('reportFilter', 'change', () => renderReports(q('reportStart')?.value, q('reportEnd')?.value, q('reportFilter')?.value || 'usage'));
+	on('applyReportRange', 'click', () => {});
 
 	on('exportReportsBtn', 'click', () => {
 		const start = q('reportStart')?.value;
@@ -5577,10 +5514,18 @@ function startApp() {
 	}
 	
 	const applyBtn = q('applyReportRange');
-	if (applyBtn && !applyBtn._wired) {
-		applyBtn._wired = true;
+	if (applyBtn) {
+		applyBtn.removeEventListener?.('click', () => {});
 		applyBtn.addEventListener('click', () => {
-			renderReports(q('reportStart')?.value || null, q('reportEnd')?.value || null, q('reportFilter')?.value || 'usage');
+			const presetDays = Number(q('reportPreset')?.value || 30);
+			const end = new Date();
+			const start = new Date();
+			start.setDate(end.getDate() - (presetDays - 1));
+			q('reportStart').value = start.toISOString().slice(0, 10);
+			q('reportEnd').value = end.toISOString().slice(0, 10);
+			const filter = q('reportFilter')?.value || 'usage';
+			renderReports(q('reportStart').value, q('reportEnd').value, filter);
+			renderStockChart(q('reportStart').value, q('reportEnd').value);
 		});
 	}
 
