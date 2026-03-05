@@ -1367,10 +1367,52 @@ function openResetPasswordModal(email = '', code = '') {
 
 function applyTheme(theme) {
 	localStorage.setItem(THEME_KEY, theme);
-	if (theme === 'dark') document.documentElement.classList.add('theme-dark');
-	else document.documentElement.classList.remove('theme-dark');
+	document.documentElement.classList.remove('theme-dark', 'theme-custom');
+	const prevStyle = document.getElementById('custom-color-vars');
+	if (prevStyle) prevStyle.remove();
+
+	if (theme === 'dark') {
+		document.documentElement.classList.add('theme-dark');
+	} else if (theme === 'custom') {
+		document.documentElement.classList.add('theme-custom');
+		applyCustomColorVars();
+	}
 
 	if (q('themeToggle')) q('themeToggle').checked = theme === 'dark';
+
+	document.querySelectorAll('.theme-preset-btn').forEach(btn => {
+		const isActive = btn.dataset.preset === theme;
+		btn.classList.toggle('active', isActive);
+		btn.style.fontWeight = isActive ? '700' : '';
+	});
+}
+
+const CUSTOM_COLORS_KEY = 'bakery_custom_colors';
+const COLOR_SCHEME_DEFAULTS = {
+	'--bg':      { label: 'Background', light: '#eeeeee', dark: '#06101a' },
+	'--surface': { label: 'Surface',    light: '#f6f7fb', dark: '#081620' },
+	'--card':    { label: 'Card',       light: '#ffffff', dark: '#0f1a24' },
+	'--text':    { label: 'Text',       light: '#12202f', dark: '#e6f1fb' },
+	'--accent':  { label: 'Accent',     light: '#1b85ec', dark: '#ffb366' },
+};
+
+function loadCustomColors() {
+	try { return JSON.parse(localStorage.getItem(CUSTOM_COLORS_KEY) || 'null') || {}; } catch(e) { return {}; }
+}
+
+function saveCustomColors(obj) {
+	localStorage.setItem(CUSTOM_COLORS_KEY, JSON.stringify(obj));
+}
+
+function applyCustomColorVars() {
+	const stored = loadCustomColors();
+	const vars = Object.entries(COLOR_SCHEME_DEFAULTS).map(([varName, cfg]) => {
+		const val = stored[varName] || cfg.light;
+		return `${varName}: ${val};`;
+	}).join('\n  ');
+	let st = document.getElementById('custom-color-vars');
+	if (!st) { st = document.createElement('style'); st.id = 'custom-color-vars'; document.head.appendChild(st); }
+	st.textContent = `.theme-custom { ${vars} }`;
 }
 
 const SEARCH_HISTORY_KEY = 'bakery_search_history_v1';
@@ -4717,34 +4759,79 @@ function populateSettings() {
 		window.notify._overrideBySettings = true;
 	}
 
+	// ── Appearance / Color Scheme ──────────────────────────────────────────
 	const currentTheme = localStorage.getItem(THEME_KEY) || 'light';
-	const oldThemeEl = document.getElementById('themeToggle');
 
-	if (oldThemeEl) {
+	// Wire up preset buttons
+	document.querySelectorAll('.theme-preset-btn').forEach(btn => {
+		const isActive = btn.dataset.preset === currentTheme;
+		btn.classList.toggle('active', isActive);
+		btn.style.fontWeight = isActive ? '700' : '';
+		btn.addEventListener('click', () => {
+			const preset = btn.dataset.preset;
+			applyTheme(preset);
+			const panel = document.getElementById('customColorPanel');
+			if (panel) panel.style.display = preset === 'custom' ? 'block' : 'none';
+			if (preset === 'custom') buildColorPickers();
+			notify(`Theme: ${preset.charAt(0).toUpperCase() + preset.slice(1)}`);
+		});
+	});
 
-		if (!oldThemeEl.closest || !oldThemeEl.closest('.switch')) {
-			const wrap = document.createElement('label');
-			wrap.className = 'switch';
-			wrap.innerHTML = `<input id="themeToggle" type="checkbox" ${currentTheme === 'dark' ? 'checked': ''} /><span class="slider" aria-hidden="true"></span><span class="switch-label"></span>`;
-			try {
-				oldThemeEl.parentNode.replaceChild(wrap, oldThemeEl);
-			} catch (e) {
+	// Show/hide custom panel on load
+	const customPanel = document.getElementById('customColorPanel');
+	if (customPanel) {
+		customPanel.style.display = currentTheme === 'custom' ? 'block' : 'none';
+		if (currentTheme === 'custom') buildColorPickers();
+	}
 
-				if (oldThemeEl.parentNode) {
-					oldThemeEl.parentNode.insertBefore(wrap, oldThemeEl);
-					oldThemeEl.remove();
-				}
-			}
-		}
-	} else {
+	function buildColorPickers() {
+		const container = document.getElementById('colorPickerRows');
+		if (!container) return;
+		const stored = loadCustomColors();
+		container.innerHTML = '';
+		Object.entries(COLOR_SCHEME_DEFAULTS).forEach(([varName, cfg]) => {
+			const currentVal = stored[varName] || cfg.light;
+			const row = document.createElement('div');
+			row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;';
+			row.innerHTML = `
+				<span style="font-size:13px;font-weight:500;flex:1">${cfg.label}</span>
+				<div style="display:flex;align-items:center;gap:6px">
+					<input type="color" data-var="${varName}" value="${currentVal}"
+						style="width:36px;height:28px;border:none;border-radius:6px;cursor:pointer;padding:2px;background:transparent" />
+					<span class="color-hex-label" style="font-size:11px;font-family:monospace;opacity:.65;min-width:52px">${currentVal}</span>
+				</div>`;
+			container.appendChild(row);
+			const picker = row.querySelector('input[type=color]');
+			const hexLabel = row.querySelector('.color-hex-label');
+			picker.addEventListener('input', () => {
+				hexLabel.textContent = picker.value;
+			});
+		});
+	}
 
-		const container = q('settingsControls') || q('usersList')?.parentElement;
-		if (container && !container.querySelector('.switch #themeToggle') && !document.getElementById('themeToggle')) {
-			const wrap = document.createElement('div');
-			wrap.style.marginBottom = '10px';
-			wrap.innerHTML = `<label class="switch"><input id="themeToggle" type="checkbox" ${currentTheme === 'dark' ? 'checked': ''} /><span class="slider" aria-hidden="true"></span><span class="switch-label">Dark theme</span></label>`;
-			container.insertBefore(wrap, container.firstChild);
-		}
+	// Apply button
+	const applyBtn = document.getElementById('applyCustomColors');
+	if (applyBtn) {
+		applyBtn.addEventListener('click', () => {
+			const pickers = document.querySelectorAll('#colorPickerRows input[type=color]');
+			const colors = {};
+			pickers.forEach(p => { colors[p.dataset.var] = p.value; });
+			saveCustomColors(colors);
+			applyCustomColorVars();
+			applyTheme('custom');
+			notify('Custom colors applied!');
+		});
+	}
+
+	// Reset button
+	const resetBtn = document.getElementById('resetCustomColors');
+	if (resetBtn) {
+		resetBtn.addEventListener('click', () => {
+			localStorage.removeItem(CUSTOM_COLORS_KEY);
+			buildColorPickers();
+			applyCustomColorVars();
+			notify('Colors reset to defaults');
+		});
 	}
 
 	if (!document.getElementById('customCursorToggle')) {
@@ -4755,22 +4842,6 @@ function populateSettings() {
 			row.innerHTML = `<label class="switch"><input id="customCursorToggle" type="checkbox" ${(localStorage.getItem('bakery_custom_cursor') === 'true') ? 'checked':''} /><span class="slider" aria-hidden="true"></span><span class="switch-label"> Custom cursor</span></label>`;
 			container.insertBefore(row, container.firstChild);
 		}
-	}
-
-	const themeToggleEl = document.getElementById('themeToggle');
-	if (themeToggleEl) {
-		themeToggleEl.addEventListener('change', (e) => {
-			const isDark = !!e.target.checked;
-			try {
-				applyTheme(isDark ? 'dark' : 'light');
-			} catch (err) {
-
-				if (isDark) document.documentElement.classList.add('theme-dark');
-				else document.documentElement.classList.remove('theme-dark');
-				localStorage.setItem(THEME_KEY, isDark ? 'dark' : 'light');
-			}
-			notify(`Theme set to ${isDark ? 'dark' : 'light'}`);
-		});
 	}
 
 	const curToggle = document.getElementById('customCursorToggle');
@@ -5021,7 +5092,6 @@ function startApp() {
 		if (e.key === 'Escape') closeModal();
 	});
 
-	if (q('themeToggle')) q('themeToggle').addEventListener('change', (e) => applyTheme(e.target.checked ? 'dark' : 'light'));
 	if (q('addIngredientBtn')) q('addIngredientBtn').addEventListener('click', openAddIngredient);
 	if (q('addProductBtn')) q('addProductBtn').addEventListener('click', openAddProduct);
 
