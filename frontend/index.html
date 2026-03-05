@@ -324,23 +324,11 @@
               </div>
               <aside>
                 <div class="card small-card" id="appearanceCard">
-                  <h3 style="margin:0 0 12px 0">Appearance</h3>
-                  <div style="margin-bottom:14px">
-                    <div class="field-label" style="font-size:12px;font-weight:600;margin-bottom:8px;opacity:.7">PRESET THEMES</div>
-                    <div style="display:flex;gap:6px;flex-wrap:wrap" id="themePresetBtns">
-                      <button type="button" class="btn small theme-preset-btn" data-preset="light">☀️ Light</button>
-                      <button type="button" class="btn small theme-preset-btn" data-preset="dark">🌙 Dark</button>
-                      <button type="button" class="btn small theme-preset-btn" data-preset="custom">🎨 Custom</button>
-                    </div>
-                  </div>
-                  <div id="customColorPanel" style="display:none;border-top:1px solid rgba(128,128,128,.12);padding-top:12px;margin-top:4px">
-                    <div class="field-label" style="font-size:12px;font-weight:600;margin-bottom:10px;opacity:.7">CUSTOM COLORS</div>
-                    <div id="colorPickerRows" style="display:flex;flex-direction:column;gap:8px"></div>
-                    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
-                      <button type="button" id="applyCustomColors" class="btn small">Apply colors</button>
-                      <button type="button" id="resetCustomColors" class="btn ghost small">Reset</button>
-                    </div>
-                  </div>
+                  <h3 style="margin:0 0 4px 0">Appearance</h3>
+                  <div class="muted small" style="margin-bottom:12px">Pick a color scheme for the UI.</div>
+                  <div id="colorPaletteGrid" class="color-palette-grid"></div>
+                  <!-- hidden checkbox kept for backward-compat JS that reads #themeToggle -->
+                  <input id="themeToggle" type="checkbox" style="display:none" aria-hidden="true" />
                 </div>
                 <div class="card small-card" style="margin-top:12px">
                   <div id="usersList" class="users-list"></div>
