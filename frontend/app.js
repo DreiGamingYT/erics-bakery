@@ -2383,28 +2383,17 @@ async function renderIngredientCards(page = 1, limit = 5) {
 						});
 					}
 					if (inVal > 0) {
-						await apiFetch(`/api/ingredients/${id}/stock`, {
-							method: 'POST',
-							body: {
-								type: 'in',
-								qty: Number(inVal),
-								note: 'Stock-in'
-							}
-						});
-					}
-					if (outVal > 0) {
-						await apiFetch(`/api/ingredients/${id}/stock`, {
-							method: 'POST',
-							body: {
-								type: 'out',
-								qty: Number(outVal),
-								note: 'Stock-out'
-							}
-						});
-					}
-					notify('Inventory updated');
+						// Use applyStockChange so the undo bar appears
+						applyStockChange(id, 'in', Number(inVal), 'Stock-in');
+					} else if (outVal > 0) {
+						// Use applyStockChange so the undo bar appears
+						applyStockChange(id, 'out', Number(outVal), 'Stock-out');
+					} else {
+						// Only min threshold changed — no stock movement
+						notify('Min threshold updated');
 					await renderIngredientCards(meta.page || page, limit);
 					await renderInventoryActivity();
+					}
 				} catch (err) {
 					console.error('save-row api error', err);
 					notify(err.message || 'Server error');
