@@ -3167,10 +3167,10 @@ async function renderReports(rangeStart, rangeEnd, reportFilter) {
         <div id="summarybtns" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
           <div style="display:flex;gap:4px;align-items:center;background:rgba(0,0,0,0.03);border:1px solid rgba(0,0,0,0.08);border-radius:8px;padding:4px 8px;flex-wrap:wrap">
             <label style="font-size:11px;font-weight:700;color:var(--muted,#888);white-space:nowrap">From</label>
-            <input id="reportStart" type="date" value="${startISO}" style="height:30px;padding:0 6px;border-radius:6px;border:1px solid rgba(0,0,0,0.12);font-size:12px;background:var(--bg,#fff)" />
+            <input id="reportStart" type="date" value="${startISO}" style="height:30px;padding:0 6px;border-radius:6px;border:1px solid rgba(0,0,0,0.12);font-size:12px;background:var(--bg,#fff);color:var(--text);" />
             <label style="font-size:11px;font-weight:700;color:var(--muted,#888);white-space:nowrap">To</label>
-            <input id="reportEnd" type="date" value="${endISO}" style="height:30px;padding:0 6px;border-radius:6px;border:1px solid rgba(0,0,0,0.12);font-size:12px;background:var(--bg,#fff)" />
-            <select id="reportPreset" style="height:30px;padding:0 6px;border-radius:6px;border:1px solid rgba(0,0,0,0.12);font-size:12px;background:var(--bg,#fff)">
+            <input id="reportEnd" type="date" value="${endISO}" style="height:30px;padding:0 6px;border-radius:6px;border:1px solid rgba(0,0,0,0.12);font-size:12px;background:var(--bg,#fff);color:var(--text);" />
+            <select id="reportPreset" style="height:30px;padding:0 6px;border-radius:6px;border:1px solid rgba(0,0,0,0.12);font-size:12px;background:var(--bg,#fff);color:var(--text);">
               <option value="7">Last 7 days</option>
               <option value="30">Last 30 days</option>
               <option value="90">Last 90 days</option>
@@ -3295,10 +3295,22 @@ async function printReports(rangeStartISO, rangeEndISO, filter) {
 
 		const expiryWindow = (typeof REPORT_EXPIRY_DAYS !== 'undefined' ? REPORT_EXPIRY_DAYS : 7);
 		const rows = (DB.ingredients || []).map(i => {
-			if (selFilter === 'low' && !(i.type === 'ingredient' && i.qty <= (i.min || computeThresholdForIngredient(i)))) return '';
-			if (selFilter === 'expiring' && !(i.type === 'ingredient' && i.expiry && daysUntil(i.expiry) >= 0 && daysUntil(i.expiry) <= expiryWindow)) return '';
+			const isIngredient = String(i.type || '').toLowerCase() === 'ingredient';
+			const minVal       = (i.min != null) ? i.min : computeThresholdForIngredient(i);
+			const days         = i.expiry ? daysUntil(i.expiry) : null;
 			const sIn  = +(printStockInMap[i.id]  || 0).toFixed(3);
 			const sOut = +(printStockOutMap[i.id] || 0).toFixed(3);
+			// Apply same filter logic as renderReports
+			if (selFilter === 'usage') {
+				if (!isIngredient) return '';
+				if (!(sIn > 0 || sOut > 0)) return '';
+			} else if (selFilter === 'low') {
+				if (!(Number(i.qty || 0) <= Number(minVal || 0))) return '';
+			} else if (selFilter === 'expiring') {
+				if (!isIngredient) return '';
+				if (!(i.expiry && days !== null && days >= 0 && days <= 30)) return '';
+			}
+			// 'all' — no filter
 			return `<tr>
         <td style="padding:8px;border:1px solid #ddd">${i.id}</td>
         <td style="padding:8px;border:1px solid #ddd">${escapeHtml(i.name)}</td>
@@ -3320,7 +3332,7 @@ async function printReports(rangeStartISO, rangeEndISO, filter) {
       <head>
         <meta charset="utf-8"/>
         <meta name="viewport" content="width=device-width,initial-scale=1"/>
-        <title>Report — ${escapeHtml(selFilter)} — ${start.toISOString().slice(0,10)} to ${end.toISOString().slice(0,10)}</title>
+        <title>Report — ${selFilter === 'usage' ? 'Ingredient Usage' : selFilter === 'low' ? 'Low Stock' : selFilter === 'expiring' ? 'Expiring Items' : 'All Items'} — ${start.toISOString().slice(0,10)} to ${end.toISOString().slice(0,10)}</title>
         <style>
           html,body{font-family:Poppins,Inter,Arial,sans-serif;color:#12202f;margin:0;padding:8px}
           .header { display:flex;align-items:center;gap:12px;margin-bottom:12px }
@@ -3345,7 +3357,7 @@ async function printReports(rangeStartISO, rangeEndISO, filter) {
         <div class="header">
           <div>
             <h1>${escapeHtml(bakeryName)}</h1>
-            <div class="meta">Report: ${escapeHtml(selFilter)} • ${start.toISOString().slice(0,10)} — ${end.toISOString().slice(0,10)}</div>
+            <div class="meta">Report: ${selFilter === 'usage' ? 'Ingredient Usage' : selFilter === 'low' ? 'Low Stock' : selFilter === 'expiring' ? 'Expiring Items' : 'All Items'} • ${start.toISOString().slice(0,10)} — ${end.toISOString().slice(0,10)}</div>
             <div class="meta">Generated: ${new Date().toLocaleString()}</div>
           </div>
         </div>
@@ -3519,10 +3531,24 @@ async function exportReportsCSVReport(rangeStartISO, rangeEndISO, filter) {
 	];
 
 	(DB.ingredients || []).forEach(i => {
-		if (filter === 'low' && !(i.type === 'ingredient' && i.qty <= (i.min || computeThresholdForIngredient(i)))) return;
-		if (filter === 'expiring' && !(i.type === 'ingredient' && i.expiry && daysUntil(i.expiry) >= 0 && daysUntil(i.expiry) <= REPORT_EXPIRY_DAYS)) return;
+		const isIngredient = String(i.type || '').toLowerCase() === 'ingredient';
+		const minVal       = (i.min != null) ? i.min : computeThresholdForIngredient(i);
+		const days         = i.expiry ? daysUntil(i.expiry) : null;
+		const sIn  = +(csvStockInMap[i.id]  || 0).toFixed(3);
+		const sOut = +(csvStockOutMap[i.id] || 0).toFixed(3);
+		// Apply same filter logic as renderReports
+		if (filter === 'usage') {
+			if (!isIngredient) return;
+			if (!(sIn > 0 || sOut > 0)) return;
+		} else if (filter === 'low') {
+			if (!(Number(i.qty || 0) <= Number(minVal || 0))) return;
+		} else if (filter === 'expiring') {
+			if (!isIngredient) return;
+			if (!(i.expiry && days !== null && days >= 0 && days <= 30)) return;
+		}
+		// 'all' — no filter
 
-		rows.push([i.id, i.name, +(csvStockInMap[i.id] || 0).toFixed(3), +(csvStockOutMap[i.id] || 0).toFixed(3), i.qty, i.unit || '', i.min || '', i.type || '', i.expiry || '']);
+		rows.push([i.id, i.name, sIn, sOut, i.qty, i.unit || '', i.min || '', i.type || '', i.expiry || '']);
 	});
 
 	const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
