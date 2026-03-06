@@ -255,16 +255,24 @@
           <section id="view-profile" class="view hidden">
             <div class="page-header">
               <h2>User Profile</h2>
-              <div class="page-actions"><button id="saveProfile" class="btn primary small" type="button">Save Profile</button></div>
+              <div class="page-actions">
+                <button id="profileCancel" class="btn ghost small" type="button">Cancel</button>
+                <button id="saveProfile" class="btn primary small" type="button">Save Profile</button>
+              </div>
             </div>
             <div class="card profile-big">
               <div class="profile-grid" style="align-items:start;gap:18px">
                 <div class="profile-left">
                   <div class="avatar-wrap">
                     <div id="profileAvatarPreview" class="avatar-preview"><i class="fa fa-user fa-2x"></i></div>
-                    <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><label class="btn ghost small" for="profileAvatarInput" style="cursor:pointer">Upload Avatar</label><input id="profileAvatarInput" type="file" accept="image/*" style="display:none" /><button id="removeAvatar" class="btn small" type="button">Remove</button><button id="profileSaveServer" class="btn small" style="margin-left:auto" type="button">Save to server</button></div>
-                    <div class="muted small" style="margin-top:8px">Square JPEG/PNG, max ~1.5MB.</div>
+                    <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                      <label class="btn ghost small" for="profileAvatarInput" style="cursor:pointer"><i class="fa fa-upload" style="margin-right:5px"></i>Upload</label>
+                      <input id="profileAvatarInput" type="file" accept="image/*" style="display:none" />
+                      <button id="removeAvatar" class="btn small" type="button">Remove</button>
+                    </div>
+                    <div class="muted small" style="margin-top:4px">Square JPEG/PNG, max ~1.5MB.</div>
                   </div>
+                  <div id="profileSyncStatus" class="muted small" style="margin-top:4px;display:none"></div>
                   <div id="recent" class="card small-card" style="margin-top:10px">
                     <h3 style="margin:0 0 8px 0">Recent logins</h3>
                     <ul id="recentLogins" class="timeline" style="margin:0;padding:0;list-style:none"></ul>
@@ -273,18 +281,53 @@
                 </div>
                 <div class="profile-right">
                   <div class="card small-card">
-                    <h3 style="margin:0 0 8px 0">Account</h3><label class="field"><span class="field-label">Name</span><input id="profileName" /></label><label class="field"><span class="field-label">Role</span><input id="profileRole" /></label><label class="field"><span class="field-label">Username</span><input id="profileUsername" readonly /></label><label class="field"><span class="field-label">Email</span><input id="profileEmail" type="email" placeholder="you@bakery.example" /></label><label class="field"><span class="field-label">Phone</span><input id="profilePhone" type="tel" placeholder="+63 9..." /></label>
+                    <h3 style="margin:0 0 8px 0">Account</h3>
+                    <label class="field"><span class="field-label">Name</span><input id="profileName" /></label>
+                    <label class="field"><span class="field-label">Role</span><input id="profileRole" /></label>
+                    <label class="field"><span class="field-label">Username</span><input id="profileUsername" readonly /></label>
+                    <label class="field"><span class="field-label">Email</span><input id="profileEmail" type="email" placeholder="you@bakery.example" /></label>
+                    <label class="field"><span class="field-label">Phone</span><input id="profilePhone" type="tel" placeholder="+63 9..." /></label>
+                    <label class="field">
+                      <span class="field-label">Timezone</span>
+                      <select id="profileTimezone">
+                        <option value="Asia/Manila">Asia/Manila (PHT)</option>
+                        <option value="Asia/Singapore">Asia/Singapore (SGT)</option>
+                        <option value="Asia/Tokyo">Asia/Tokyo (JST)</option>
+                        <option value="Asia/Bangkok">Asia/Bangkok (ICT)</option>
+                        <option value="Asia/Jakarta">Asia/Jakarta (WIB)</option>
+                        <option value="Asia/Kolkata">Asia/Kolkata (IST)</option>
+                        <option value="Asia/Dubai">Asia/Dubai (GST)</option>
+                        <option value="Europe/London">Europe/London (GMT/BST)</option>
+                        <option value="Europe/Paris">Europe/Paris (CET)</option>
+                        <option value="America/New_York">America/New_York (ET)</option>
+                        <option value="America/Chicago">America/Chicago (CT)</option>
+                        <option value="America/Los_Angeles">America/Los_Angeles (PT)</option>
+                        <option value="UTC">UTC</option>
+                      </select>
+                    </label>
                   </div>
                   <div id="security" class="card small-card" style="margin-top:12px">
                     <h3 style="margin:0 0 8px 0">Security</h3>
-                    <div class="muted small" style="margin-bottom:8px">Change your password</div><label class="field"><span class="field-label">Current password</span><input id="curPassword" type="password" autocomplete="current-password" /></label><label class="field"><span class="field-label">New password</span><input id="newPassword" type="password" autocomplete="new-password" /></label><label class="field"><span class="field-label">Confirm new password</span><input id="confirmPassword" type="password" /></label>
-                    <div style="display:flex;gap:8px;margin-top:10px"><button id="changePassBtn" class="btn small" type="button">Change password</button>
+                    <div class="muted small" style="margin-bottom:8px">Change your password</div>
+                    <label class="field"><span class="field-label">Current password</span><input id="curPassword" type="password" autocomplete="current-password" /></label>
+                    <label class="field">
+                      <span class="field-label">New password</span>
+                      <input id="newPassword" type="password" autocomplete="new-password" />
+                      <div id="passStrengthBar" style="margin-top:5px;height:4px;border-radius:4px;background:rgba(0,0,0,0.07);display:none"><div id="passStrengthFill" style="height:100%;border-radius:4px;width:0;transition:width .25s,background .25s"></div></div>
+                      <div id="passStrengthLabel" class="muted small" style="margin-top:3px;display:none"></div>
+                    </label>
+                    <label class="field"><span class="field-label">Confirm new password</span><input id="confirmPassword" type="password" /></label>
+                    <div style="display:flex;gap:8px;margin-top:10px">
+                      <button id="changePassBtn" class="btn small" type="button">Change password</button>
                       <div id="changePassStatus" class="muted small" style="align-self:center"></div>
                     </div>
                   </div>
                   <div id="action" class="card small-card" style="margin-top:12px">
                     <h3 style="margin:0 0 8px 0">Account actions</h3>
-                    <div style="display:flex;flex-direction:column;gap:8px"><button id="signOutBtn" class="btn ghost small" type="button">Sign out</button><button id="deleteAccountBtn" class="btn small danger" type="button">Delete account</button></div>
+                    <div style="display:flex;flex-direction:column;gap:8px">
+                      <button id="signOutBtn" class="btn ghost small" type="button"><i class="fa fa-right-from-bracket" style="margin-right:6px"></i>Sign out</button>
+                      <button id="deleteAccountBtn" class="btn small danger" type="button"><i class="fa fa-trash" style="margin-right:6px"></i>Delete account</button>
+                    </div>
                   </div>
                 </div>
               </div>

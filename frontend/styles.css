@@ -1418,6 +1418,23 @@ body {
   border: 1px solid rgba(217, 83, 79, 0.12);
 }
 
+/* Timezone select styling */
+#profileTimezone {
+  height: 40px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Sync status line under avatar */
+#profileSyncStatus {
+  font-size: 11px;
+  color: var(--muted, #888);
+}
+
+/* Password strength bar */
+#passStrengthBar {
+  margin-top: 5px;
+}
 #logoutBtn {
   display: flex;
   align-items: center;

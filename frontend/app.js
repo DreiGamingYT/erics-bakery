@@ -5990,17 +5990,7 @@ function startApp() {
 		q('userMenu') && q('userMenu').classList.add('hidden');
 	};
 	if (q('logoutBtn')) q('logoutBtn').addEventListener('click', performLogout);
-	if (q('saveProfile')) q('saveProfile').addEventListener('click', (e) => {
-		e.preventDefault();
-		const name = q('profileName')?.value || '';
-		const sess = getSession();
-		if (sess) {
-			sess.name = name;
-			setSession(sess, !!getPersistentSession());
-			if (q('sidebarUser')) q('sidebarUser').textContent = `${name} — ${sess.role}`;
-			notify('Profile saved');
-		}
-	});
+	// saveProfile is bound in bindProfileControls — do not add a second listener here
 	if (q('saveBakery')) q('saveBakery').addEventListener('click', (e) => {
 		e.preventDefault();
 		const o = {
@@ -6541,8 +6531,8 @@ async function populateProfile() {
 	if (q('profileEmail')) q('profileEmail').value = prefs.email || s.email || '';
 	if (q('profilePhone')) q('profilePhone').value = prefs.phone || '';
 	if (q('profileTimezone')) q('profileTimezone').value = prefs.timezone || 'Asia/Manila';
-	if (q('prefEmailNotif')) q('prefEmailNotif').checked = !!prefs.emailNotifications;
-	if (q('prefPushNotif')) q('prefPushNotif').checked = !!prefs.pushNotifications;
+	// Note: prefEmailNotif and prefPushNotif are intentionally NOT set here —
+	// they live in view-settings and are managed by notifications.js
 
 	const avatarData = localStorage.getItem(avatarKeyFor(s.username));
 	const avatarWrap = q('profileAvatarPreview');
@@ -6647,27 +6637,26 @@ function bindProfileAvatarUpload() {
 	});
 }
 
-function saveProfile() {
+async function saveProfile() {
 	const s = getSession();
 	if (!s) {
 		notify('Not signed in');
 		return;
 	}
 
-	const name = q('profileName')?.value?.trim() || s.name || '';
-	const role = q('profileRole')?.value?.trim() || s.role || '';
-	const email = q('profileEmail')?.value?.trim() || '';
-	const phone = q('profilePhone')?.value?.trim() || '';
-	const timezone = q('profileTimezone')?.value || 'Asia/Manila';
-	const emailNotif = !!q('prefEmailNotif')?.checked;
-	const pushNotif = !!q('prefPushNotif')?.checked;
+	const saveBtn = q('saveProfile');
+	if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
 
+	const name     = q('profileName')?.value?.trim() || s.name || '';
+	const role     = q('profileRole')?.value?.trim() || s.role || '';
+	const email    = q('profileEmail')?.value?.trim() || '';
+	const phone    = q('profilePhone')?.value?.trim() || '';
+	const timezone = q('profileTimezone')?.value || 'Asia/Manila';
+
+	// Update local session
 	s.name = name;
 	const sess = getSession();
-	if (sess && sess.role === 'Owner') {
-		s.role = role;
-	}
-
+	if (sess && sess.role === 'Owner') s.role = role;
 	setSession(s, !!getPersistentSession());
 
 	try {
@@ -6679,29 +6668,45 @@ function saveProfile() {
 		}
 	} catch (e) {}
 
-	const prefs = {
-		email,
-		phone,
-		timezone,
-		emailNotifications: emailNotif,
-		pushNotifications: pushNotif
-	};
+	// Save prefs to localStorage — deliberately NOT touching notification prefs
+	// (those are managed by notifications.js and saved separately to the server)
+	const existingPrefs = JSON.parse(localStorage.getItem(prefsKeyFor(s.username)) || '{}');
+	const prefs = Object.assign({}, existingPrefs, { email, phone, timezone });
 	localStorage.setItem(prefsKeyFor(s.username), JSON.stringify(prefs));
 
 	if (q('sidebarUser')) q('sidebarUser').textContent = `${s.name} — ${s.role}`;
 	if (q('userBadgeText')) q('userBadgeText').textContent = `${s.name}`;
 
+	// Push to server
+	let serverOk = false;
 	try {
-		const arr = JSON.parse(localStorage.getItem('recent_logins') || '[]');
-		arr.push({
-			username: s.username || '',
-			time: new Date().toLocaleString()
+		const payload = { name, email, phone };
+		if (sess && sess.role === 'Owner') payload.role = role;
+		const res = await fetch('/api/users/me', {
+			method: 'PUT',
+			headers: { 'Content-Type': 'application/json' },
+			credentials: 'include',
+			body: JSON.stringify(payload)
 		});
+		if (res.ok) {
+			serverOk = true;
+			const data = await res.json().catch(() => null);
+			if (data && data.user) setSession(data.user, !!getPersistentSession());
+			const syncEl = q('profileSyncStatus');
+			if (syncEl) {
+				syncEl.textContent = `Last saved: ${new Date().toLocaleTimeString()}`;
+				syncEl.style.display = 'block';
+			}
+		} else {
+			const body = await res.json().catch(() => null);
+			notify((body && (body.error || body.message)) || 'Server update failed — changes saved locally only', { type: 'warn' });
+		}
+	} catch (e) {
+		notify('Server unreachable — changes saved locally only', { type: 'warn' });
+	}
 
-		localStorage.setItem('recent_logins', JSON.stringify(arr.slice(-12)));
-	} catch (e) {}
-
-	notify('Profile saved', 1);
+	if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save Profile'; }
+	notify(serverOk ? 'Profile saved' : 'Saved locally', { type: serverOk ? 'success' : 'info' });
 }
 
 async function changePassword() {
@@ -6794,14 +6799,31 @@ async function changePassword() {
 }
 
 
-function deleteAccountDemo() {
+async function deleteAccountDemo() {
 	const s = getSession();
 	if (!s) return;
-	if (!confirm(`Delete account ${s.username}? This will remove local account.`)) return;
+	if (!confirm(`Delete account "${s.username}"?\nThis will permanently remove your account and cannot be undone.`)) return;
+
+	// Try server deletion first (admin endpoint only works for Owner — falls back to local gracefully)
+	let serverDeleted = false;
+	try {
+		if (s.id) {
+			const res = await fetch(`/api/admin/users/${s.id}`, {
+				method: 'DELETE',
+				credentials: 'include'
+			});
+			if (res.ok) serverDeleted = true;
+		}
+	} catch (e) {}
+
+	// Always clean up locally
+	try {
 	const acc = loadAccounts();
 	delete acc[s.username];
 	saveAccounts(acc);
-	notify('Account deleted');
+	} catch (e) {}
+
+	notify(serverDeleted ? 'Account deleted' : 'Local account removed');
 	performLogout();
 }
 
@@ -6894,19 +6916,16 @@ function bindProfileControls() {
 		removeBtn.addEventListener('click', onRemoveAvatar);
 	}
 
-	const profileSaveServerBtn = q('profileSaveServer');
-	if (profileSaveServerBtn) {
-		profileSaveServerBtn.addEventListener('click', onSaveServer);
-	}
+	// "Save to server" button removed — main Save Profile now handles both local + server
 
 	const saveBtn = q('saveProfile');
 	if (saveBtn) {
 		saveBtn.onclick = (e) => {
 			e.preventDefault();
 			saveProfile();
-			populateProfile();
 		};
 	}
+
 	const cancelBtn = q('profileCancel');
 	if (cancelBtn) {
 		cancelBtn.onclick = (e) => {
@@ -6914,6 +6933,38 @@ function bindProfileControls() {
 			populateProfile();
 			notify('Changes reverted');
 		};
+	}
+
+	// Password strength indicator
+	const newPwInput = q('newPassword');
+	if (newPwInput) {
+		newPwInput.addEventListener('input', () => {
+			const bar   = q('passStrengthBar');
+			const fill  = q('passStrengthFill');
+			const label = q('passStrengthLabel');
+			if (!bar || !fill || !label) return;
+			const v = newPwInput.value;
+			if (!v) { bar.style.display = 'none'; label.style.display = 'none'; return; }
+			bar.style.display = 'block'; label.style.display = 'block';
+			let score = 0;
+			if (v.length >= 8)  score++;
+			if (v.length >= 12) score++;
+			if (/[A-Z]/.test(v) && /[a-z]/.test(v)) score++;
+			if (/[0-9]/.test(v)) score++;
+			if (/[^A-Za-z0-9]/.test(v)) score++;
+			const levels = [
+				{ pct: '20%',  bg: '#ef4444', txt: 'Very weak'  },
+				{ pct: '40%',  bg: '#f97316', txt: 'Weak'       },
+				{ pct: '60%',  bg: '#eab308', txt: 'Fair'       },
+				{ pct: '80%',  bg: '#22c55e', txt: 'Strong'     },
+				{ pct: '100%', bg: '#15803d', txt: 'Very strong' },
+			];
+			const lvl = levels[Math.min(score, 4)];
+			fill.style.width      = lvl.pct;
+			fill.style.background = lvl.bg;
+			label.textContent     = lvl.txt;
+			label.style.color     = lvl.bg;
+		});
 	}
 
 	const cpb = q('changePassBtn');
@@ -7196,9 +7247,9 @@ const HELP_STEPS = {
 			pos: 'top'
 		},
 		{
-			sel: '#event',
-			title: 'Events',
-			text: 'Open to view events.',
+			sel: '#addScheduleBtn',
+			title: 'Schedule',
+			text: 'Schedule events.',
 			pos: 'right'
 		}
 	],
