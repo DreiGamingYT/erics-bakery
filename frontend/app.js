@@ -4975,13 +4975,109 @@ function addAllChartDownloadBtns() {
 	];
 	charts.forEach(c => addChartDownloadBtn(c.id, c.name));
 }
+
+// ── UNDO BAR — fully independent of notify/toast, always visible ─────────────
+function showUndoBar(message, onUndo, timeout) {
+	timeout = timeout || 6000;
+	var old = document.getElementById('bakery-undo-bar');
+	if (old) { try { old.remove(); } catch (_) {} }
+
+	var bar = document.createElement('div');
+	bar.id = 'bakery-undo-bar';
+	bar.setAttribute('style', [
+		'position:fixed',
+		'bottom:24px',
+		'left:50%',
+		'transform:translateX(-50%) translateY(120px)',
+		'background:#1e293b',
+		'color:#ffffff',
+		'padding:12px 16px 15px 20px',
+		'border-radius:999px',
+		'display:flex',
+		'align-items:center',
+		'gap:14px',
+		'z-index:99999',
+		'box-shadow:0 8px 32px rgba(0,0,0,0.32)',
+		'transition:transform 0.35s cubic-bezier(0.34,1.4,0.64,1)',
+		'pointer-events:auto',
+		'min-width:280px',
+		'max-width:90vw',
+		'overflow:hidden',
+		'box-sizing:border-box',
+		'font-family:inherit'
+	].join(';'));
+
+	var msgEl = document.createElement('span');
+	msgEl.setAttribute('style', 'flex:1;font-size:13px;font-weight:600;color:#ffffff;line-height:1.3');
+	msgEl.textContent = String(message || '');
+
+	var btn = document.createElement('button');
+	btn.textContent = 'Undo';
+	btn.setAttribute('style', [
+		'background:#3b82f6',
+		'color:#ffffff',
+		'border:none',
+		'border-radius:999px',
+		'padding:6px 18px',
+		'font-size:13px',
+		'font-weight:800',
+		'cursor:pointer',
+		'flex-shrink:0',
+		'font-family:inherit',
+		'line-height:1.4',
+		'display:inline-block'
+	].join(';'));
+
+	var progress = document.createElement('div');
+	progress.setAttribute('style',
+		'position:absolute;bottom:0;left:0;height:3px;background:rgba(59,130,246,0.7);' +
+		'width:100%;border-radius:0;transition:width ' + timeout + 'ms linear'
+	);
+
+	bar.appendChild(msgEl);
+	bar.appendChild(btn);
+	bar.appendChild(progress);
+	document.body.appendChild(bar);
+
+	// Double rAF to ensure transition triggers
+	requestAnimationFrame(function() {
+		requestAnimationFrame(function() {
+			bar.style.transform = 'translateX(-50%) translateY(0)';
+			progress.style.width = '0%';
+		});
+	});
+
+	var done = false;
+	function hide() {
+		if (done) return;
+		done = true;
+		bar.style.transform = 'translateX(-50%) translateY(120px)';
+		setTimeout(function() { try { bar.remove(); } catch (_) {} }, 400);
+	}
+
+	var tid = setTimeout(hide, timeout);
+
+	btn.addEventListener('click', function(e) {
+		e.stopPropagation();
+		clearTimeout(tid);
+		hide();
+		try { onUndo(); } catch (err) { console.error('[undoBar] onUndo error', err); }
+	});
+
+	bar.addEventListener('click', function(e) {
+		if (e.target === btn) return;
+		clearTimeout(tid);
+		hide();
+	});
+}
+
 async function applyStockChange(id, type, qty, note) {
 	if (!id || !['in', 'out'].includes(type) || !(qty > 0)) {
-		notify('Invalid stock change', { type: 'error' });
+		notify('Invalid stock change');
 		return;
 	}
 
-	// ── Optimistic UI update ──────────────────────────────────
+	// ── Optimistic UI update ─────────────────────────────────────────────────
 	const ing = DB.ingredients.find(x => x.id === id);
 	const prevQty = ing ? ing.qty : null;
 	if (ing) {
@@ -4991,27 +5087,22 @@ async function applyStockChange(id, type, qty, note) {
 		renderDashboard();
 	}
 
-	let undone = false;
-	const revert = () => {
-		if (undone) return;
-		undone = true;
+	// ── Show undo bar (independent UI, always visible) ───────────────────────
+	const label = type === 'in' ? '\u2191 Stock In' : '\u2193 Stock Out';
+	const undoMsg = label + ': ' + qty + ' ' + (ing ? (ing.unit || '') : '') + ' \u2014 ' + (ing ? (ing.name || '') : '');
+	let serverDone = false;
+
+	showUndoBar(undoMsg, async function() {
+		// Revert optimistic update
 		if (ing && prevQty !== null) {
 			ing.qty = prevQty;
 			renderIngredientCards();
 			renderDashboard();
 		}
-		notify('Stock change undone', { type: 'warn' });
-	};
-
-	const label = type === 'in' ? '↑ Stock In' : '↓ Stock Out';
-	notify(`${label}: ${qty} ${ing?.unit || ''} — ${ing?.name || ''}`, {
-		type: type === 'in' ? 'success' : 'warn',
-		timeout: 6000,
-		onUndo: async () => {
-			revert();
-			// Best-effort reverse on server — stock the other way
-	try {
-		await apiFetch(`/api/ingredients/${id}/stock`, {
+		// If server already saved, reverse it
+		if (serverDone) {
+			try {
+				await apiFetch('/api/ingredients/' + id + '/stock', {
 			method: 'POST',
 					body: { type: type === 'in' ? 'out' : 'in', qty: Number(qty), note: '(undo)' }
 				});
@@ -5020,14 +5111,15 @@ async function applyStockChange(id, type, qty, note) {
 				renderDashboard();
 			} catch (_) {}
 		}
+		notify('Stock change undone');
 	});
 
 	try {
-		await apiFetch(`/api/ingredients/${id}/stock`, {
+		await apiFetch('/api/ingredients/' + id + '/stock', {
 			method: 'POST',
-			body: { type, qty: Number(qty), note: note || '' }
+			body: { type: type, qty: Number(qty), note: note || '' }
 		});
-		// Sync real qty from server after save
+		serverDone = true;
 		await renderIngredientCards();
 		await renderInventoryActivity();
 		renderStockChart();
@@ -5035,8 +5127,12 @@ async function applyStockChange(id, type, qty, note) {
 		if (reportsVisible) renderReports();
 	} catch (e) {
 		console.error('applyStockChange err', e);
-		revert();
-		notify(e.message || 'Server error', { type: 'error' });
+		if (ing && prevQty !== null) {
+			ing.qty = prevQty;
+			renderIngredientCards();
+			renderDashboard();
+		}
+		notify(e.message || 'Server error');
 	}
 }
 
