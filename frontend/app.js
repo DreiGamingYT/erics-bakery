@@ -890,6 +890,9 @@ function notify(msg, opts = {}) {
 		console.warn('notify failed', msg);
 	}
 }
+// Mark so the settings-block override doesn't replace our enhanced version
+notify._overrideBySettings = true;
+window.notify = notify;
 
 const PERMISSIONS = {
 	Owner: {
@@ -3074,15 +3077,27 @@ async function renderReports(rangeStart, rangeEnd, reportFilter) {
 			<div style="margin-bottom:14px;border-radius:10px;overflow:hidden;border:1.5px solid rgba(249,115,22,.35)">
 				<div style="background:rgba(249,115,22,.12);padding:8px 14px;display:flex;align-items:center;gap:8px">
 					<span style="font-size:16px">⚠️</span>
-					<span style="font-weight:800;color:#c2410c">${lowItems.length} item${lowItems.length>1?'s':''} at or below minimum stock${criticalItems.length ? ` · ${criticalItems.length} completely out` : ''}</span>
+      <span style="font-weight:800;color:#c2410c">
+        ${lowItems.length} item${lowItems.length > 1 ? 's' : ''} at or below minimum stock${(criticalItems && criticalItems.length) ? ` · ${criticalItems.length} completely out` : ''}
+      </span>
 				</div>
+
 				<div style="display:flex;flex-wrap:wrap;gap:6px;padding:10px 14px;background:rgba(249,115,22,.04)">
 					${lowItems.map(i => {
-						const isEmpty = Number(i.qty||0) === 0;
-						return `<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700;background:${isEmpty?'rgba(239,68,68,.15)':'rgba(249,115,22,.15)'};color:${isEmpty?'#dc2626':'#c2410c'}">${escapeHtml(i.name)} — ${i.qty} ${escapeHtml(i.unit||'')} ${isEmpty?'⛔':'⚠️'}</span>`;
+        const isEmpty = Number(i.qty || 0) === 0;
+        // build the span with string concatenation to avoid nested backtick conflicts
+        return (
+          '<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700;' +
+          'background:' + (isEmpty ? 'rgba(239,68,68,.15)' : 'rgba(249,115,22,.15)') + ';' +
+          'color:' + (isEmpty ? '#dc2626' : '#c2410c') + '">' +
+            escapeHtml(i.name) + ' — ' + (i.qty ?? 0) + ' ' + escapeHtml(i.unit || '') + ' ' +
+            (isEmpty ? '⛔' : '⚠️') +
+          '</span>'
+        );
 					}).join('')}
 				</div>
-			</div>` : '';
+  </div>
+` : '';
 
 		const lowCount = (DB.ingredients || []).filter(i => {
 			const minVal = (i && (i.min != null)) ? i.min : computeThresholdForIngredient(i);
