@@ -2237,27 +2237,7 @@ async function renderIngredientCards(page = 1, limit = 5) {
 	const chip = document.querySelector('.filter-chips .chip.active')?.dataset.filter || 'all';
 	const invType = document.querySelector('input[name="invType"]:checked')?.value || 'all';
 
-	if (!document.getElementById('inv-table-responsive-style')) {
-		const st = document.createElement('style');
-		st.id = 'inv-table-responsive-style';
-		st.textContent = `
-      .inv-table-wrap { width:100%; overflow:auto; -webkit-overflow-scrolling:touch; }
-      .inv-table { width:100%; border-collapse:collapse }
-      .inv-table thead th { text-align:left; padding:8px; border-bottom:1px solid rgba(0,0,0,0.06); }
-      @media (max-width:700px) {
-        .inv-table { display:block; }
-        .inv-table thead { display:none; }
-        .inv-table tbody { display:block; }
-        .inv-table tr { display:block; margin-bottom:10px; border-radius:8px; background:var(--card); padding:10px; border:1px solid rgba(0,0,0,0.04); }
-        .inv-table td { display:flex; justify-content:space-between; padding:6px 8px; border:0; }
-        .inv-table td[data-label]::before { content: attr(data-label); font-weight:700; color:rgba(0,0,0,0.6); margin-right:8px; white-space:nowrap; }
-        .inv-table td .muted.small { display:block; margin-left:12px; color:rgba(0,0,0,0.54); margin-top:6px; font-size:12px; }
-        .inv-table td input { max-width:40%; }
-        .inv-table td .btn { margin-left:8px; }
-      }
-    `;
-		document.head.appendChild(st);
-	}
+	// Responsive table styles are in styles.css — no JS injection needed
 
 	container.innerHTML = `<div class="card muted">Loading inventory…</div>`;
 

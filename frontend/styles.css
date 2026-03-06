@@ -1651,55 +1651,197 @@ body {
 
 }
 
-@media (max-width: 560px) {
-  #ingredientList {
+/* ── Mobile inventory — unified, conflict-free ───────────────────────────── */
+
+/* inv-table-wrap: always scrollable on small screens */
+.inv-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
     border-radius: 10px;
-    padding: 6px;
+}
+
+/* ── 767px: page-header search takes full width ────────────────────────── */
+@media (max-width: 767px) {
+  #view-inventory .page-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
   }
-  #ingredientList .inv-table {
-    border-radius: 8px;
+  #view-inventory .page-actions {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 6px;
+    align-items: center;
+    width: 100%;
   }
+  #view-inventory .page-actions #searchIng {
+    grid-column: 1 / -1;
+    width: 100%;
+    box-sizing: border-box;
+    height: 42px;
+    font-size: 14px;
+  }
+  #view-inventory .page-actions .filter-chips {
+    grid-column: 1 / -1;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  #view-inventory .page-actions .chip {
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+  #view-inventory .page-actions #batchStockBtn,
+  #view-inventory .page-actions #addIngredientBtn {
+    height: 42px;
+    min-width: 44px;
+  }
+}
+
+/* ── 640px: card table becomes stacked label-value rows ───────────────── */
+@media (max-width: 640px) {
   #ingredientList .inv-table thead {
     display: none;
   }
-  #ingredientList .inv-table tbody tr {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 8px;
-    padding: 10px;
-    margin-bottom: 10px;
-    border-radius: 10px;
-  }
-  #ingredientList .inv-table td {
+
+  #ingredientList .inv-table,
+  #ingredientList .inv-table tbody {
     display: block;
-    border: none;
-    padding: 6px 4px;
-  }
-  #ingredientList .inv-table td:nth-child(1),
-  #ingredientList .inv-table td:nth-child(2) {
-    grid-column: 1 / -1;
-  }
-  #ingredientList .inv-table td:nth-child(3),
-  #ingredientList .inv-table td:nth-child(4),
-  #ingredientList .inv-table td:nth-child(5),
-  #ingredientList .inv-table td:nth-child(6) {
-    font-size: 13px;
-    font-weight: 800;
-    color: var(--primary);
-  }
-  #ingredientList .inv-table td:nth-child(9) {
-    display: flex;
-    gap: 8px;
-    justify-self: end;
-    align-items: center;
-  }
-  #ingredientList .inv-table .qty-value {
-    font-weight: 900;
-    font-size: 15px;
-  }
-  #ingredientList .inv-table input {
     width: 100%;
+  }
+
+  #ingredientList .inv-table tbody tr {
+    display: block;
+    background: var(--card);
+    border-radius: 12px;
+    border: 1px solid rgba(0,0,0,0.05);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    margin-bottom: 10px;
+    padding: 12px;
+    /* cancel desktop hover lift on touch */
+    transform: none !important;
+  }
+
+  #ingredientList .inv-table td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 0;
+    border: none;
+    font-size: 13px;
+    gap: 8px;
+  }
+
+  /* label pulled from data-label */
+  #ingredientList .inv-table td[data-label]::before {
+    content: attr(data-label);
+    font-weight: 700;
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    flex-shrink: 0;
+    min-width: 72px;
+  }
+
+  /* hide low-value columns on smallest screens */
+  #ingredientList .inv-table td[data-label="ID"],
+  #ingredientList .inv-table td[data-label="Supplier"],
+  #ingredientList .inv-table td[data-label="Threshold"] {
+    display: none;
+  }
+
+  /* Name row — bigger, no label prefix */
+  #ingredientList .inv-table td[data-label="Name"] {
+    font-size: 15px;
+    font-weight: 800;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(0,0,0,0.05);
+    margin-bottom: 4px;
+  }
+  #ingredientList .inv-table td[data-label="Name"]::before {
+    display: none;
+  }
+
+  /* Qty row — highlight the value */
+  #ingredientList .inv-table .qty-value {
+    font-size: 16px;
+    font-weight: 900;
+  }
+
+  /* In / Out / Min inputs — full available width */
+  #ingredientList .inv-table .in-input,
+  #ingredientList .inv-table .out-input,
+  #ingredientList .inv-table .min-input {
+    width: 100%;
+    max-width: 120px;
     min-width: 0;
+    box-sizing: border-box;
+    height: 38px;
+    font-size: 15px;
+    text-align: right;
+  }
+
+  /* Actions row — spread Save / Details / Edit */
+  #ingredientList .inv-table td[data-label="Actions"] {
+    padding-top: 10px;
+    border-top: 1px solid rgba(0,0,0,0.05);
+    margin-top: 4px;
+    justify-content: flex-end;
+  }
+  #ingredientList .inv-table td[data-label="Actions"]::before {
+    display: none;
+  }
+  #ingredientList .inv-table td[data-label="Actions"] .btn {
+    flex: 1;
+    justify-content: center;
+    min-height: 40px;
+    font-size: 13px;
+  }
+
+  /* Delete column */
+  #ingredientList .inv-table td[data-label="Delete"] {
+    justify-content: flex-end;
+    padding-top: 6px;
+  }
+  #ingredientList .inv-table td[data-label="Delete"]::before {
+    display: none;
+  }
+
+  /* inv-header type filters stack neatly */
+  .inv-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .inv-filters {
+    gap: 6px;
+  }
+  .inv-filters label {
+    font-size: 13px;
+  }
+  .inv-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+  .inv-actions .btn {
+    text-align: center;
+    justify-content: center;
+    min-height: 40px;
+  }
+
+  /* Pagination — larger tap targets */
+  #invPagination .btn {
+    min-height: 40px;
+    min-width: 40px;
+    padding: 8px 10px !important;
+    font-size: 14px;
+  }
+
+  /* Activity panel spacing when stacked */
+  #inventoryActivity {
+    margin-top: 8px;
   }
 }
 
@@ -3330,31 +3472,7 @@ html {
   gap: 8px;
 }
 
-@media (max-width: 640px) {
-  .inv-header {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
-  }
-
-  .inv-actions {
-    justify-content: flex-start;
-    gap: 6px;
-  }
-
-  .inv-actions .btn {
-    flex: 1 1 auto;
-  }
-
-  .inv-filters {
-    justify-content: flex-start;
-    gap: 6px;
-  }
-
-  .inv-filters label {
-    font-size: 14px;
-  }
-}
+/* inv-header mobile handled in unified mobile block above */
 
 /* User menu container */
 .user-menu {
@@ -4119,7 +4237,8 @@ html {
 
 /* ── Mobile nav improvements ─────────────────────────────────── */
 @media (max-width: 640px) {
-  .page-actions { flex-wrap: wrap; gap: 6px !important; }
+  /* inventory page-actions handled by its own scoped rule above */
+  .page-actions:not(#view-inventory .page-actions) { flex-wrap: wrap; gap: 6px !important; }
   .page-actions .btn { min-height: 40px; font-size: 13px; }
   #batchStockBtn { order: -1; }
 }
