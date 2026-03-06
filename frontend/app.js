@@ -2968,7 +2968,7 @@ async function renderInventoryActivity(limit = 20) {
 	}
 }
 
-function renderReports(rangeStart, rangeEnd, reportFilter) {
+async function renderReports(rangeStart, rangeEnd, reportFilter) {
 	const startInput = rangeStart || q('reportStart')?.value || null;
 	const endInput = rangeEnd || q('reportEnd')?.value || null;
 	const presetDays = Number(q('reportPreset')?.value || 30);
@@ -2987,11 +2987,14 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
 		chartSalesTimeline = null;
 	} catch (e) {}
 
-	// Build per-ingredient stock-in and stock-out totals for the selected date range
+	// Build per-ingredient stock-in and stock-out totals — fetch live from API
 	const stockInMap  = {};
 	const stockOutMap = {};
-		(DB.activity || []).forEach(a => {
-			const t = new Date(a.time || a.date || null);
+	try {
+		const actResp = await apiFetch('/api/activity?limit=5000');
+		const liveActivity = (actResp && actResp.items) ? actResp.items : [];
+		liveActivity.forEach(a => {
+			const t = new Date(a.time || null);
 			if (!t || t < start || t > end) return;
 			const iid = Number(a.ingredient_id || 0);
 		if (!iid) return;
@@ -2999,11 +3002,14 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
 		const text   = String(a.text   || '').toLowerCase();
 			const m = String(a.text || '').match(/([0-9]*\.?[0-9]+)/g);
 		const v = m ? (Number(m[0]) || 0) : 0;
-		const isIn  = action.includes('stock_in')  || action.includes('stock in')  || text.includes('stock in');
-		const isOut = action.includes('stock_out') || action.includes('stock out') || text.includes('stock out') || text.includes('used');
+			const isIn  = action === 'stock_in'  || text.includes('stock in');
+			const isOut = action === 'stock_out' || text.includes('stock out') || text.includes('used for');
 		if (isIn)  stockInMap[iid]  = (stockInMap[iid]  || 0) + v;
 		if (isOut) stockOutMap[iid] = (stockOutMap[iid] || 0) + v;
 		});
+	} catch (e) {
+		console.warn('[renderReports] could not fetch live activity:', e);
+	}
 
 	// Keep agg for the bar chart (stock-out totals used as "usage")
 	let agg;
@@ -3220,7 +3226,7 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
 	try { chartIngredientUsage && chartIngredientUsage.resize && chartIngredientUsage.resize(); } catch (e) {}
 }
 
-function printReports(rangeStartISO, rangeEndISO, filter) {
+async function printReports(rangeStartISO, rangeEndISO, filter) {
 	try {
 
 		const selFilter = filter || q('reportFilter')?.value || 'usage';
@@ -3234,29 +3240,37 @@ function printReports(rangeStartISO, rangeEndISO, filter) {
 
 		const bakeryName = (q('bakeryName')?.value) || document.querySelector('.brand-name')?.innerText || "Eric's Bakery";
 
-		const usageMap = {};
-		(DB.ingredients || []).forEach(i => usageMap[i.id] = 0);
-		(DB.activity || []).forEach(a => {
-			const t = new Date(a.time || a.date || null);
-			if (!t) return;
-			if (t < start || t > end) return;
-			const txt = String(a.text || '').toLowerCase();
-			if (!(txt.includes('used') || txt.includes('stock out') || txt.includes('used for'))) return;
+		// Fetch live activity from API for accurate stock in/out data
+		const printStockInMap  = {};
+		const printStockOutMap = {};
+		try {
+			const actResp = await apiFetch('/api/activity?limit=5000');
+			const liveAct = (actResp && actResp.items) ? actResp.items : [];
+			liveAct.forEach(a => {
+				const t = new Date(a.time || null);
+				if (!t || t < start || t > end) return;
+				const iid = Number(a.ingredient_id || 0);
+				if (!iid) return;
+				const action = String(a.action || '').toLowerCase();
+				const text   = String(a.text   || '').toLowerCase();
 			const m = String(a.text || '').match(/([0-9]*\.?[0-9]+)/g);
-			if (!m) return;
-			const v = Number(m[0]) || 0;
-			if (a.ingredient_id) usageMap[a.ingredient_id] = (usageMap[a.ingredient_id] || 0) + v;
+				const v = m ? (Number(m[0]) || 0) : 0;
+				if (action === 'stock_in'  || text.includes('stock in'))  printStockInMap[iid]  = (printStockInMap[iid]  || 0) + v;
+				if (action === 'stock_out' || text.includes('stock out') || text.includes('used for')) printStockOutMap[iid] = (printStockOutMap[iid] || 0) + v;
 		});
+		} catch (e) { console.warn('[printReports] activity fetch failed', e); }
 
 		const expiryWindow = (typeof REPORT_EXPIRY_DAYS !== 'undefined' ? REPORT_EXPIRY_DAYS : 7);
 		const rows = (DB.ingredients || []).map(i => {
 			if (selFilter === 'low' && !(i.type === 'ingredient' && i.qty <= (i.min || computeThresholdForIngredient(i)))) return '';
 			if (selFilter === 'expiring' && !(i.type === 'ingredient' && i.expiry && daysUntil(i.expiry) >= 0 && daysUntil(i.expiry) <= expiryWindow)) return '';
-			const used = usageMap[i.id] || 0;
+			const sIn  = +(printStockInMap[i.id]  || 0).toFixed(3);
+			const sOut = +(printStockOutMap[i.id] || 0).toFixed(3);
 			return `<tr>
         <td style="padding:8px;border:1px solid #ddd">${i.id}</td>
         <td style="padding:8px;border:1px solid #ddd">${escapeHtml(i.name)}</td>
-        <td style="padding:8px;border:1px solid #ddd;text-align:right">${used}</td>
+        <td style="padding:8px;border:1px solid #ddd;text-align:right;color:#16a34a">${sIn}</td>
+        <td style="padding:8px;border:1px solid #ddd;text-align:right;color:#dc2626">${sOut}</td>
         <td style="padding:8px;border:1px solid #ddd;text-align:right">${i.qty}</td>
         <td style="padding:8px;border:1px solid #ddd">${escapeHtml(i.unit||'')}</td>
         <td style="padding:8px;border:1px solid #ddd;text-align:right">${i.min || computeThresholdForIngredient(i)}</td>
@@ -3265,7 +3279,7 @@ function printReports(rangeStartISO, rangeEndISO, filter) {
       </tr>`;
 		}).filter(Boolean).join('');
 
-		const finalRows = rows || `<tr><td colspan="8" style="padding:12px;border:1px solid #ddd" class="muted">No items match the selected filter/range</td></tr>`;
+		const finalRows = rows || `<tr><td colspan="9" style="padding:12px;border:1px solid #ddd" class="muted">No items match the selected filter/range</td></tr>`;
 
 		const printableHTML = `
       <!doctype html>
@@ -3308,7 +3322,8 @@ function printReports(rangeStartISO, rangeEndISO, filter) {
             <tr>
               <th>ID</th>
               <th>Name</th>
-              <th>Used</th>
+              <th style="color:#16a34a">↑ Stock In</th>
+              <th style="color:#dc2626">↓ Stock Out</th>
               <th>Current Qty</th>
               <th>Unit</th>
               <th>Min</th>
@@ -3440,35 +3455,41 @@ function printReports(rangeStartISO, rangeEndISO, filter) {
 	}
 }
 
-function exportReportsCSVReport(rangeStartISO, rangeEndISO, filter) {
+async function exportReportsCSVReport(rangeStartISO, rangeEndISO, filter) {
 	const start = new Date(rangeStartISO);
 	start.setHours(0, 0, 0, 0);
 	const end = new Date(rangeEndISO);
 	end.setHours(23, 59, 59, 999);
 
-	const usageMap = {};
-	(DB.ingredients || []).forEach(i => usageMap[i.id] = 0);
-	(DB.activity || []).forEach(a => {
-		const t = new Date(a.time || a.date || null);
-		if (!t) return;
-		if (t < start || t > end) return;
-		const txt = String(a.text || '').toLowerCase();
-		if (!(txt.includes('used') || txt.includes('stock out') || txt.includes('used for'))) return;
+	// Fetch live activity for accurate stock in/out
+	const csvStockInMap  = {};
+	const csvStockOutMap = {};
+	try {
+		const actResp = await apiFetch('/api/activity?limit=5000');
+		const liveAct = (actResp && actResp.items) ? actResp.items : [];
+		liveAct.forEach(a => {
+			const t = new Date(a.time || null);
+			if (!t || t < start || t > end) return;
+			const iid = Number(a.ingredient_id || 0);
+			if (!iid) return;
+			const action = String(a.action || '').toLowerCase();
+			const text   = String(a.text   || '').toLowerCase();
 		const m = String(a.text || '').match(/([0-9]*\.?[0-9]+)/g);
-		if (!m) return;
-		const v = Number(m[0]) || 0;
-		if (a.ingredient_id) usageMap[a.ingredient_id] = (usageMap[a.ingredient_id] || 0) + v;
+			const v = m ? (Number(m[0]) || 0) : 0;
+			if (action === 'stock_in'  || text.includes('stock in'))  csvStockInMap[iid]  = (csvStockInMap[iid]  || 0) + v;
+			if (action === 'stock_out' || text.includes('stock out') || text.includes('used for')) csvStockOutMap[iid] = (csvStockOutMap[iid] || 0) + v;
 	});
+	} catch (e) { console.warn('[exportReportsCSV] activity fetch failed', e); }
 
 	const rows = [
-		['ingredient_id', 'name', 'used', 'current_qty', 'unit', 'min', 'type', 'expiry']
+		['ingredient_id', 'name', 'stock_in', 'stock_out', 'current_qty', 'unit', 'min', 'type', 'expiry']
 	];
 
 	(DB.ingredients || []).forEach(i => {
 		if (filter === 'low' && !(i.type === 'ingredient' && i.qty <= (i.min || computeThresholdForIngredient(i)))) return;
 		if (filter === 'expiring' && !(i.type === 'ingredient' && i.expiry && daysUntil(i.expiry) >= 0 && daysUntil(i.expiry) <= REPORT_EXPIRY_DAYS)) return;
 
-		rows.push([i.id, i.name, (usageMap[i.id] || 0), i.qty, i.unit || '', i.min || '', i.type || '', i.expiry || '']);
+		rows.push([i.id, i.name, +(csvStockInMap[i.id] || 0).toFixed(3), +(csvStockOutMap[i.id] || 0).toFixed(3), i.qty, i.unit || '', i.min || '', i.type || '', i.expiry || '']);
 	});
 
 	const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
@@ -4807,14 +4828,15 @@ async function applyStockChange(id, type, qty, note) {
 		});
 		notify('Stock updated');
 		await renderIngredientCards();
-
 		await renderInventoryActivity();
-
 		renderDashboard();
+		renderStockChart();
+		// Refresh the reports summary so stock in/out shows immediately
+		const reportsVisible = !document.getElementById('view-reports')?.classList.contains('hidden');
+		if (reportsVisible) renderReports();
 	} catch (e) {
 		console.error('applyStockChange err', e);
 		notify(e.message || 'Server error');
-
 	}
 }
 
