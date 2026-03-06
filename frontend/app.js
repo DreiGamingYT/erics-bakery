@@ -168,6 +168,34 @@ async function changeStockAPI(id, type, qty, note = '') {
 	return res.json();
 }
 
+async function deleteIngredientAPI(id) {
+	const res = await fetch(`/api/ingredients/${id}`, {
+		method: 'DELETE',
+		credentials: 'include'
+	});
+	if (!res.ok) {
+		const body = await res.json().catch(() => ({}));
+		throw new Error(body.error || body.message || 'Delete failed');
+	}
+	return res.json().catch(() => ({}));
+}
+
+/* ── Delete mode helpers ── */
+const DELETE_MODE_KEY = 'bakery_inv_delete_mode';
+function isDeleteModeEnabled() {
+	return localStorage.getItem(DELETE_MODE_KEY) === 'true';
+}
+function canUseDeleteMode() {
+	const role = (window.currentUser?.role || getSession()?.role || '').toLowerCase();
+	return role === 'owner' || role === 'admin';
+}
+
+/* ── Day-scoped inventory history key ── */
+const INV_HIST_DAY_KEY = 'bakery_inv_hist_day';
+function todayDateStr() {
+	return new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+}
+
 const sampleIngredients = [{
 		id: 1,
 		name: 'Flour',
@@ -699,6 +727,19 @@ let chartIngredientUsage = null;
 const ACCOUNTS_KEY = 'bakery_accounts';
 const SESSION_KEY = 'bakery_session';
 const THEME_KEY = 'bakery_theme';
+
+// Apply theme early to avoid FOUC
+(function() {
+	const _t = localStorage.getItem('bakery_theme') || 'light';
+	const _darkIds = ['dark','forest','sunset','ocean','mocha','charcoal'];
+	const _all = ['theme-dark','theme-forest','theme-sunset','theme-ocean','theme-lavender','theme-rose','theme-mocha','theme-mint','theme-charcoal','theme-is-dark'];
+	document.documentElement.classList.remove(..._all);
+	if (_t === 'dark') document.documentElement.classList.add('theme-dark', 'theme-is-dark');
+	else if (_t !== 'light') {
+		document.documentElement.classList.add('theme-' + _t);
+		if (_darkIds.includes(_t)) document.documentElement.classList.add('theme-is-dark');
+	}
+})();
 
 function q(id) {
 	return document.getElementById(id) || null;
@@ -1365,12 +1406,62 @@ function openResetPasswordModal(email = '', code = '') {
 	});
 }
 
+/* ── Color palette definitions ── */
+const COLOR_PALETTES = [
+	{ id: 'light',     label: 'Sky',      bg: '#eeeeee', accent: '#1b85ec', dark: false },
+	{ id: 'dark',      label: 'Night',    bg: '#06101a', accent: '#ffb366', dark: true  },
+	{ id: 'forest',    label: 'Forest',   bg: '#0b1a10', accent: '#3ecf6f', dark: true  },
+	{ id: 'sunset',    label: 'Sunset',   bg: '#1a0d0a', accent: '#f5824e', dark: true  },
+	{ id: 'ocean',     label: 'Ocean',    bg: '#071b26', accent: '#00c8dc', dark: true  },
+	{ id: 'lavender',  label: 'Lavender', bg: '#f0ecff', accent: '#7c3aed', dark: false },
+	{ id: 'rose',      label: 'Rose',     bg: '#fff0f3', accent: '#e11d6a', dark: false },
+	{ id: 'mocha',     label: 'Mocha',    bg: '#18110d', accent: '#c98a58', dark: true  },
+	{ id: 'mint',      label: 'Mint',     bg: '#edfaf5', accent: '#059669', dark: false },
+	{ id: 'charcoal',  label: 'Charcoal', bg: '#111214', accent: '#a0aec0', dark: true  },
+];
+
+const ALL_THEME_CLASSES = COLOR_PALETTES.map(p => p.id === 'light' ? null : (p.id === 'dark' ? 'theme-dark' : `theme-${p.id}`)).filter(Boolean);
+
 function applyTheme(theme) {
 	localStorage.setItem(THEME_KEY, theme);
-	if (theme === 'dark') document.documentElement.classList.add('theme-dark');
-	else document.documentElement.classList.remove('theme-dark');
+	// Remove all theme classes, then apply the right one
+	document.documentElement.classList.remove(...ALL_THEME_CLASSES, 'theme-is-dark');
+	const palette = COLOR_PALETTES.find(p => p.id === theme);
+	if (theme === 'dark') {
+		document.documentElement.classList.add('theme-dark', 'theme-is-dark');
+	} else if (theme !== 'light') {
+		document.documentElement.classList.add(`theme-${theme}`);
+		if (palette && palette.dark) document.documentElement.classList.add('theme-is-dark');
+	}
+	// Keep hidden legacy checkbox in sync (dark = checked)
+	const tt = q('themeToggle');
+	if (tt) tt.checked = theme === 'dark';
+	// Update palette grid active state
+	document.querySelectorAll('.palette-swatch').forEach(sw => {
+		sw.classList.toggle('active', sw.dataset.palette === theme);
+	});
+}
 
-	if (q('themeToggle')) q('themeToggle').checked = theme === 'dark';
+function renderColorPaletteGrid() {
+	const grid = document.getElementById('colorPaletteGrid');
+	if (!grid) return;
+	const current = localStorage.getItem(THEME_KEY) || 'light';
+	grid.innerHTML = COLOR_PALETTES.map(p => `
+		<div class="palette-swatch${p.id === current ? ' active' : ''}" data-palette="${p.id}" title="${p.label}" role="button" tabindex="0" aria-label="${p.label} theme">
+			<div class="swatch-bg" style="background:${p.bg}"></div>
+			<div class="swatch-accent" style="background:${p.accent}"></div>
+			<div class="swatch-check">✓</div>
+			<div class="swatch-label">${p.label}</div>
+		</div>
+	`).join('');
+	grid.querySelectorAll('.palette-swatch').forEach(sw => {
+		const activate = () => {
+			applyTheme(sw.dataset.palette);
+			notify(`Theme: ${sw.title}`);
+		};
+		sw.addEventListener('click', activate);
+		sw.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); } });
+	});
 }
 
 const SEARCH_HISTORY_KEY = 'bakery_search_history_v1';
@@ -2202,6 +2293,8 @@ async function renderIngredientCards(page = 1, limit = 5) {
       </div>
     `;
 
+		const showDelete = isDeleteModeEnabled() && canUseDeleteMode();
+
 		const tableHead = `
       <div class="inv-table-wrap">
       <table class="inv-table" style="width:100%;border-collapse:collapse" role="table" aria-label="Inventory table">
@@ -2217,6 +2310,7 @@ async function renderIngredientCards(page = 1, limit = 5) {
             <th style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06)">In</th>
             <th style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06)">Out</th>
             <th style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06)">Actions</th>
+            ${showDelete ? '<th style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06)"></th>' : ''}
           </tr>
         </thead>
       <tbody>
@@ -2245,8 +2339,9 @@ async function renderIngredientCards(page = 1, limit = 5) {
             <button class="btn small soft edit-btn" type="button">Edit</button>
           </div>
         </td>
+        ${showDelete ? `<td data-label="Delete" style="padding:10px;vertical-align:middle"><button class="btn small danger delete-row" data-id="${i.id}" data-name="${escapeHtml(i.name)}" type="button" title="Delete ${escapeHtml(i.name)}"><i class="fa fa-trash"></i></button></td>` : ''}
       </tr>`;
-		}).join('') || `<tr><td colspan="10" class="muted" style="padding:12px">No inventory items</td></tr>`;
+		}).join('') || `<tr><td colspan="${showDelete ? 11 : 10}" class="muted" style="padding:12px">No inventory items</td></tr>`;
 
 		const tableFooter = `</tbody></table></div>`;
 
@@ -2350,6 +2445,28 @@ async function renderIngredientCards(page = 1, limit = 5) {
 				if (!tr) return;
 				const id = Number(tr.dataset.id);
 				openEditIngredient(id);
+			});
+		});
+
+		// ── Delete row ──────────────────────────────────────
+		container.querySelectorAll('.delete-row').forEach(btn => {
+			btn.addEventListener('click', async (e) => {
+				const id = Number(btn.dataset.id);
+				const name = btn.dataset.name || `#${id}`;
+				if (!canUseDeleteMode()) { notify('Only Owners can delete items.'); return; }
+				if (!confirm(`Permanently delete "${name}"?\nThis cannot be undone.`)) return;
+				try {
+					btn.disabled = true;
+					btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i>';
+					await deleteIngredientAPI(id);
+					notify(`"${name}" deleted`);
+					await renderIngredientCards(meta.page || page, limit);
+					await renderInventoryActivity();
+				} catch (err) {
+					btn.disabled = false;
+					btn.innerHTML = '<i class="fa fa-trash"></i>';
+					notify(err.message || 'Delete failed');
+				}
 			});
 		});
 
@@ -2761,6 +2878,19 @@ async function renderInventoryActivity(limit = 20) {
 	const el = q('inventoryRecentActivity');
 	if (!el) return;
 
+	// ── Day-scope: clear history if the calendar day has rolled over ──
+	const today = todayDateStr();
+	// Show the date in the heading
+	const dateLabel = q('invHistoryDateLabel');
+	if (dateLabel) dateLabel.textContent = new Date().toLocaleDateString(undefined, {weekday:'short', month:'short', day:'numeric'});
+	const storedDay = localStorage.getItem(INV_HIST_DAY_KEY);
+	if (storedDay && storedDay !== today) {
+		// New day — wipe the cached day-history so it shows fresh for today
+		localStorage.removeItem(INV_HIST_DAY_KEY);
+	}
+	// Record today as the active history day
+	localStorage.setItem(INV_HIST_DAY_KEY, today);
+
 	const sess = getSession();
 	if (!sess || !sess.username) {
 		el.innerHTML = `
@@ -2784,14 +2914,31 @@ async function renderInventoryActivity(limit = 20) {
 	el.innerHTML = '<li class="muted">Loading…</li>';
 	try {
 		const resp = await apiFetch(`/api/activity?limit=${limit}`);
-		const items = (resp && resp.items) ? resp.items : [];
+		const allItems = (resp && resp.items) ? resp.items : [];
+
+		// ── Filter to today only ──
+		const todayStart = new Date(today + 'T00:00:00');
+		const todayEnd   = new Date(today + 'T23:59:59.999');
+		const items = allItems.filter(it => {
+			if (!it.time) return false;
+			const d = new Date(it.time);
+			return d >= todayStart && d <= todayEnd;
+		}).slice(0, limit);
+
 		if (!items.length) {
-			el.innerHTML = '<li class="muted">No recent inventory activity</li>';
+			el.innerHTML = `<li class="muted" style="padding:10px">No activity yet today — edits you make will appear here.</li>`;
 			return;
 		}
-		el.innerHTML = items.slice(0, limit).map(it => {
-			const time = it.time ? new Date(it.time).toLocaleString() : '';
-			return `<li tabindex="0" role="listitem"><div>${escapeHtml(it.text)}</div><div class="muted small">${escapeHtml(time)}</div></li>`;
+		el.innerHTML = items.map(it => {
+			const time = it.time ? new Date(it.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
+			const badge = it.action ? `<span class="inv-hist-badge inv-hist-badge--${(it.action||'').toLowerCase().replace(/\s+/g,'-')}">${escapeHtml(it.action)}</span>` : '';
+			return `<li tabindex="0" role="listitem" style="padding:8px 0;border-bottom:1px solid rgba(0,0,0,0.05);display:flex;align-items:flex-start;gap:8px">
+				<div style="flex:1;min-width:0">
+					<div style="font-size:13px">${badge} ${escapeHtml(it.text)}</div>
+					${it.username ? `<div class="muted small" style="margin-top:2px">by <strong>${escapeHtml(it.username)}</strong></div>` : ''}
+				</div>
+				<div class="muted small" style="white-space:nowrap;padding-top:2px">${escapeHtml(time)}</div>
+			</li>`;
 		}).join('');
 	} catch (err) {
 		console.error('renderInventoryActivity err:', err);
@@ -2802,10 +2949,16 @@ async function renderInventoryActivity(limit = 20) {
 			return;
 		}
 
-		const fallback = (DB && Array.isArray(DB.activity)) ? DB.activity.slice(0, limit) : [];
+		const fallback = (DB && Array.isArray(DB.activity)) ? DB.activity.filter(it => {
+			if (!it.time) return false;
+			const d = new Date(it.time);
+			const ts = todayDateStr();
+			const s = new Date(ts + 'T00:00:00'), e2 = new Date(ts + 'T23:59:59.999');
+			return d >= s && d <= e2;
+		}).slice(0, limit) : [];
 		if (fallback.length) {
 			el.innerHTML = fallback.map(it => {
-				const time = it.time ? new Date(it.time).toLocaleString() : '';
+				const time = it.time ? new Date(it.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
 				return `<li tabindex="0" role="listitem"><div>${escapeHtml(it.text)}</div><div class="muted small">${escapeHtml(time)}</div></li>`;
 			}).join('');
 			notify('Showing local demo activity (server failed).');
@@ -2815,7 +2968,7 @@ async function renderInventoryActivity(limit = 20) {
 	}
 }
 
-function renderReports(rangeStart, rangeEnd, reportFilter) {
+async function renderReports(rangeStart, rangeEnd, reportFilter) {
 	const startInput = rangeStart || q('reportStart')?.value || null;
 	const endInput = rangeEnd || q('reportEnd')?.value || null;
 	const presetDays = Number(q('reportPreset')?.value || 30);
@@ -2834,31 +2987,38 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
 		chartSalesTimeline = null;
 	} catch (e) {}
 
+	// Build per-ingredient stock-in and stock-out totals — fetch live from API
+	const stockInMap  = {};
+	const stockOutMap = {};
+	try {
+		const actResp = await apiFetch('/api/activity?limit=5000');
+		const liveActivity = (actResp && actResp.items) ? actResp.items : [];
+		liveActivity.forEach(a => {
+			const t = new Date(a.time || null);
+			if (!t || t < start || t > end) return;
+			const iid = Number(a.ingredient_id || 0);
+		if (!iid) return;
+		const action = String(a.action || '').toLowerCase();
+		const text   = String(a.text   || '').toLowerCase();
+			const m = String(a.text || '').match(/([0-9]*\.?[0-9]+)/g);
+		const v = m ? (Number(m[0]) || 0) : 0;
+			const isIn  = action === 'stock_in'  || text.includes('stock in');
+			const isOut = action === 'stock_out' || text.includes('stock out') || text.includes('used for');
+		if (isIn)  stockInMap[iid]  = (stockInMap[iid]  || 0) + v;
+		if (isOut) stockOutMap[iid] = (stockOutMap[iid] || 0) + v;
+		});
+	} catch (e) {
+		console.warn('[renderReports] could not fetch live activity:', e);
+	}
+
+	// Keep agg for the bar chart (stock-out totals used as "usage")
 	let agg;
 	if (typeof aggregateUsageFromActivity === 'function') {
 		agg = aggregateUsageFromActivity(start.toISOString(), end.toISOString(), 50);
 	} else {
-		const usageMap = {};
-		(DB.ingredients || []).forEach(i => {
-			if (i && String(i.type || '').toLowerCase() === 'ingredient') {
-				usageMap[i.id] = 0;
-			}
-		});
-		(DB.activity || []).forEach(a => {
-			const t = new Date(a.time || a.date || null);
-			if (!t || t < start || t > end) return;
-			const iid = Number(a.ingredient_id || 0);
-			if (!iid || !(iid in usageMap)) return;
-			const text = String(a.text || '').toLowerCase();
-			if (!(text.includes('used') || text.includes('stock out') || text.includes('used for'))) return;
-			const m = String(a.text || '').match(/([0-9]*\.?[0-9]+)/g);
-			if (!m) return;
-			const v = Number(m[0]) || 0;
-			usageMap[iid] = (usageMap[iid] || 0) + v;
-		});
-		const arr = Object.keys(usageMap).map(k => ({
+		const arr = Object.keys(stockOutMap).map(k => ({
 			id: Number(k),
-			qty: usageMap[k]
+			qty: stockOutMap[k]
 		})).sort((a, b) => b.qty - a.qty).slice(0, 50);
 		agg = {
 			labels: arr.map(x => (DB.ingredients.find(i => i.id === x.id)?.name) || `#${x.id}`),
@@ -2892,7 +3052,8 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
 
 	const summaryEl = q('reportSummary');
 	if (summaryEl) {
-		const totalUsed = (agg.raw || []).reduce((s, r) => s + (r.qty || 0), 0);
+		const totalStockIn  = +Object.values(stockInMap).reduce((s, v) => s + v, 0).toFixed(3);
+		const totalStockOut = +Object.values(stockOutMap).reduce((s, v) => s + v, 0).toFixed(3);
 
 		const lowCount = (DB.ingredients || []).filter(i => {
 			const minVal = (i && (i.min != null)) ? i.min : computeThresholdForIngredient(i);
@@ -2930,8 +3091,8 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
 				if (!((agg.raw || []).some(r => r.id === i.id))) return null;
 			}
 
-			const used    = (agg.raw || []).find(r => r.id === i.id);
-			const usedQty = used ? used.qty : 0;
+			const stockIn  = +(stockInMap[i.id]  || 0).toFixed(3);
+			const stockOut = +(stockOutMap[i.id] || 0).toFixed(3);
 
 			// Row background: expiring urgent (red) > low stock (orange) > expiring soon (yellow)
 			const rowBg = isExpiring     ? 'background:rgba(239,68,68,.08);'
@@ -2955,22 +3116,38 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
 			return `<tr style="${rowBg}">
         <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${i.id}</td>
         <td style="padding:8px;border:1px solid rgba(0,0,0,.07);font-weight:600">${escapeHtml(i.name)}${lowBadge}</td>
-        <td style="padding:8px;border:1px solid rgba(0,0,0,.07);text-align:right">${+usedQty.toFixed(3)}</td>
+        <td style="padding:8px;border:1px solid rgba(0,0,0,.07);text-align:right;color:#16a34a;font-weight:600">${stockIn}</td>
+        <td style="padding:8px;border:1px solid rgba(0,0,0,.07);text-align:right;color:#dc2626;font-weight:600">${stockOut}</td>
         <td style="padding:8px;border:1px solid rgba(0,0,0,.07);text-align:right">${qtyDisplay}</td>
         <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${escapeHtml(i.unit||'')}</td>
         <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${minVal != null ? minVal : ''}</td>
         <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${escapeHtml(i.type||'')}</td>
         <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${expiryDisplay}</td>
       </tr>`;
-		}).filter(Boolean).join('') || `<tr><td colspan="8" style="padding:12px" class="muted">No items match the selected filter/range</td></tr>`;
+		}).filter(Boolean).join('') || `<tr><td colspan="9" style="padding:12px" class="muted">No items match the selected filter/range</td></tr>`;
+		const startISO = start.toISOString().slice(0,10);
+		const endISO   = end.toISOString().slice(0,10);
 		summaryEl.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap">
         <div>
           <div style="font-weight:800">Reports — ${filter === 'usage' ? 'Ingredient Usage' : filter === 'low' ? 'Low stock' : filter === 'expiring' ? 'Expiring items' : 'All items'}</div>
-          <div class="muted small">Period: ${start.toISOString().slice(0,10)} to ${end.toISOString().slice(0,10)} • Total used: ${+totalUsed.toFixed(3)} • Low items: ${lowCount} • Expiring: ${expiringCount} • Top used: ${best}</div>
+          <div class="muted small" id="summaryPeriodLabel">Period: ${startISO} to ${endISO} • Stock In: ${totalStockIn} • Stock Out: ${totalStockOut} • Low items: ${lowCount} • Expiring: ${expiringCount}</div>
         </div>
-        <div id="summarybtns" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <select id="reportFilter" title="Filter report">
+        <div id="summarybtns" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <div style="display:flex;gap:4px;align-items:center;border:1px solid rgba(0,0,0,0.08);border-radius:8px;padding:4px 8px;flex-wrap:wrap">
+            <label style="font-size:11px;font-weight:700;color:var(--muted,#888);white-space:nowrap">From</label>
+            <input id="reportStart" type="date" value="${startISO}" style="height:30px;padding:0 6px;border-radius:6px;border:1px solid rgba(0,0,0,0.12);font-size:12px;background:var(--bg,#fff)" />
+            <label style="font-size:11px;font-weight:700;color:var(--muted,#888);white-space:nowrap">To</label>
+            <input id="reportEnd" type="date" value="${endISO}" style="height:30px;padding:0 6px;border-radius:6px;border:1px solid rgba(0,0,0,0.12);font-size:12px;background:var(--bg,#fff)" />
+            <select id="reportPreset" style="height:30px;padding:0 6px;border-radius:6px;border:1px solid rgba(0,0,0,0.12);font-size:12px;background:var(--bg,#fff)">
+              <option value="7">Last 7 days</option>
+              <option value="30">Last 30 days</option>
+              <option value="90">Last 90 days</option>
+              <option value="365">Last year</option>
+            </select>
+            <button id="applyReportRange" class="btn small" type="button" style="height:30px;white-space:nowrap">Apply</button>
+          </div>
+          <select id="reportFilter" title="Filter report" style="height:30px;padding:0 6px;border-radius:6px;border:1px solid rgba(0,0,0,0.12);font-size:12px;background:var(--bg,#fff)">
             <option value="all">All items</option>
             <option value="usage">Ingredient usage</option>
             <option value="low">Low stock</option>
@@ -2992,7 +3169,8 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
           <thead><tr>
             <th style="padding:8px;border:1px solid #eee">ID</th>
             <th style="padding:8px;border:1px solid #eee">Name</th>
-            <th style="padding:8px;border:1px solid #eee">Used</th>
+            <th style="padding:8px;border:1px solid #eee;color:#16a34a">↑ Stock In</th>
+            <th style="padding:8px;border:1px solid #eee;color:#dc2626">↓ Stock Out</th>
             <th style="padding:8px;border:1px solid #eee">Current Qty</th>
             <th style="padding:8px;border:1px solid #eee">Unit</th>
             <th style="padding:8px;border:1px solid #eee">Min</th>
@@ -3008,18 +3186,47 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
 		if (prBtn) prBtn.onclick = () => printReports(start.toISOString(), end.toISOString(), filter);
 		const exBtn = q('exportReportsCsvBtn');
 		if (exBtn) exBtn.onclick = () => exportReportsCSVReport(start.toISOString(), end.toISOString(), filter);
-		// Restore filter select to the value used for this render, and wire change handler
+
+		// Restore filter select and wire change handler
 		const filterSel = q('reportFilter');
 		if (filterSel) {
 			filterSel.value = filter;
 			filterSel.onchange = () => renderReports(q('reportStart')?.value || null, q('reportEnd')?.value || null, filterSel.value);
+		}
+
+		// Restore preset select to the closest matching value
+		const presetSel = q('reportPreset');
+		if (presetSel) {
+			presetSel.value = String(presetDays);
+			// Preset change: update date inputs and re-render
+			presetSel.onchange = () => {
+				const days = Number(presetSel.value || 30);
+				const eDate = new Date();
+				const sDate = new Date(Date.now() - (days - 1) * 24 * 60 * 60 * 1000);
+				const sEl = q('reportStart'), eEl = q('reportEnd');
+				if (sEl) sEl.value = sDate.toISOString().slice(0, 10);
+				if (eEl) eEl.value = eDate.toISOString().slice(0, 10);
+				renderReports(sEl?.value || null, eEl?.value || null, q('reportFilter')?.value || filter);
+			};
+		}
+
+		// Apply button: re-render with the manually chosen dates
+		const applyBtn = q('applyReportRange');
+		if (applyBtn) {
+			applyBtn.onclick = () => {
+				const sVal = q('reportStart')?.value || null;
+				const eVal = q('reportEnd')?.value || null;
+				renderReports(sVal, eVal, q('reportFilter')?.value || filter);
+				if (typeof renderStockChart === 'function') renderStockChart(sVal, eVal);
+				if (typeof window.__reportRangeChanged === 'function') window.__reportRangeChanged();
+			};
 		}
 	}
 
 	try { chartIngredientUsage && chartIngredientUsage.resize && chartIngredientUsage.resize(); } catch (e) {}
 }
 
-function printReports(rangeStartISO, rangeEndISO, filter) {
+async function printReports(rangeStartISO, rangeEndISO, filter) {
 	try {
 
 		const selFilter = filter || q('reportFilter')?.value || 'usage';
@@ -3033,29 +3240,37 @@ function printReports(rangeStartISO, rangeEndISO, filter) {
 
 		const bakeryName = (q('bakeryName')?.value) || document.querySelector('.brand-name')?.innerText || "Eric's Bakery";
 
-		const usageMap = {};
-		(DB.ingredients || []).forEach(i => usageMap[i.id] = 0);
-		(DB.activity || []).forEach(a => {
-			const t = new Date(a.time || a.date || null);
-			if (!t) return;
-			if (t < start || t > end) return;
-			const txt = String(a.text || '').toLowerCase();
-			if (!(txt.includes('used') || txt.includes('stock out') || txt.includes('used for'))) return;
+		// Fetch live activity from API for accurate stock in/out data
+		const printStockInMap  = {};
+		const printStockOutMap = {};
+		try {
+			const actResp = await apiFetch('/api/activity?limit=5000');
+			const liveAct = (actResp && actResp.items) ? actResp.items : [];
+			liveAct.forEach(a => {
+				const t = new Date(a.time || null);
+				if (!t || t < start || t > end) return;
+				const iid = Number(a.ingredient_id || 0);
+				if (!iid) return;
+				const action = String(a.action || '').toLowerCase();
+				const text   = String(a.text   || '').toLowerCase();
 			const m = String(a.text || '').match(/([0-9]*\.?[0-9]+)/g);
-			if (!m) return;
-			const v = Number(m[0]) || 0;
-			if (a.ingredient_id) usageMap[a.ingredient_id] = (usageMap[a.ingredient_id] || 0) + v;
+				const v = m ? (Number(m[0]) || 0) : 0;
+				if (action === 'stock_in'  || text.includes('stock in'))  printStockInMap[iid]  = (printStockInMap[iid]  || 0) + v;
+				if (action === 'stock_out' || text.includes('stock out') || text.includes('used for')) printStockOutMap[iid] = (printStockOutMap[iid] || 0) + v;
 		});
+		} catch (e) { console.warn('[printReports] activity fetch failed', e); }
 
 		const expiryWindow = (typeof REPORT_EXPIRY_DAYS !== 'undefined' ? REPORT_EXPIRY_DAYS : 7);
 		const rows = (DB.ingredients || []).map(i => {
 			if (selFilter === 'low' && !(i.type === 'ingredient' && i.qty <= (i.min || computeThresholdForIngredient(i)))) return '';
 			if (selFilter === 'expiring' && !(i.type === 'ingredient' && i.expiry && daysUntil(i.expiry) >= 0 && daysUntil(i.expiry) <= expiryWindow)) return '';
-			const used = usageMap[i.id] || 0;
+			const sIn  = +(printStockInMap[i.id]  || 0).toFixed(3);
+			const sOut = +(printStockOutMap[i.id] || 0).toFixed(3);
 			return `<tr>
         <td style="padding:8px;border:1px solid #ddd">${i.id}</td>
         <td style="padding:8px;border:1px solid #ddd">${escapeHtml(i.name)}</td>
-        <td style="padding:8px;border:1px solid #ddd;text-align:right">${used}</td>
+        <td style="padding:8px;border:1px solid #ddd;text-align:right;color:#16a34a">${sIn}</td>
+        <td style="padding:8px;border:1px solid #ddd;text-align:right;color:#dc2626">${sOut}</td>
         <td style="padding:8px;border:1px solid #ddd;text-align:right">${i.qty}</td>
         <td style="padding:8px;border:1px solid #ddd">${escapeHtml(i.unit||'')}</td>
         <td style="padding:8px;border:1px solid #ddd;text-align:right">${i.min || computeThresholdForIngredient(i)}</td>
@@ -3064,7 +3279,7 @@ function printReports(rangeStartISO, rangeEndISO, filter) {
       </tr>`;
 		}).filter(Boolean).join('');
 
-		const finalRows = rows || `<tr><td colspan="8" style="padding:12px;border:1px solid #ddd" class="muted">No items match the selected filter/range</td></tr>`;
+		const finalRows = rows || `<tr><td colspan="9" style="padding:12px;border:1px solid #ddd" class="muted">No items match the selected filter/range</td></tr>`;
 
 		const printableHTML = `
       <!doctype html>
@@ -3107,7 +3322,8 @@ function printReports(rangeStartISO, rangeEndISO, filter) {
             <tr>
               <th>ID</th>
               <th>Name</th>
-              <th>Used</th>
+              <th style="color:#16a34a">↑ Stock In</th>
+              <th style="color:#dc2626">↓ Stock Out</th>
               <th>Current Qty</th>
               <th>Unit</th>
               <th>Min</th>
@@ -3239,35 +3455,41 @@ function printReports(rangeStartISO, rangeEndISO, filter) {
 	}
 }
 
-function exportReportsCSVReport(rangeStartISO, rangeEndISO, filter) {
+async function exportReportsCSVReport(rangeStartISO, rangeEndISO, filter) {
 	const start = new Date(rangeStartISO);
 	start.setHours(0, 0, 0, 0);
 	const end = new Date(rangeEndISO);
 	end.setHours(23, 59, 59, 999);
 
-	const usageMap = {};
-	(DB.ingredients || []).forEach(i => usageMap[i.id] = 0);
-	(DB.activity || []).forEach(a => {
-		const t = new Date(a.time || a.date || null);
-		if (!t) return;
-		if (t < start || t > end) return;
-		const txt = String(a.text || '').toLowerCase();
-		if (!(txt.includes('used') || txt.includes('stock out') || txt.includes('used for'))) return;
+	// Fetch live activity for accurate stock in/out
+	const csvStockInMap  = {};
+	const csvStockOutMap = {};
+	try {
+		const actResp = await apiFetch('/api/activity?limit=5000');
+		const liveAct = (actResp && actResp.items) ? actResp.items : [];
+		liveAct.forEach(a => {
+			const t = new Date(a.time || null);
+			if (!t || t < start || t > end) return;
+			const iid = Number(a.ingredient_id || 0);
+			if (!iid) return;
+			const action = String(a.action || '').toLowerCase();
+			const text   = String(a.text   || '').toLowerCase();
 		const m = String(a.text || '').match(/([0-9]*\.?[0-9]+)/g);
-		if (!m) return;
-		const v = Number(m[0]) || 0;
-		if (a.ingredient_id) usageMap[a.ingredient_id] = (usageMap[a.ingredient_id] || 0) + v;
+			const v = m ? (Number(m[0]) || 0) : 0;
+			if (action === 'stock_in'  || text.includes('stock in'))  csvStockInMap[iid]  = (csvStockInMap[iid]  || 0) + v;
+			if (action === 'stock_out' || text.includes('stock out') || text.includes('used for')) csvStockOutMap[iid] = (csvStockOutMap[iid] || 0) + v;
 	});
+	} catch (e) { console.warn('[exportReportsCSV] activity fetch failed', e); }
 
 	const rows = [
-		['ingredient_id', 'name', 'used', 'current_qty', 'unit', 'min', 'type', 'expiry']
+		['ingredient_id', 'name', 'stock_in', 'stock_out', 'current_qty', 'unit', 'min', 'type', 'expiry']
 	];
 
 	(DB.ingredients || []).forEach(i => {
 		if (filter === 'low' && !(i.type === 'ingredient' && i.qty <= (i.min || computeThresholdForIngredient(i)))) return;
 		if (filter === 'expiring' && !(i.type === 'ingredient' && i.expiry && daysUntil(i.expiry) >= 0 && daysUntil(i.expiry) <= REPORT_EXPIRY_DAYS)) return;
 
-		rows.push([i.id, i.name, (usageMap[i.id] || 0), i.qty, i.unit || '', i.min || '', i.type || '', i.expiry || '']);
+		rows.push([i.id, i.name, +(csvStockInMap[i.id] || 0).toFixed(3), +(csvStockOutMap[i.id] || 0).toFixed(3), i.qty, i.unit || '', i.min || '', i.type || '', i.expiry || '']);
 	});
 
 	const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
@@ -3582,6 +3804,303 @@ function printInventoryTable() {
 let currentCalendarYear = (new Date()).getFullYear();
 let currentCalendarMonth = (new Date()).getMonth();
 
+/* ================================================================
+   SCHEDULING ENGINE  (localStorage-backed)
+   ================================================================ */
+const SCHED_KEY = 'bakery_schedules_v1';
+
+function getAllSchedules() {
+	try { return JSON.parse(localStorage.getItem(SCHED_KEY) || '[]'); } catch(e) { return []; }
+}
+function saveAllSchedules(arr) {
+	localStorage.setItem(SCHED_KEY, JSON.stringify(arr));
+}
+function getSchedulesForDate(dateStr) {
+	return getAllSchedules().filter(s => s.date === dateStr);
+}
+function addSchedule(sched) {
+	const all = getAllSchedules();
+	sched.id = Date.now() + '_' + Math.random().toString(36).slice(2);
+	sched.createdAt = new Date().toISOString();
+	sched.notified  = false;
+	all.push(sched);
+	saveAllSchedules(all);
+	return sched;
+}
+function deleteSchedule(id) {
+	saveAllSchedules(getAllSchedules().filter(s => s.id !== id));
+}
+
+/* ── Reminder checker — runs every 30 s ── */
+function checkScheduleReminders() {
+	const now      = new Date();
+	const todayStr = now.toISOString().slice(0, 10);
+	const all      = getAllSchedules();
+	let changed    = false;
+	all.forEach(s => {
+		if (s.notified || s.date !== todayStr || !s.time) return;
+		const [hh, mm] = (s.time || '00:00').split(':').map(Number);
+		const target   = new Date(now); target.setHours(hh, mm, 0, 0);
+		const diff     = target - now;            // ms until scheduled time
+		if (diff <= 0 && diff > -120000) {        // within 2-min window after
+			s.notified = true; changed = true;
+			pushInAppNotif({
+				type: 'reminder',
+				title: `🔔 Reminder: ${s.title}`,
+				sub:   s.note || `Scheduled at ${s.time}`,
+				icon:  'fa-bell',
+			});
+			if (typeof notify === 'function') notify(`🔔 ${s.title}`);
+		}
+	});
+	if (changed) saveAllSchedules(all);
+}
+setInterval(checkScheduleReminders, 30000);
+document.addEventListener('DOMContentLoaded', () => setTimeout(checkScheduleReminders, 2000));
+
+/* ── Open schedule modal for a date ── */
+function openScheduleModal(dateStr) {
+	const scheds = getSchedulesForDate(dateStr);
+	const displayDate = new Date(dateStr + 'T00:00:00').toLocaleDateString(undefined, {
+		weekday:'long', month:'long', day:'numeric', year:'numeric'
+	});
+
+	const listHtml = scheds.length
+		? scheds.map(s => `
+			<div class="sched-modal-item" style="display:flex;align-items:center;gap:8px;border-bottom:1px solid rgba(0,0,0,0.05)">
+				<div style="flex:1;min-width:0">
+					<div style="font-weight:700;font-size:13px">${escapeHtml(s.title)}</div>
+					${s.time ? `<div class="muted small"><i class="fa fa-clock" style="margin-right:3px;opacity:.6"></i>${escapeHtml(s.time)}</div>` : ''}
+					${s.note ? `<div class="muted small">${escapeHtml(s.note)}</div>` : ''}
+				</div>
+				<button class="btn small danger sched-delete-btn" data-id="${s.id}" type="button" title="Remove"><i class="fa fa-trash"></i></button>
+			</div>`).join('')
+		: `<div class="muted small" style="padding:8px 0 12px">No schedules yet for this day.</div>`;
+
+	if (typeof openModalHTML === 'function') {
+		openModalHTML(`
+			<div style="padding:4px">
+				<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+					<i class="fa fa-calendar-check" style="color:var(--accent);font-size:18px"></i>
+					<h3 style="margin:0;font-size:15px">${escapeHtml(displayDate)}</h3>
+				</div>
+				<div id="schedModalList" style="margin-bottom:16px">${listHtml}</div>
+				<div style="background:var(--surface,#f6f7fb);border-radius:10px;padding:12px">
+					<div style="font-weight:800;font-size:13px;margin-bottom:10px"><i class="fa fa-plus" style="margin-right:5px;opacity:.7"></i>Add new schedule</div>
+					<label class="field"><span class="field-label">Title <span style="color:#e11d6a">*</span></span><input id="newSchedTitle" type="text" placeholder="e.g. Bread baking batch" /></label>
+					<label class="field" style="margin-top:6px"><span class="field-label">Time</span><input id="newSchedTime" type="time" /></label>
+					<label class="field" style="margin-top:6px"><span class="field-label">Note</span><input id="newSchedNote" type="text" placeholder="Optional note…" /></label>
+					<div style="display:flex;gap:8px;margin-top:12px">
+						<button id="saveSchedBtn" class="btn primary small" type="button"><i class="fa fa-check" style="margin-right:4px"></i>Add Schedule</button>
+						<button id="closeSchedBtn" class="btn ghost small" type="button">Close</button>
+					</div>
+				</div>
+			</div>
+		`);
+	}
+
+	document.querySelectorAll('.sched-delete-btn').forEach(btn => {
+		btn.addEventListener('click', e => {
+			e.stopPropagation();
+			if (!confirm('Remove this schedule?')) return;
+			deleteSchedule(btn.dataset.id);
+			pushInAppNotif({ type: 'info', title: 'Schedule removed', sub: displayDate, icon: 'fa-calendar-xmark' });
+			closeModal();
+			refreshCalendarCell(dateStr);
+		});
+	});
+
+	const saveBtn = document.getElementById('saveSchedBtn');
+	if (saveBtn) {
+		saveBtn.addEventListener('click', () => {
+			const title = (document.getElementById('newSchedTitle')?.value || '').trim();
+			if (!title) { if (typeof notify === 'function') notify('Title is required'); return; }
+			const time  = document.getElementById('newSchedTime')?.value  || '';
+			const note  = (document.getElementById('newSchedNote')?.value || '').trim();
+			addSchedule({ date: dateStr, title, time, note });
+			pushInAppNotif({
+				type:  'schedule',
+				title: `Scheduled: ${title}`,
+				sub:   displayDate + (time ? ' at ' + time : ''),
+				icon:  'fa-calendar-plus',
+			});
+			if (typeof notify === 'function') notify(`Schedule added`);
+			closeModal();
+			refreshCalendarCell(dateStr);
+		});
+	}
+	const closeBtn = document.getElementById('closeSchedBtn');
+	if (closeBtn) closeBtn.addEventListener('click', closeModal);
+}
+
+/* ── Refresh just one cell after schedule change ── */
+function refreshCalendarCell(dateStr) {
+	document.querySelectorAll(`.calendar-cell[data-date="${dateStr}"]`).forEach(cell => {
+		renderScheduleChipsInCell(cell, dateStr);
+	});
+}
+
+/* ── Render schedule chips inside a cell ── */
+const CAL_SHOW_MAX = 2;   // show first 2 items, then "+N more"
+
+function renderScheduleChipsInCell(cell, dateStr) {
+	cell.querySelectorAll('.sched-chip, .cal-more-pill, .cell-add-btn, .sched-section').forEach(el => el.remove());
+	const scheds = getSchedulesForDate(dateStr);
+
+	// Quick-add "+" button (appears on hover via CSS)
+	const addBtn = document.createElement('button');
+	addBtn.className = 'cell-add-btn';
+	addBtn.title = 'Add schedule';
+	addBtn.innerHTML = '<i class="fa fa-plus" style="font-size:10px"></i>';
+	addBtn.addEventListener('click', e => { e.stopPropagation(); openScheduleModal(dateStr); });
+	cell.appendChild(addBtn);
+
+	if (!scheds.length) return;
+
+	const section = document.createElement('div');
+	section.className = 'sched-section';
+	section.style.cssText = 'display:flex;flex-direction:column;gap:3px;margin-top:3px;width:100%';
+
+	scheds.slice(0, CAL_SHOW_MAX).forEach(s => {
+		const chip = document.createElement('div');
+		chip.className = 'sched-chip';
+		chip.innerHTML = `<i class="fa fa-clock" style="font-size:9px;opacity:.6;flex-shrink:0"></i><span style="overflow:hidden;text-overflow:ellipsis">${escapeHtml(s.title)}</span>${s.time ? `<span class="sched-chip-time">${escapeHtml(s.time)}</span>` : ''}`;
+		chip.title = s.title + (s.note ? ' — ' + s.note : '');
+		chip.addEventListener('click', e => { e.stopPropagation(); openScheduleModal(dateStr); });
+		section.appendChild(chip);
+	});
+
+	if (scheds.length > CAL_SHOW_MAX) {
+		const pill = document.createElement('button');
+		pill.className = 'cal-more-pill';
+		pill.type = 'button';
+		pill.textContent = `+${scheds.length - CAL_SHOW_MAX} more`;
+		pill.addEventListener('click', e => { e.stopPropagation(); openScheduleModal(dateStr); });
+		section.appendChild(pill);
+	}
+
+	cell.appendChild(section);
+}
+
+/* ── Apply today highlight to a cell ── */
+function applyTodayHighlight(cell, dateStr) {
+	const todayStr = new Date().toISOString().slice(0, 10);
+	if (dateStr === todayStr) cell.classList.add('is-today');
+}
+
+/* ================================================================
+   IN-APP NOTIFICATION PANEL
+   Integrates with notifications.js alerts; also used by schedule system
+   ================================================================ */
+const INAPP_KEY     = 'bakery_inapp_notifs_v1';
+const INAPP_MAX     = 50;
+let   _notifPanelOpen = false;
+
+function _getNotifs()     { try { return JSON.parse(localStorage.getItem(INAPP_KEY) || '[]'); } catch(e) { return []; } }
+function _saveNotifs(arr) { localStorage.setItem(INAPP_KEY, JSON.stringify(arr.slice(0, INAPP_MAX))); }
+
+function pushInAppNotif({ type = 'info', title = '', sub = '', icon = 'fa-bell' }) {
+	const n = { id: Date.now() + '_' + Math.random().toString(36).slice(2), type, title, sub, icon, time: new Date().toISOString(), read: false };
+	_saveNotifs([n, ..._getNotifs()]);
+	_renderNotifPanel();
+}
+window.pushInAppNotif = pushInAppNotif;   // expose for notifications.js
+
+function _relTime(iso) {
+	const diff = Date.now() - new Date(iso).getTime();
+	const m = Math.floor(diff / 60000);
+	if (m < 1)  return 'just now';
+	if (m < 60) return `${m}m ago`;
+	const h = Math.floor(m / 60);
+	if (h < 24) return `${h}h ago`;
+	return `${Math.floor(h / 24)}d ago`;
+}
+
+function _iconClass(type) {
+	return ({ schedule:'notif-icon--schedule', reminder:'notif-icon--reminder',
+	          alert:'notif-icon--alert', info:'notif-icon--info' })[type] || 'notif-icon--info';
+}
+
+function _renderNotifPanel() {
+	const list  = document.getElementById('notifList');
+	const empty = document.getElementById('notifEmpty');
+	const badge = document.getElementById('notifBadge');
+	if (!list) return;
+
+	const notifs = _getNotifs();
+	const unread = notifs.filter(n => !n.read).length;
+
+	// badge
+	if (badge) {
+		if (unread > 0) {
+			badge.textContent = unread > 99 ? '99+' : unread;
+			badge.style.display = 'block';
+		} else {
+			badge.style.display = 'none';
+		}
+	}
+
+	// list
+	if (!notifs.length) {
+		list.innerHTML = '';
+		if (empty) empty.style.display = 'block';
+		return;
+	}
+	if (empty) empty.style.display = 'none';
+
+	list.innerHTML = notifs.map(n => `
+		<li class="notif-item${n.read ? '' : ' unread'}" data-id="${n.id}">
+			<div class="notif-icon ${_iconClass(n.type)}"><i class="fa ${escapeHtml(n.icon)}"></i></div>
+			<div class="notif-item-body">
+				<div class="notif-item-title">${escapeHtml(n.title)}</div>
+				${n.sub ? `<div class="notif-item-sub">${escapeHtml(n.sub)}</div>` : ''}
+			</div>
+			<div class="notif-item-time">${_relTime(n.time)}</div>
+		</li>`).join('');
+}
+
+function _initNotifBell() {
+	const btn   = document.getElementById('notifBellBtn');
+	const panel = document.getElementById('notifPanel');
+	const clear = document.getElementById('notifClearAll');
+	if (!btn || !panel) return;
+
+	btn.addEventListener('click', e => {
+		e.stopPropagation();
+		_notifPanelOpen = !_notifPanelOpen;
+		panel.style.display = _notifPanelOpen ? 'block' : 'none';
+		btn.setAttribute('aria-expanded', _notifPanelOpen);
+		if (_notifPanelOpen) {
+			// mark all read
+			const notifs = _getNotifs().map(n => ({ ...n, read: true }));
+			_saveNotifs(notifs);
+			_renderNotifPanel();
+		}
+	});
+
+	document.addEventListener('click', e => {
+		if (_notifPanelOpen && !document.getElementById('notifBellWrap')?.contains(e.target)) {
+			_notifPanelOpen = false;
+			panel.style.display = 'none';
+			btn.setAttribute('aria-expanded', 'false');
+		}
+	});
+
+	if (clear) {
+		clear.addEventListener('click', e => {
+			e.stopPropagation();
+			_saveNotifs([]);
+			_renderNotifPanel();
+		});
+	}
+
+	// Re-render every 60 s to keep relative timestamps fresh
+	setInterval(_renderNotifPanel, 60000);
+	_renderNotifPanel();
+}
+
+document.addEventListener('DOMContentLoaded', _initNotifBell);
+
 function isAgendaMode() {
 	return window.matchMedia('(max-width: 640px)').matches;
 }
@@ -3593,14 +4112,13 @@ async function renderCalendarForMonth(year, month) {
 	grid.innerHTML = '';
 
 	const isMobile = window.matchMedia && window.matchMedia('(max-width:640px)').matches;
+	const todayStr = new Date().toISOString().slice(0, 10);
 
 	const first = new Date(year, month, 1);
-	const last = new Date(year, month + 1, 0);
-	const daysInMonth = last.getDate();
-	const startWeekday = first.getDay();
-
+	const last  = new Date(year, month + 1, 0);
+	const daysInMonth   = last.getDate();
+	const startWeekday  = first.getDay();
 	const pad = n => String(n).padStart(2, '0');
-
 	const totalCells = isAgendaMode() ? daysInMonth : 42;
 
 	const cells = [];
@@ -3608,149 +4126,132 @@ async function renderCalendarForMonth(year, month) {
 		const dayIndex = i - startWeekday + 1;
 		const cell = document.createElement('div');
 		cell.className = 'calendar-cell';
-		cell.style.minHeight = '72px';
-		cell.style.padding = '8px';
-		cell.style.boxSizing = 'border-box';
+		cell.style.minHeight   = '80px';
+		cell.style.padding     = '8px';
+		cell.style.boxSizing   = 'border-box';
 		cell.style.borderRadius = '8px';
-		cell.style.background = 'var(--card, #fff)';
-		cell.style.border = '1px solid rgba(0,0,0,0.04)';
-		cell.style.cursor = 'pointer';
-		cell.style.display = 'flex';
+		cell.style.background  = 'var(--card, #fff)';
+		cell.style.border      = '1px solid rgba(0,0,0,0.04)';
+		cell.style.cursor      = 'pointer';
+		cell.style.display     = 'flex';
 		cell.style.flexDirection = 'column';
-		cell.style.justifyContent = 'flex-start';
-		cell.style.alignItems = 'flex-start';
-		cell.style.overflow = 'hidden';
+		cell.style.overflow    = 'hidden';
 
 		if (dayIndex >= 1 && dayIndex <= daysInMonth) {
 			const date = new Date(year, month, dayIndex);
-			const iso = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+			const iso  = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 			cell.dataset.date = iso;
 
 			const dateNum = document.createElement('div');
-			dateNum.className = 'date-num';
+			dateNum.className   = 'date-num';
 			dateNum.textContent = dayIndex;
-			dateNum.style.fontWeight = '800';
-			dateNum.style.marginBottom = '6px';
 			cell.appendChild(dateNum);
 
 			const eventListWrap = document.createElement('div');
 			eventListWrap.className = 'calendar-events';
-			eventListWrap.id = 'event';
-			eventListWrap.style.display = 'flex';
-			eventListWrap.style.flexDirection = 'column';
-			eventListWrap.style.gap = '6px';
-			eventListWrap.style.marginTop = '4px';
-			eventListWrap.style.width = '100%';
-			eventListWrap.style.flex = '1 1 auto';
-			eventListWrap.style.overflow = 'hidden';
+			eventListWrap.style.cssText = 'display:flex;flex-direction:column;gap:3px;margin-top:4px;width:100%;overflow:hidden;flex:1 1 auto';
 			cell.appendChild(eventListWrap);
+
+			// Today ring
+			if (iso === todayStr) cell.classList.add('is-today');
 		} else {
-			cell.style.visibility = 'hidden';
+			cell.style.visibility    = 'hidden';
 			cell.style.pointerEvents = 'none';
 		}
 		grid.appendChild(cell);
 		cells.push(cell);
 	}
 
-	function showDayEventsModal(dateIso, items, bottom = false) {
-		let html = `<h3>Events — ${new Date(dateIso).toLocaleDateString()}</h3>`;
+	// ── Shared day-events modal ──
+	function showDayEventsModal(dateIso, items) {
+		const displayDate = new Date(dateIso + 'T00:00:00').toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric' });
+		let html = `<div style="padding:4px">
+			<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+				<i class="fa fa-calendar-day" style="color:var(--accent);font-size:18px"></i>
+				<h3 style="margin:0;font-size:15px">${escapeHtml(displayDate)}</h3>
+			</div>`;
+
 		if (!items || items.length === 0) {
-			html += `<div class="muted small" style="padding:12px">No events for ${dateIso}</div>`;
+			html += `<div class="muted small" style="padding:8px 0">No activity for this day.</div>`;
 		} else {
-			html += `<div style="max-height:60vh;overflow:auto;margin-top:8px">`;
+			html += `<div style="max-height:52vh;overflow-y:auto">`;
 			html += items.map(it => {
-				const time = it.time ? new Date(it.time).toLocaleString() : '';
-				const who = it.username ? escapeHtml(it.username) : (it.user_id ? `User ${escapeHtml(String(it.user_id))}` : 'system');
-				const ing = it.ingredient_name ? `<div><strong>Ingredient:</strong> ${escapeHtml(it.ingredient_name)}</div>` : '';
-				const action = it.action ? `<div><strong>Action:</strong> ${escapeHtml(it.action)}</div>` : '';
-				return `<div style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06);margin-bottom:6px">
-                  <div style="font-weight:800">${escapeHtml(it.text || '').slice(0,120)}</div>
+				const time   = it.time ? new Date(it.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
+				const who    = it.username ? escapeHtml(it.username) : (it.user_id ? `User ${escapeHtml(String(it.user_id))}` : 'system');
+				const ing    = it.ingredient_name ? `<div style="font-size:12px"><strong>Item:</strong> ${escapeHtml(it.ingredient_name)}</div>` : '';
+				const action = it.action ? `<span style="font-size:10px;font-weight:800;text-transform:uppercase;opacity:.7">${escapeHtml(it.action)}</span> ` : '';
+				return `<div style="padding:8px 0;border-bottom:1px solid rgba(0,0,0,0.05)">
+					<div style="font-weight:700;font-size:13px">${action}${escapeHtml((it.text||'').slice(0,120))}</div>
                   ${ing}
-                  ${action}
-                  <div class="muted small" style="margin-top:6px">By: ${who} • ${escapeHtml(time)}</div>
+					<div class="muted small" style="margin-top:4px">By ${who}${time ? ' · ' + time : ''}</div>
                 </div>`;
 			}).join('');
 			html += `</div>`;
 		}
-		html += `<div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end"><button class="btn ghost" id="closeDayEvents" type="button">Close</button></div>`;
+		// Schedule section inside modal
+		const scheds = getSchedulesForDate(dateIso);
+		if (scheds.length) {
+			html += `<div style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(0,0,0,0.07)">
+				<div style="font-weight:800;font-size:12px;text-transform:uppercase;opacity:.6;margin-bottom:8px">Schedules</div>`;
+			html += scheds.map(s => `<div style="display:flex;gap:6px;align-items:center;padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.04)">
+				<i class="fa fa-clock" style="color:var(--accent);opacity:.7;font-size:11px"></i>
+				<span style="font-weight:700;font-size:13px">${escapeHtml(s.title)}</span>
+				${s.time ? `<span class="muted small">${escapeHtml(s.time)}</span>` : ''}
+			</div>`).join('');
+			html += `</div>`;
+		}
+		html += `<div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
+			<button class="btn small primary" id="modalAddSched" type="button"><i class="fa fa-plus" style="margin-right:4px"></i>Add Schedule</button>
+			<button class="btn ghost small" id="closeDayEvents" type="button">Close</button>
+		</div></div>`;
 
 		openModalHTML(html);
 
-		const modalCard = document.querySelector('.modal-card');
-		if (!modalCard) return;
-
-		modalCard.classList.remove('modal-bottom-sheet');
-		modalCard.classList.add('modal-enter');
-
-		modalCard.style = '';
-
-		if (bottom) {
-			modalCard.classList.add('modal-bottom-sheet');
-		}
-
-		modalCard.offsetHeight;
-
-		requestAnimationFrame(() => {
-			modalCard.classList.remove('modal-enter');
-		});
-
-		q('closeDayEvents')?.addEventListener('click', () => {
-
-			const modalCard = document.querySelector('.modal-card');
-			if (modalCard) {
-				modalCard.classList.remove('modal-bottom-sheet');
-				modalCard.style = '';
-				modalCard.style.right = '';
-				modalCard.style.bottom = '';
-				modalCard.style.top = '';
-				modalCard.style.maxHeight = '';
-				modalCard.style.borderRadius = '';
-				modalCard.style.overflow = '';
-				modalCard.style.boxShadow = '';
-			}
-			closeModal();
-		}, {
-			once: true
-		});
+		document.getElementById('closeDayEvents')?.addEventListener('click', closeModal, { once: true });
+		document.getElementById('modalAddSched')?.addEventListener('click', () => { closeModal(); openScheduleModal(dateIso); });
 	}
 
+	// ── Fetch activity events per cell ──
 	const dayCells = Array.from(grid.querySelectorAll('.calendar-cell[data-date]'));
 	await Promise.all(dayCells.map(async (cell) => {
 		const d = cell.dataset.date;
 		try {
-			const res = await (typeof apiFetch === 'function' ?
-				apiFetch(`/api/events?date=${d}`) :
-				fetch(`/api/events?date=${d}`, {
-					credentials: 'include'
-				}).then(r => r.json()));
-
+			const res   = await (typeof apiFetch === 'function'
+				? apiFetch(`/api/events?date=${d}`)
+				: fetch(`/api/events?date=${d}`, { credentials:'include' }).then(r => r.json()));
 			const items = Array.isArray(res) ? res : ((res && res.items) ? res.items : []);
 			const listWrap = cell.querySelector('.calendar-events');
+			if (!listWrap) return;
 
-			if (items.length > 0 && listWrap) {
-				const btn = document.createElement('button');
-				btn.className = 'btn small';
-				btn.type = 'button';
-				btn.style.width = '100%';
-				btn.setAttribute('aria-expanded', 'false');
-				btn.textContent = `Expand (${items.length})`;
-				btn.addEventListener('click', (e) => {
-					e.stopPropagation();
+			// Show first CAL_SHOW_MAX items as chips, then "+N more" pill
+			const visItems = items.slice(0, CAL_SHOW_MAX);
+			const extra    = items.length - visItems.length;
 
-					showDayEventsModal(d, items, isMobile);
-					btn.setAttribute('aria-expanded', 'true');
-				});
-				listWrap.appendChild(btn);
+			visItems.forEach(it => {
+				const chip = document.createElement('div');
+				chip.className   = 'event-chip';
+				chip.textContent = (it.action || it.text || '').slice(0, 38);
+				chip.title       = it.text || '';
+				listWrap.appendChild(chip);
+			});
+
+			if (extra > 0) {
+				const pill = document.createElement('button');
+				pill.className   = 'cal-more-pill';
+				pill.type        = 'button';
+				pill.textContent = `+${extra} more`;
+				pill.addEventListener('click', e => { e.stopPropagation(); showDayEventsModal(d, items); });
+				listWrap.appendChild(pill);
 			}
 
-			cell.addEventListener('click', (e) => {
-				e.stopPropagation();
-				showDayEventsModal(d, items, isMobile);
-			});
+			cell.addEventListener('click', e => { e.stopPropagation(); showDayEventsModal(d, items); });
 
 		} catch (err) {
 			console.warn('calendar fetch day err', d, err);
 		}
+
+		// Render schedule chips after activity chips
+		renderScheduleChipsInCell(cell, d);
 	}));
 }
 
@@ -3946,105 +4447,148 @@ function renderCalendar() {
 				openDayEvents(dStr, cellDate);
 			});
 
-			cell.setAttribute('data-date', toYYYYMMDD(cellDate));
+			const dStr = toYYYYMMDD(cellDate);
+			cell.setAttribute('data-date', dStr);
+
+			// Today ring
+			if (dStr === new Date().toISOString().slice(0, 10)) cell.classList.add('is-today');
+
 			calendarGrid.appendChild(cell);
 		}
 
 		prefetchMonthEvents(year, month);
+
+		// Render schedule chips after grid is built
+		calendarGrid.querySelectorAll('.calendar-cell[data-date]').forEach(c => {
+			renderScheduleChipsInCell(c, c.dataset.date);
+		});
 	}
 
 	async function prefetchMonthEvents(year, month) {
-
+		const todayStr = new Date().toISOString().slice(0, 10);
 		const days = new Date(year, month + 1, 0).getDate();
 		for (let d = 1; d <= days; d++) {
 			const dateObj = new Date(year, month, d);
 			const dateStr = toYYYYMMDD(dateObj);
 
-			fetch(`/api/events?date=${dateStr}`, {
-					credentials: 'include'
-				})
+			fetch(`/api/events?date=${dateStr}`, { credentials: 'include' })
 				.then(r => r.json())
 				.then(payload => {
 					if (!payload || !Array.isArray(payload.items)) return;
-					const items = payload.items.slice(0, 2);
-
-					const cell = calendarGrid.querySelector(`[data-date="${dateStr}"]`);
+					const items    = payload.items;
+					const cell     = calendarGrid.querySelector(`[data-date="${dateStr}"]`);
 					if (!cell) return;
-					const eventsCont = cell.querySelector('.day-events');
-					eventsCont.innerHTML = '';
-					for (const it of items) {
-						const chip = document.createElement('div');
-						chip.className = 'event-chip';
-						const who = it.username || (it.user_id ? `user:${it.user_id}` : 'unknown');
 
-						const txt = it.action ? `${it.action}` : (it.text || '');
-						chip.textContent = `${txt}`.slice(0, 40);
+					// Today ring
+					if (dateStr === todayStr) cell.classList.add('is-today');
+
+					const eventsCont = cell.querySelector('.day-events');
+					if (!eventsCont) return;
+					eventsCont.innerHTML = '';
+
+					// First CAL_SHOW_MAX chips, then "+N more" pill
+					const visItems = items.slice(0, CAL_SHOW_MAX);
+					const extra    = items.length - visItems.length;
+
+					visItems.forEach(it => {
+						const chip = document.createElement('div');
+						chip.className   = 'event-chip';
+						chip.textContent = (it.action || it.text || '').slice(0, 38);
+						chip.title       = it.text || '';
 						eventsCont.appendChild(chip);
+					});
+
+					if (extra > 0) {
+						const pill = document.createElement('button');
+						pill.className   = 'cal-more-pill';
+						pill.type        = 'button';
+						pill.textContent = `+${extra} more`;
+						pill.addEventListener('click', e => { e.stopPropagation(); openDayEvents(dateStr, dateObj); });
+						eventsCont.appendChild(pill);
 					}
+
+					// Schedule chips below activity chips
+					renderScheduleChipsInCell(cell, dateStr);
 				})
-				.catch(() => {});
+				.catch(() => {
+					// Still render schedule chips even if events fail
+					const cell = calendarGrid.querySelector(`[data-date="${dateStr}"]`);
+					if (cell) renderScheduleChipsInCell(cell, dateStr);
+				});
 		}
 	}
 
 	async function openDayEvents(dateStr, dateObj) {
-
 		try {
-			const res = await fetch(`/api/events?date=${dateStr}`, {
-				credentials: 'include'
-			});
-			if (!res.ok) {
-				const text = await res.text().catch(() => 'Server error');
-				return showModal(`Could not load events: ${text}`);
-			}
-			const data = await res.json();
+			const res = await fetch(`/api/events?date=${dateStr}`, { credentials: 'include' });
+			if (!res.ok) { const t = await res.text().catch(() => 'Server error'); return showModal(`Could not load events: ${t}`); }
+			const data  = await res.json();
 			const items = data.items || [];
 
+			const displayDate = dateObj.toLocaleDateString('en-US', { timeZone, weekday:'long', month:'long', day:'numeric' });
+
 			const content = document.createElement('div');
-			content.style.padding = '12px';
+			content.style.padding = '4px';
+
+			// Header
+			const hRow = document.createElement('div');
+			hRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:14px';
+			hRow.innerHTML = `<i class="fa fa-calendar-day" style="color:var(--accent);font-size:18px"></i>`;
 			const h = document.createElement('h3');
-			h.textContent = `Events — ${dateObj.toLocaleDateString('en-US', { timeZone })}`;
-			h.style.margin = '0 0 8px 0';
-			content.appendChild(h);
+			h.textContent = displayDate;
+			h.style.cssText = 'margin:0;font-size:15px';
+			hRow.appendChild(h);
+			content.appendChild(hRow);
 
 			if (items.length === 0) {
 				const p = document.createElement('div');
-				p.className = 'muted small';
-				p.textContent = 'No events';
+				p.className   = 'muted small';
+				p.textContent = 'No activity for this day.';
 				content.appendChild(p);
 			} else {
+				const listWrap = document.createElement('div');
+				listWrap.style.cssText = 'max-height:52vh;overflow-y:auto';
 				for (const it of items) {
 					const wrap = document.createElement('div');
-					wrap.style.padding = '8px';
-					wrap.style.borderBottom = '1px solid rgba(0,0,0,0.06)';
-					const titleLine = document.createElement('div');
-					titleLine.style.fontWeight = '800';
-					titleLine.style.marginBottom = '6px';
-					const who = (it.username && it.username !== 'unknown') ? it.username : (it.user_id ? `User ${it.user_id}` : 'unknown');
-					titleLine.textContent = `${it.action ? it.action : 'Activity'} — By: ${who}`;
-					wrap.appendChild(titleLine);
-
-					if (it.ingredient_name) {
-						const ing = document.createElement('div');
-						ing.innerHTML = `<strong>Ingredient:</strong> ${escapeHtml(it.ingredient_name)}`;
-						wrap.appendChild(ing);
-					}
-					if (it.time) {
-						const when = document.createElement('div');
-						const dt = new Date(it.time);
-						when.className = 'muted small';
-						when.textContent = `${dt.toLocaleString('en-US', { timeZone })}`;
-						wrap.appendChild(when);
-					}
-					const text = document.createElement('div');
-					text.style.marginTop = '6px';
-					text.textContent = it.text || '';
-					wrap.appendChild(text);
-
-					content.appendChild(wrap);
+					wrap.style.cssText = 'padding:8px 0;border-bottom:1px solid rgba(0,0,0,0.05)';
+					const who    = (it.username && it.username !== 'unknown') ? it.username : (it.user_id ? `User ${it.user_id}` : 'unknown');
+					const action = it.action ? `<span style="font-size:10px;font-weight:800;text-transform:uppercase;opacity:.7">${escapeHtml(it.action)} </span>` : '';
+					const time   = it.time ? new Date(it.time).toLocaleTimeString('en-US', { timeZone, hour:'2-digit', minute:'2-digit' }) : '';
+					wrap.innerHTML = `
+						<div style="font-weight:700;font-size:13px">${action}${escapeHtml(it.text || '')}</div>
+						${it.ingredient_name ? `<div style="font-size:12px"><strong>Item:</strong> ${escapeHtml(it.ingredient_name)}</div>` : ''}
+						<div class="muted small" style="margin-top:4px">By ${escapeHtml(who)}${time ? ' · ' + time : ''}</div>`;
+					listWrap.appendChild(wrap);
 				}
+				content.appendChild(listWrap);
+					}
+
+			// Schedule section
+			const scheds = getSchedulesForDate(dateStr);
+			if (scheds.length) {
+				const schedDiv = document.createElement('div');
+				schedDiv.style.cssText = 'margin-top:14px;padding-top:12px;border-top:1px solid rgba(0,0,0,0.07)';
+				schedDiv.innerHTML = `<div style="font-weight:800;font-size:11px;text-transform:uppercase;opacity:.6;margin-bottom:8px">Schedules</div>`
+					+ scheds.map(s => `<div style="display:flex;gap:6px;align-items:center;padding:5px 0;border-bottom:1px solid rgba(0,0,0,0.04)">
+						<i class="fa fa-clock" style="color:var(--accent);opacity:.7;font-size:11px"></i>
+						<span style="font-weight:700;font-size:13px">${escapeHtml(s.title)}</span>
+						${s.time ? `<span class="muted small">${escapeHtml(s.time)}</span>` : ''}
+					</div>`).join('');
+				content.appendChild(schedDiv);
 			}
 
+			// Actions
+			const actions = document.createElement('div');
+			actions.style.cssText = 'display:flex;gap:8px;margin-top:14px;justify-content:flex-end';
+			actions.innerHTML = `<button class="btn small primary" id="ddAddSched" type="button"><i class="fa fa-plus" style="margin-right:4px"></i>Add Schedule</button>
+				<button class="btn ghost small" id="ddClose" type="button">Close</button>`;
+			content.appendChild(actions);
+
 			showModalElement(content);
+
+			document.getElementById('ddClose')?.addEventListener('click', closeModal, { once: true });
+			document.getElementById('ddAddSched')?.addEventListener('click', () => { closeModal(); openScheduleModal(dateStr); });
+
 		} catch (err) {
 			console.error('openDayEvents err', err);
 			showModal('Failed to load events');
@@ -4284,14 +4828,15 @@ async function applyStockChange(id, type, qty, note) {
 		});
 		notify('Stock updated');
 		await renderIngredientCards();
-
 		await renderInventoryActivity();
-
 		renderDashboard();
+		renderStockChart();
+		// Refresh the reports summary so stock in/out shows immediately
+		const reportsVisible = !document.getElementById('view-reports')?.classList.contains('hidden');
+		if (reportsVisible) renderReports();
 	} catch (e) {
 		console.error('applyStockChange err', e);
 		notify(e.message || 'Server error');
-
 	}
 }
 
@@ -4718,34 +5263,50 @@ function populateSettings() {
 	}
 
 	const currentTheme = localStorage.getItem(THEME_KEY) || 'light';
-	const oldThemeEl = document.getElementById('themeToggle');
+	// Re-apply theme in case page reloaded
+	applyTheme(currentTheme);
 
-	if (oldThemeEl) {
+	// Render the color palette grid (replaces old dark-mode toggle)
+	renderColorPaletteGrid();
 
-		if (!oldThemeEl.closest || !oldThemeEl.closest('.switch')) {
-			const wrap = document.createElement('label');
-			wrap.className = 'switch';
-			wrap.innerHTML = `<input id="themeToggle" type="checkbox" ${currentTheme === 'dark' ? 'checked': ''} /><span class="slider" aria-hidden="true"></span><span class="switch-label"></span>`;
-			try {
-				oldThemeEl.parentNode.replaceChild(wrap, oldThemeEl);
-			} catch (e) {
-
-				if (oldThemeEl.parentNode) {
-					oldThemeEl.parentNode.insertBefore(wrap, oldThemeEl);
-					oldThemeEl.remove();
-				}
-			}
+	// Also re-render grid whenever the settings view is shown
+	document.querySelectorAll('.nav-item').forEach(btn => {
+		if (btn.dataset && btn.dataset.view === 'settings') {
+			btn.addEventListener('click', () => setTimeout(renderColorPaletteGrid, 60));
 		}
-	} else {
+	});
 
-		const container = q('settingsControls') || q('usersList')?.parentElement;
-		if (container && !container.querySelector('.switch #themeToggle') && !document.getElementById('themeToggle')) {
-			const wrap = document.createElement('div');
-			wrap.style.marginBottom = '10px';
-			wrap.innerHTML = `<label class="switch"><input id="themeToggle" type="checkbox" ${currentTheme === 'dark' ? 'checked': ''} /><span class="slider" aria-hidden="true"></span><span class="switch-label">Dark theme</span></label>`;
-			container.insertBefore(wrap, container.firstChild);
+	// ── Delete mode toggle (Owner only) ──────────────────────────────
+	function initDeleteModeToggle() {
+		const wrap     = q('deleteToggleWrap');
+		const noAccess = q('deleteToggleNoAccess');
+		const tog      = q('allowDeleteToggle');
+		if (!wrap || !noAccess || !tog) return;
+
+		if (canUseDeleteMode()) {
+			wrap.style.display = 'block';
+			noAccess.style.display = 'none';
+			tog.checked = isDeleteModeEnabled();
+			tog.addEventListener('change', () => {
+				localStorage.setItem(DELETE_MODE_KEY, tog.checked ? 'true' : 'false');
+				notify('Delete mode ' + (tog.checked ? 'enabled' : 'disabled'));
+				// Refresh inventory table so delete buttons appear/disappear instantly
+				if (document.querySelector('#view-inventory:not(.hidden)')) {
+					renderIngredientCards();
+				}
+			});
+		} else {
+			wrap.style.display = 'none';
+			noAccess.style.display = 'block';
 		}
 	}
+	initDeleteModeToggle();
+	// Re-check role every time settings tab is opened (in case user just logged in)
+	document.querySelectorAll('.nav-item').forEach(btn => {
+		if (btn.dataset && btn.dataset.view === 'settings') {
+			btn.addEventListener('click', () => setTimeout(initDeleteModeToggle, 80));
+		}
+	});
 
 	if (!document.getElementById('customCursorToggle')) {
 		const container = q('settingsControls') || q('usersList')?.parentElement;
@@ -4757,21 +5318,7 @@ function populateSettings() {
 		}
 	}
 
-	const themeToggleEl = document.getElementById('themeToggle');
-	if (themeToggleEl) {
-		themeToggleEl.addEventListener('change', (e) => {
-			const isDark = !!e.target.checked;
-			try {
-				applyTheme(isDark ? 'dark' : 'light');
-			} catch (err) {
-
-				if (isDark) document.documentElement.classList.add('theme-dark');
-				else document.documentElement.classList.remove('theme-dark');
-				localStorage.setItem(THEME_KEY, isDark ? 'dark' : 'light');
-			}
-			notify(`Theme set to ${isDark ? 'dark' : 'light'}`);
-		});
-	}
+	// themeToggle is now a hidden legacy element; palette swatches handle theme changes.
 
 	const curToggle = document.getElementById('customCursorToggle');
 	if (curToggle) {
@@ -4946,6 +5493,11 @@ function startApp() {
 		renderCalendar();
 	});
 
+	on('addScheduleBtn', 'click', () => {
+		const todayStr = new Date().toISOString().slice(0, 10);
+		openScheduleModal(todayStr);
+	});
+
 	const hb = q('hamburger');
 	if (hb) {
 		hb.onclick = () => {
@@ -5021,7 +5573,7 @@ function startApp() {
 		if (e.key === 'Escape') closeModal();
 	});
 
-	if (q('themeToggle')) q('themeToggle').addEventListener('change', (e) => applyTheme(e.target.checked ? 'dark' : 'light'));
+	// themeToggle is now hidden; color palette swatches handle theme switching.
 	if (q('addIngredientBtn')) q('addIngredientBtn').addEventListener('click', openAddIngredient);
 	if (q('addProductBtn')) q('addProductBtn').addEventListener('click', openAddProduct);
 
