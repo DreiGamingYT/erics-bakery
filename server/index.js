@@ -489,7 +489,7 @@ app.get('/api/ingredients', authMiddleware, async (req, res) => {
 			`SELECT COUNT(*) as cnt FROM ingredients ${whereSql}`, params);
 		const total = countRows && countRows[0] ? Number(countRows[0].cnt) : 0;
 
-		const q = `SELECT id,name,type,supplier,qty,unit,min_qty,max_qty,expiry,attrs,unit_cost,created_at,updated_at,created_by
+		const q = `SELECT id,name,type,supplier,qty,unit,min_qty,max_qty,expiry,attrs,created_at,updated_at,created_by
                FROM ingredients
                ${whereSql}
                ORDER BY ${pool.escapeId ? pool.escapeId(sort) : sort} ${order}
@@ -556,13 +556,12 @@ app.post('/api/ingredients', authMiddleware, async (req, res) => {
 		const max_qty = data.max_qty == null ? null : data.max_qty;
 		const expiry = data.expiry || null;
 		const attrs = data.attrs ? JSON.stringify(data.attrs) : null;
-		const unit_cost = data.unit_cost != null ? Number(data.unit_cost) : null;
 		const userId = (req.user && req.user.id) ? req.user.id : null;
 
 		const [r] = await pool.query(
-			`INSERT INTO ingredients (name, type, supplier, qty, unit, min_qty, max_qty, expiry, attrs, unit_cost, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			[name, type, supplier, qty, unit, min_qty, max_qty, expiry, attrs, unit_cost, userId]
+			`INSERT INTO ingredients (name, type, supplier, qty, unit, min_qty, max_qty, expiry, attrs, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			[name, type, supplier, qty, unit, min_qty, max_qty, expiry, attrs, userId]
 		);
 
 		const [rows] = await pool.query('SELECT * FROM ingredients WHERE id = ?', [r.insertId]);
@@ -603,7 +602,7 @@ app.get('/api/ingredients/:id', authMiddleware, async (req, res) => {
 			error: 'Invalid id'
 		});
 
-		const [rows] = await pool.query('SELECT id,name,type,supplier,qty,unit,min_qty,max_qty,expiry,attrs,unit_cost,created_at,updated_at FROM ingredients WHERE id = ?', [id]);
+		const [rows] = await pool.query('SELECT id,name,type,supplier,qty,unit,min_qty,max_qty,expiry,attrs,created_at,updated_at FROM ingredients WHERE id = ?', [id]);
 		if (!rows || rows.length === 0) return res.status(404).json({
 			error: 'Not found'
 		});
@@ -680,10 +679,6 @@ app.put('/api/ingredients/:id', authMiddleware, async (req, res) => {
 		if (body.attrs !== undefined) {
 			updates.push('attrs = ?');
 			params.push(body.attrs ? JSON.stringify(body.attrs) : null);
-		}
-		if (body.unit_cost !== undefined) {
-			updates.push('unit_cost = ?');
-			params.push(body.unit_cost != null ? Number(body.unit_cost) : null);
 		}
 
 		if (updates.length === 0) return res.status(400).json({
@@ -1516,14 +1511,6 @@ async function runStartupMigrations() {
 			console.log('[startup] last_active_at column added to user_sessions');
 		} catch (e) {
 			if (e.code !== 'ER_DUP_FIELDNAME') console.warn('[startup] last_active_at:', e.message);
-		}
-
-		// 3. unit_cost column on ingredients (#6 — cost tracking)
-		try {
-			await conn.query(`ALTER TABLE ingredients ADD COLUMN unit_cost DECIMAL(10,4) DEFAULT NULL`);
-			console.log('[startup] unit_cost column added to ingredients');
-		} catch (e) {
-			if (e.code !== 'ER_DUP_FIELDNAME') console.warn('[startup] unit_cost:', e.message);
 		}
 
 		// 4. schedules table (#4 — server-side calendar schedule sync)
