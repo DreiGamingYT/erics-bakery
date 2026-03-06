@@ -2987,31 +2987,32 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
 		chartSalesTimeline = null;
 	} catch (e) {}
 
-	let agg;
-	if (typeof aggregateUsageFromActivity === 'function') {
-		agg = aggregateUsageFromActivity(start.toISOString(), end.toISOString(), 50);
-	} else {
-		const usageMap = {};
-		(DB.ingredients || []).forEach(i => {
-			if (i && String(i.type || '').toLowerCase() === 'ingredient') {
-				usageMap[i.id] = 0;
-			}
-		});
+	// Build per-ingredient stock-in and stock-out totals for the selected date range
+	const stockInMap  = {};
+	const stockOutMap = {};
 		(DB.activity || []).forEach(a => {
 			const t = new Date(a.time || a.date || null);
 			if (!t || t < start || t > end) return;
 			const iid = Number(a.ingredient_id || 0);
-			if (!iid || !(iid in usageMap)) return;
-			const text = String(a.text || '').toLowerCase();
-			if (!(text.includes('used') || text.includes('stock out') || text.includes('used for'))) return;
+		if (!iid) return;
+		const action = String(a.action || '').toLowerCase();
+		const text   = String(a.text   || '').toLowerCase();
 			const m = String(a.text || '').match(/([0-9]*\.?[0-9]+)/g);
-			if (!m) return;
-			const v = Number(m[0]) || 0;
-			usageMap[iid] = (usageMap[iid] || 0) + v;
+		const v = m ? (Number(m[0]) || 0) : 0;
+		const isIn  = action.includes('stock_in')  || action.includes('stock in')  || text.includes('stock in');
+		const isOut = action.includes('stock_out') || action.includes('stock out') || text.includes('stock out') || text.includes('used');
+		if (isIn)  stockInMap[iid]  = (stockInMap[iid]  || 0) + v;
+		if (isOut) stockOutMap[iid] = (stockOutMap[iid] || 0) + v;
 		});
-		const arr = Object.keys(usageMap).map(k => ({
+
+	// Keep agg for the bar chart (stock-out totals used as "usage")
+	let agg;
+	if (typeof aggregateUsageFromActivity === 'function') {
+		agg = aggregateUsageFromActivity(start.toISOString(), end.toISOString(), 50);
+	} else {
+		const arr = Object.keys(stockOutMap).map(k => ({
 			id: Number(k),
-			qty: usageMap[k]
+			qty: stockOutMap[k]
 		})).sort((a, b) => b.qty - a.qty).slice(0, 50);
 		agg = {
 			labels: arr.map(x => (DB.ingredients.find(i => i.id === x.id)?.name) || `#${x.id}`),
@@ -3045,7 +3046,8 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
 
 	const summaryEl = q('reportSummary');
 	if (summaryEl) {
-		const totalUsed = (agg.raw || []).reduce((s, r) => s + (r.qty || 0), 0);
+		const totalStockIn  = +Object.values(stockInMap).reduce((s, v) => s + v, 0).toFixed(3);
+		const totalStockOut = +Object.values(stockOutMap).reduce((s, v) => s + v, 0).toFixed(3);
 
 		const lowCount = (DB.ingredients || []).filter(i => {
 			const minVal = (i && (i.min != null)) ? i.min : computeThresholdForIngredient(i);
@@ -3083,8 +3085,8 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
 				if (!((agg.raw || []).some(r => r.id === i.id))) return null;
 			}
 
-			const used    = (agg.raw || []).find(r => r.id === i.id);
-			const usedQty = used ? used.qty : 0;
+			const stockIn  = +(stockInMap[i.id]  || 0).toFixed(3);
+			const stockOut = +(stockOutMap[i.id] || 0).toFixed(3);
 
 			// Row background: expiring urgent (red) > low stock (orange) > expiring soon (yellow)
 			const rowBg = isExpiring     ? 'background:rgba(239,68,68,.08);'
@@ -3108,21 +3110,22 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
 			return `<tr style="${rowBg}">
         <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${i.id}</td>
         <td style="padding:8px;border:1px solid rgba(0,0,0,.07);font-weight:600">${escapeHtml(i.name)}${lowBadge}</td>
-        <td style="padding:8px;border:1px solid rgba(0,0,0,.07);text-align:right">${+usedQty.toFixed(3)}</td>
+        <td style="padding:8px;border:1px solid rgba(0,0,0,.07);text-align:right;color:#16a34a;font-weight:600">${stockIn}</td>
+        <td style="padding:8px;border:1px solid rgba(0,0,0,.07);text-align:right;color:#dc2626;font-weight:600">${stockOut}</td>
         <td style="padding:8px;border:1px solid rgba(0,0,0,.07);text-align:right">${qtyDisplay}</td>
         <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${escapeHtml(i.unit||'')}</td>
         <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${minVal != null ? minVal : ''}</td>
         <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${escapeHtml(i.type||'')}</td>
         <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${expiryDisplay}</td>
       </tr>`;
-		}).filter(Boolean).join('') || `<tr><td colspan="8" style="padding:12px" class="muted">No items match the selected filter/range</td></tr>`;
+		}).filter(Boolean).join('') || `<tr><td colspan="9" style="padding:12px" class="muted">No items match the selected filter/range</td></tr>`;
 		const startISO = start.toISOString().slice(0,10);
 		const endISO   = end.toISOString().slice(0,10);
 		summaryEl.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap">
         <div>
           <div style="font-weight:800">Reports — ${filter === 'usage' ? 'Ingredient Usage' : filter === 'low' ? 'Low stock' : filter === 'expiring' ? 'Expiring items' : 'All items'}</div>
-          <div class="muted small" id="summaryPeriodLabel">Period: ${startISO} to ${endISO} • Total used: ${+totalUsed.toFixed(3)} • Low items: ${lowCount} • Expiring: ${expiringCount} • Top used: ${best}</div>
+          <div class="muted small" id="summaryPeriodLabel">Period: ${startISO} to ${endISO} • Stock In: ${totalStockIn} • Stock Out: ${totalStockOut} • Low items: ${lowCount} • Expiring: ${expiringCount}</div>
         </div>
         <div id="summarybtns" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
           <div style="display:flex;gap:4px;align-items:center;background:rgba(0,0,0,0.03);border:1px solid rgba(0,0,0,0.08);border-radius:8px;padding:4px 8px;flex-wrap:wrap">
@@ -3160,7 +3163,8 @@ function renderReports(rangeStart, rangeEnd, reportFilter) {
           <thead><tr>
             <th style="padding:8px;border:1px solid #eee">ID</th>
             <th style="padding:8px;border:1px solid #eee">Name</th>
-            <th style="padding:8px;border:1px solid #eee">Used (${startISO} – ${endISO})</th>
+            <th style="padding:8px;border:1px solid #eee;color:#16a34a">↑ Stock In</th>
+            <th style="padding:8px;border:1px solid #eee;color:#dc2626">↓ Stock Out</th>
             <th style="padding:8px;border:1px solid #eee">Current Qty</th>
             <th style="padding:8px;border:1px solid #eee">Unit</th>
             <th style="padding:8px;border:1px solid #eee">Min</th>
