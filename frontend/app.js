@@ -3134,7 +3134,7 @@ async function renderReports(rangeStart, rangeEnd, reportFilter) {
           <div class="muted small" id="summaryPeriodLabel">Period: ${startISO} to ${endISO} • Stock In: ${totalStockIn} • Stock Out: ${totalStockOut} • Low items: ${lowCount} • Expiring: ${expiringCount}</div>
         </div>
         <div id="summarybtns" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-          <div style="display:flex;gap:4px;align-items:center;border:1px solid rgba(0,0,0,0.08);border-radius:8px;padding:4px 8px;flex-wrap:wrap">
+          <div style="display:flex;gap:4px;align-items:center;background:rgba(0,0,0,0.03);border:1px solid rgba(0,0,0,0.08);border-radius:8px;padding:4px 8px;flex-wrap:wrap">
             <label style="font-size:11px;font-weight:700;color:var(--muted,#888);white-space:nowrap">From</label>
             <input id="reportStart" type="date" value="${startISO}" style="height:30px;padding:0 6px;border-radius:6px;border:1px solid rgba(0,0,0,0.12);font-size:12px;background:var(--bg,#fff)" />
             <label style="font-size:11px;font-weight:700;color:var(--muted,#888);white-space:nowrap">To</label>

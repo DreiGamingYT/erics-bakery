@@ -4029,4 +4029,8 @@ html {
 
 /* Schedule modal item */
 .sched-modal-item { transition: background .14s; border-radius: 6px; padding: 8px !important; }
+<<<<<<< HEAD
 .sched-modal-item:hover { background: rgba(0,0,0,0.03); }
+=======
+.sched-modal-item:hover { background: rgba(0,0,0,0.03); }
+>>>>>>> 7c6a6b69cca2b28ce8a017fbda90e1cc444d91d6
