@@ -1066,11 +1066,7 @@ body {
   box-shadow: var(--shadow);
   border: 1px solid rgba(0, 0, 0, 0.04);
   cursor: pointer;
-  transition: transform 0.12s ease, box-shadow 0.12s ease;
-}
-.kpi-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 24px rgba(0,0,0,0.10);
+  transition: transform 0.12s ease;
 }
 .kpi-card:active {
   transform: translateY(0);
@@ -2186,13 +2182,7 @@ body {
   }
 
   .top-search {
-    display: block;
-    width: 100%;
-  }
-  .top-search input {
-    width: 100%;
-    min-width: 0;
-    font-size: 14px;
+    display: none;
   }
 
   .landing-split {
@@ -2210,9 +2200,7 @@ body {
     padding: 16px;
   }
   .top-center {
-    display: flex;
-    flex: 1;
-    max-width: 260px;
+    display: none;
   }
 
   .sidebar {
@@ -2365,9 +2353,7 @@ body {
     padding: 8px 10px;
   }
   .top-center {
-    display: flex;
-    flex: 1;
-    max-width: 200px;
+    display: none;
   }
   .hamburger {
     display: block !important;

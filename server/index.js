@@ -533,7 +533,7 @@ app.get('/api/ingredients', authMiddleware, async (req, res) => {
 app.post('/api/ingredients', authMiddleware, async (req, res) => {
 	try {
 		const data = req.body || {};
-		if (!hasRole(req.user, ['Owner', 'Baker', 'Assistant', 'Admin'])) {
+		if (!hasRole(req.user, ['Owner', 'Baker', 'Admin'])) {
 			return res.status(403).json({
 				error: 'Forbidden: insufficient permissions to create items'
 			});
@@ -634,7 +634,7 @@ app.put('/api/ingredients/:id', authMiddleware, async (req, res) => {
 			error: 'Invalid id'
 		});
 
-		if (!hasRole(req.user, ['Owner', 'Baker', 'Assistant', 'Admin'])) {
+		if (!hasRole(req.user, ['Owner', 'Baker', 'Admin'])) {
 			return res.status(403).json({
 				error: 'Forbidden: insufficient permissions to edit items'
 			});
@@ -842,32 +842,16 @@ app.post('/api/ingredients/:id/stock', authMiddleware, async (req, res) => {
 });
 app.get('/api/activity', authMiddleware, async (req, res) => {
 	try {
-		const page  = Math.max(1, Number(req.query.page || 1));
-		// #3/#19 — raise cap to 1000 when a date range is provided so reports get accurate data
-		const hasDates = req.query.start && req.query.end;
-		const maxLimit = hasDates ? 1000 : 200;
-		const limit = Math.max(1, Math.min(maxLimit, Number(req.query.limit || 50)));
+		const page = Math.max(1, Number(req.query.page || 1));
+		const limit = Math.max(1, Math.min(200, Number(req.query.limit || 50)));
 		const offset = (page - 1) * limit;
-
-		// #3/#11 — optional date-range filtering
-		const params = [limit, offset];
-		let whereSql = '';
-		if (req.query.start && req.query.end) {
-			whereSql = 'WHERE a.time >= ? AND a.time < DATE_ADD(?, INTERVAL 1 DAY) ';
-			params.unshift(req.query.end, req.query.start);
-		}
-
-		const [rows] = await pool.query(
-			`SELECT a.id, a.ingredient_id, a.user_id, a.text, a.time, a.action, u.username as username, i.name as ingredient_name
+		const [rows] = await pool.query(`SELECT a.id, a.ingredient_id, a.user_id, a.text, a.time, u.username as username, i.name as ingredient_name
        FROM activity a
        LEFT JOIN users u ON u.id = a.user_id
        LEFT JOIN ingredients i ON i.id = a.ingredient_id
-       ${whereSql}
        ORDER BY a.time DESC
-       LIMIT ? OFFSET ?`, params);
-		const countParams = hasDates ? [req.query.start, req.query.end] : [];
-		const countWhere  = hasDates ? 'WHERE time >= ? AND time < DATE_ADD(?, INTERVAL 1 DAY)' : '';
-		const [count] = await pool.query(`SELECT COUNT(*) as cnt FROM activity ${countWhere}`, countParams);
+       LIMIT ? OFFSET ?`, [limit, offset]);
+		const [count] = await pool.query('SELECT COUNT(*) as cnt FROM activity');
 		res.json({
 			items: rows,
 			meta: {
@@ -878,7 +862,9 @@ app.get('/api/activity', authMiddleware, async (req, res) => {
 		});
 	} catch (e) {
 		console.error('GET /api/activity err', e);
-		res.status(500).json({ error: 'Server error' });
+		res.status(500).json({
+			error: 'Server error'
+		});
 	}
 });
 
@@ -1437,48 +1423,6 @@ app.post('/api/notifications/send-email', authMiddleware, async (req, res) => {
 	}
 });
 
-
-// ── SCHEDULES API (#4 — server-side schedule sync) ────────────────────────────
-
-app.get('/api/schedules', authMiddleware, async (req, res) => {
-	try {
-		const [rows] = await pool.query(
-			'SELECT * FROM schedules WHERE user_id = ? ORDER BY date ASC, time ASC',
-			[req.user.id]
-		);
-		res.json({ items: rows });
-	} catch (e) {
-		console.error('GET /api/schedules err', e);
-		res.status(500).json({ error: 'Server error' });
-	}
-});
-
-app.post('/api/schedules', authMiddleware, async (req, res) => {
-	try {
-		const { id, date, title, time, note, notified, createdAt } = req.body || {};
-		if (!date || !title) return res.status(400).json({ error: 'date and title required' });
-		const schedId = id || (Date.now() + '_' + Math.random().toString(36).slice(2));
-		await pool.query(
-			'INSERT INTO schedules (id, user_id, date, title, time, note, notified, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), time=VALUES(time), note=VALUES(note), notified=VALUES(notified)',
-			[schedId, req.user.id, date, title, time || null, note || null, notified ? 1 : 0, createdAt ? new Date(createdAt) : new Date()]
-		);
-		res.json({ ok: true, id: schedId });
-	} catch (e) {
-		console.error('POST /api/schedules err', e);
-		res.status(500).json({ error: 'Server error' });
-	}
-});
-
-app.delete('/api/schedules/:id', authMiddleware, async (req, res) => {
-	try {
-		await pool.query('DELETE FROM schedules WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
-		res.json({ ok: true });
-	} catch (e) {
-		console.error('DELETE /api/schedules err', e);
-		res.status(500).json({ error: 'Server error' });
-	}
-});
-
 async function runStartupMigrations() {
 	const conn = await pool.getConnection();
 	try {
@@ -1511,31 +1455,6 @@ async function runStartupMigrations() {
 			console.log('[startup] last_active_at column added to user_sessions');
 		} catch (e) {
 			if (e.code !== 'ER_DUP_FIELDNAME') console.warn('[startup] last_active_at:', e.message);
-		}
-
-		// 4. schedules table (#4 — server-side calendar schedule sync)
-		await conn.query(`
-			CREATE TABLE IF NOT EXISTS schedules (
-				id           VARCHAR(64)  NOT NULL PRIMARY KEY,
-				user_id      INT          NOT NULL,
-				date         DATE         NOT NULL,
-				title        VARCHAR(255) NOT NULL,
-				time         VARCHAR(10)  DEFAULT NULL,
-				note         TEXT         DEFAULT NULL,
-				notified     TINYINT(1)   NOT NULL DEFAULT 0,
-				created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-				INDEX idx_schedules_date (date),
-				INDEX idx_schedules_user (user_id)
-			)
-		`);
-		console.log('[startup] schedules table ready');
-
-		// 5. action column on activity (if missing)
-		try {
-			await conn.query(`ALTER TABLE activity ADD COLUMN action VARCHAR(64) DEFAULT NULL`);
-			console.log('[startup] action column added to activity');
-		} catch (e) {
-			if (e.code !== 'ER_DUP_FIELDNAME') console.warn('[startup] activity.action:', e.message);
 		}
 	} catch (err) {
 		console.error('[startup] migration error:', err && err.message ? err.message : err);

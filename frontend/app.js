@@ -2031,7 +2031,18 @@ async function renderDashboard() {
 		if (q('kpi-exp')) q('kpi-exp').textContent = exp;
 		if (q('kpi-equipment')) q('kpi-equipment').textContent = equipmentCount;
 
-		// #20 — Empty state for new users
+		// #6 — Calculate total inventory value (requires unit_cost set on ingredients)
+		try {
+			const valResp = await apiFetch('/api/ingredients?type=ingredient&limit=1000&page=1');
+			const allIngs = (valResp && valResp.items) ? valResp.items : [];
+			const total_val = allIngs.reduce((sum, i) => {
+				if (i.unit_cost != null && i.qty != null) return sum + (Number(i.unit_cost) * Number(i.qty));
+				return sum;
+			}, 0);
+			if (q('kpi-inv-value')) {
+				q('kpi-inv-value').textContent = total_val > 0 ? `₱${total_val.toLocaleString('en-PH', {minimumFractionDigits:2, maximumFractionDigits:2})}` : '—';
+			}
+		} catch (_) {}
 		const emptyEl = document.getElementById('dashboardEmptyState');
 		if (total === 0) {
 			if (!emptyEl) {
@@ -2282,6 +2293,7 @@ async function renderIngredientCards(page = 1, limit = INVENTORY_PAGE_LIMIT) {
             <th style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06)">Unit</th>
             <th style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06)">Threshold</th>
             <th style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06)">Min</th>
+            <th style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06)">Cost/unit</th>
             <th style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06)">In</th>
             <th style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06)">Out</th>
             <th style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06)">Actions</th>
@@ -2345,6 +2357,7 @@ async function renderIngredientCards(page = 1, limit = INVENTORY_PAGE_LIMIT) {
         <td data-label="Unit" style="padding:10px;vertical-align:middle">${isMaterial ? escapeHtml(i.unit||'') : ''}</td>
         <td data-label="Threshold" style="padding:10px;vertical-align:middle">${isMaterial ? threshold : ''}</td>
         <td data-label="Min" style="padding:10px;vertical-align:middle">${isMaterial ? `<input class="min-input" type="number" value="${i.min_qty||0}" step="0.01" style="width:80px" />` : ''}</td>
+        <td data-label="Cost/unit" style="padding:10px;vertical-align:middle">${isMaterial && i.unit_cost != null ? `<span class="muted small">₱${Number(i.unit_cost).toFixed(2)}</span>` : (isMaterial ? '<span class="muted small" style="opacity:.4">—</span>' : '')}</td>
         <td data-label="In" style="padding:10px;vertical-align:middle"><input class="in-input" type="number" step="0.01" style="width:90px" /></td>
         <td data-label="Out" style="padding:10px;vertical-align:middle"><input class="out-input" type="number" step="0.01" style="width:90px" /></td>
         <td data-label="Actions" style="padding:10px;vertical-align:middle">
@@ -2357,7 +2370,7 @@ async function renderIngredientCards(page = 1, limit = INVENTORY_PAGE_LIMIT) {
         </td>
         ${showDelete ? `<td data-label="Delete" style="padding:10px;vertical-align:middle"><button class="btn small danger delete-row" data-id="${i.id}" data-name="${escapeHtml(i.name)}" type="button" title="Delete ${escapeHtml(i.name)}"><i class="fa fa-trash"></i></button></td>` : ''}
       </tr>`;
-		}).join('') || `<tr><td colspan="${showDelete ? 11 : 10}" class="muted" style="padding:12px">No inventory items</td></tr>`;
+		}).join('') || `<tr><td colspan="${showDelete ? 12 : 11}" class="muted" style="padding:12px">No inventory items</td></tr>`;
 
 		const tableFooter = `</tbody></table></div>`;
 
@@ -2883,49 +2896,57 @@ async function apiFetch(path, opts = {}) {
 	return json;
 }
 
-async function renderInventoryActivity(limit = 20) {
+async function renderInventoryActivity(limit = 30) {
 	const el = q('inventoryRecentActivity');
 	if (!el) return;
 
+	// #11 — Use date picker if present, otherwise default to today
+	const picker = q('invHistoryDatePicker');
 	const today = todayDateStr();
+	const selectedDate = (picker && picker.value) ? picker.value : today;
+
+	// Wire up date picker and Today button once
+	if (picker && !picker._wired) {
+		picker._wired = true;
+		picker.value = today;
+		picker.max = today;
+		picker.addEventListener('change', () => renderInventoryActivity(limit));
+		q('invHistoryTodayBtn')?.addEventListener('click', () => {
+			picker.value = today;
+			renderInventoryActivity(limit);
+		});
+	}
+
 	const dateLabel = q('invHistoryDateLabel');
-	if (dateLabel) dateLabel.textContent = new Date().toLocaleDateString(undefined, {weekday:'short', month:'short', day:'numeric'});
+	if (dateLabel) dateLabel.textContent = new Date(selectedDate + 'T00:00:00').toLocaleDateString(undefined, {weekday:'short', month:'short', day:'numeric'});
 
 	const sess = getSession();
 	if (!sess || !sess.username) {
 		el.innerHTML = `
       <li class="muted" style="padding:12px">
         Sign in to view inventory activity.
-        <div style="margin-top:8px"><button id="signInForInvActivity" class="btn small primary">Sign in</button>
-        <button id="showLocalInvActivity" class="btn small ghost" style="margin-left:8px">Show local demo</button></div>
+        <div style="margin-top:8px"><button id="signInForInvActivity" class="btn small primary">Sign in</button></div>
       </li>`;
 		q('signInForInvActivity')?.addEventListener('click', () => showOverlay(true, true));
-		q('showLocalInvActivity')?.addEventListener('click', () => {
-			const items = (DB && Array.isArray(DB.activity)) ? DB.activity.slice(0, limit) : [];
-			if (!items.length) el.innerHTML = '<li class="muted">No local activity</li>';
-			else el.innerHTML = items.map(it => {
-				const time = it.time ? new Date(it.time).toLocaleString() : '';
-				return `<li tabindex="0" role="listitem"><div>${escapeHtml(it.text)}</div><div class="muted small">${escapeHtml(time)}</div></li>`;
-			}).join('');
-		});
 		return;
 	}
 
 	el.innerHTML = '<li class="muted">Loading…</li>';
 	try {
-		const resp = await apiFetch(`/api/activity?limit=${limit}`);
+		const resp = await apiFetch(`/api/activity?limit=${limit}&start=${selectedDate}&end=${selectedDate}`);
 		const allItems = (resp && resp.items) ? resp.items : [];
 
-		const todayStart = new Date(today + 'T00:00:00');
-		const todayEnd   = new Date(today + 'T23:59:59.999');
+		const dayStart = new Date(selectedDate + 'T00:00:00');
+		const dayEnd   = new Date(selectedDate + 'T23:59:59.999');
 		const items = allItems.filter(it => {
 			if (!it.time) return false;
 			const d = new Date(it.time);
-			return d >= todayStart && d <= todayEnd;
+			return d >= dayStart && d <= dayEnd;
 		}).slice(0, limit);
 
 		if (!items.length) {
-			el.innerHTML = `<li class="muted" style="padding:10px">No activity yet today — edits you make will appear here.</li>`;
+			const isToday = selectedDate === today;
+			el.innerHTML = `<li class="muted" style="padding:10px">${isToday ? 'No activity yet today — edits you make will appear here.' : 'No activity on this day.'}</li>`;
 			return;
 		}
 		el.innerHTML = items.map(it => {
@@ -2946,7 +2967,7 @@ async function renderInventoryActivity(limit = 20) {
 			q('invact-signin')?.addEventListener('click', () => showOverlay(true, true));
 			return;
 		}
-		el.innerHTML = '<li class="muted">Failed to load activity</li>';
+		el.innerHTML = '<li class="muted">Could not load activity.</li>';
 	}
 }
 
@@ -4820,6 +4841,7 @@ async function openEditIngredient(id) {
         <label class="field"><span class="field-label">Name</span><input id="editName" type="text" value="${escapeHtml(ing.name)}" required/></label>
         <label class="field"><span class="field-label">Quantity</span><input id="editQty" type="number" step="0.01" value="${ing.qty||0}" required/></label>
         <label class="field"><span class="field-label">Minimum</span><input id="editMin" type="number" step="0.01" value="${ing.min_qty||0}" required/></label>
+        <label class="field"><span class="field-label">Unit cost (₱)</span><input id="editUnitCost" type="number" step="0.01" min="0" value="${ing.unit_cost != null ? ing.unit_cost : ''}" placeholder="e.g. 85.00"/></label>
         <div style="display:flex;gap:8px;margin-top:8px" class="modal-actions"><button class="btn primary" type="submit">Save</button><button class="btn ghost" id="cancelEdit" type="button">Cancel</button></div>
       </form>`);
 
@@ -4830,7 +4852,8 @@ async function openEditIngredient(id) {
 				name: q('editName')?.value || ing.name,
 
 				qty: Number(q('editQty')?.value || ing.qty || 0),
-				min_qty: Number(q('editMin')?.value || ing.min_qty || 0)
+				min_qty: Number(q('editMin')?.value || ing.min_qty || 0),
+				unit_cost: q('editUnitCost')?.value ? Number(q('editUnitCost').value) : null
 			};
 
 			try {
@@ -4840,6 +4863,7 @@ async function openEditIngredient(id) {
 					body: {
 						name: body.name,
 						min_qty: body.min_qty,
+						unit_cost: body.unit_cost,
 						attrs: ing.attrs || null
 					}
 				});
@@ -5383,6 +5407,8 @@ function openAddIngredient() {
 
       <label class="field field-supplier"><span class="field-label">Supplier</span><input id="ingSupplier" type="text"/></label>
 
+      <label class="field field-cost"><span class="field-label">Unit cost (₱)</span><input id="ingUnitCost" type="number" step="0.01" min="0" placeholder="e.g. 85.00"/></label>
+
       <div class="modal-actions" style="margin-top:8px">
         <button class="btn primary" type="submit">Save</button>
         <button class="btn ghost" id="cancelAdd" type="button">Cancel</button>
@@ -5422,6 +5448,7 @@ function openAddIngredient() {
 			max_qty: q('ingMax')?.value ? Number(q('ingMax')?.value) : null,
 			expiry: q('ingExpiry')?.value || null,
 			supplier: q('ingSupplier')?.value || '',
+			unit_cost: q('ingUnitCost')?.value ? Number(q('ingUnitCost')?.value) : null,
 			attrs: {}
 
 		};
