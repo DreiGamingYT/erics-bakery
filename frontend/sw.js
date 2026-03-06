@@ -1,5 +1,5 @@
 /* sw.js — Eric's Bakery offline service worker */
-const CACHE_NAME = 'erics-bakery-v1';
+const CACHE_NAME = 'erics-bakery-v2';
 
 // Core assets to pre-cache on install
 const PRECACHE_ASSETS = [

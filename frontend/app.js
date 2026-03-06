@@ -908,8 +908,8 @@ const PERMISSIONS = {
 	Baker: {
 		help: true,
 		dashboard: true,
-		calendar: false,
-		profile: false,
+		calendar: true,   // Bakers need to see the schedule
+		profile: true,    // Bakers should manage their own profile/password
 		inventory: true,
 		reports: false,
 		settings: true,
@@ -919,7 +919,7 @@ const PERMISSIONS = {
 		help: true,
 		dashboard: true,
 		calendar: true,
-		profile: false,
+		profile: true,    // Assistants should manage their own profile
 		inventory: true,
 		reports: true,
 		settings: true,
@@ -1940,83 +1940,8 @@ function _parseQtyFromText(text) {
 	return parseFloat(m[1]) || 0;
 }
 
-/* async function renderStockChart(rangeStart, rangeEnd) {
-	const ctx = q('stockChart')?.getContext('2d');
-	if (!ctx) return;
-	const end = rangeEnd ? new Date(rangeEnd) : new Date();
-	end.setHours(0, 0, 0, 0);
-	const start = rangeStart ? new Date(rangeStart) : new Date(end);
-	start.setDate(end.getDate() - 6);
-	start.setHours(0, 0, 0, 0);
+// NOTE: renderStockChart is defined below (live version). The old duplicate has been removed.
 
-	const days = [];
-	const map = {};
-	const cur = new Date(start);
-	while (cur <= end) {
-		const key = cur.toISOString().slice(0, 10);
-		days.push(key);
-		map[key] = 0;
-		cur.setDate(cur.getDate() + 1);
-	}
-
-	try {
-		const resp = await apiFetch('/api/activity?limit=2000');
-		const items = (resp && resp.items) ? resp.items : [];
-
-		items.forEach(a => {
-			if (!a.time) return;
-			const d = new Date(a.time);
-			d.setHours(0, 0, 0, 0);
-			const key = d.toISOString().slice(0, 10);
-			if (map[key] === undefined) return;
-			const txt = (a.text || '').toLowerCase();
-			const qty = _parseQtyFromText(a.text || '') || 0;
-			if (qty === 0) return;
-			if (txt.includes('stock out') || txt.includes('used')) map[key] -= qty;
-			else if (txt.includes('stock in')) map[key] += qty;
-		});
-
-		const labels = days;
-		const data = days.map(d => Math.max(0, Math.round((map[d] || 0) * 100) / 100));
-
-		if (chartStock) try {
-			chartStock.destroy();
-		} catch (e) {}
-		chartStock = new Chart(ctx, {
-			type: 'bar',
-			data: {
-				labels,
-				datasets: [{
-					label: 'Net units (in-out)',
-					data,
-					borderWidth: 0,
-					backgroundColor: 'rgba(27,133,236,0.85)'
-				}]
-			},
-			options: {
-				responsive: true,
-				maintainAspectRatio: false,
-				scales: {
-					y: {
-						beginAtZero: true
-					}
-				},
-				plugins: {
-					legend: {
-						display: false
-					}
-				}
-			}
-		});
-
-	} catch (e) {
-		console.error('renderStockChart err', e);
-		if (chartStock) try {
-			chartStock.destroy();
-			chartStock = null;
-		} catch (e) {}
-	}
-} */
 
 async function renderBestSellerChart() {
 
@@ -2105,6 +2030,77 @@ async function renderDashboard() {
 		if (q('kpi-low')) q('kpi-low').textContent = low;
 		if (q('kpi-exp')) q('kpi-exp').textContent = exp;
 		if (q('kpi-equipment')) q('kpi-equipment').textContent = equipmentCount;
+
+		// #6 — Calculate total inventory value (requires unit_cost set on ingredients)
+		try {
+			const valResp = await apiFetch('/api/ingredients?type=ingredient&limit=1000&page=1');
+			const allIngs = (valResp && valResp.items) ? valResp.items : [];
+			const total_val = allIngs.reduce((sum, i) => {
+				if (i.unit_cost != null && i.qty != null) return sum + (Number(i.unit_cost) * Number(i.qty));
+				return sum;
+			}, 0);
+			if (q('kpi-inv-value')) {
+				q('kpi-inv-value').textContent = total_val > 0 ? `₱${total_val.toLocaleString('en-PH', {minimumFractionDigits:2, maximumFractionDigits:2})}` : '—';
+			}
+		} catch (_) {}
+		const emptyEl = document.getElementById('dashboardEmptyState');
+		if (total === 0) {
+			if (!emptyEl) {
+				const kpiRow = document.querySelector('#view-dashboard .kpi-row');
+				if (kpiRow) {
+					const div = document.createElement('div');
+					div.id = 'dashboardEmptyState';
+					div.className = 'card';
+					div.style.cssText = 'text-align:center;padding:40px 24px;margin-top:16px';
+					div.innerHTML = `
+						<div style="font-size:48px;margin-bottom:12px">🥐</div>
+						<h3 style="margin:0 0 8px;font-size:18px">Welcome to Eric's Bakery!</h3>
+						<p class="muted" style="margin:0 0 20px;max-width:400px;display:inline-block">Your inventory is empty. Get started by adding your first ingredient, then set a minimum quantity to enable low-stock alerts.</p>
+						<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+							<button class="btn primary" id="emptyStateAddBtn" type="button"><i class="fa fa-plus" style="margin-right:6px"></i>Add first ingredient</button>
+							<button class="btn ghost" id="emptyStateInvBtn" type="button"><i class="fa fa-boxes-stacked" style="margin-right:6px"></i>Go to Inventory</button>
+						</div>
+						<div class="muted small" style="margin-top:20px;opacity:.7">Quick start: Add Ingredient → Set Min Qty → Do a Stock-In</div>`;
+					kpiRow.insertAdjacentElement('afterend', div);
+					document.getElementById('emptyStateAddBtn')?.addEventListener('click', () => {
+						showView('inventory');
+						setTimeout(openAddIngredient, 120);
+					});
+					document.getElementById('emptyStateInvBtn')?.addEventListener('click', () => showView('inventory'));
+				}
+			} else {
+				emptyEl.style.display = '';
+			}
+		} else if (emptyEl) {
+			emptyEl.style.display = 'none';
+		}
+		const kpiNav = [
+			{ id: 'kpi-total-ing', filter: 'all', type: 'ingredient' },
+			{ id: 'kpi-low', filter: 'low', type: null },
+			{ id: 'kpi-exp', filter: 'expiring', type: null },
+			{ id: 'kpi-equipment', filter: 'all', type: 'equipment' }
+		];
+		kpiNav.forEach(({ id, filter, type }) => {
+			const card = q(id)?.closest('.kpi-card');
+			if (!card) return;
+			card.style.cursor = 'pointer';
+			card.title = 'Click to view in Inventory';
+			card.onclick = () => {
+				showView('inventory');
+				setTimeout(() => {
+					// Set type radio
+					if (type) {
+						const radio = document.querySelector(`input[name="invType"][value="${type}"]`);
+						if (radio) { radio.checked = true; radio.dispatchEvent(new Event('change')); }
+					}
+					// Set chip filter
+					document.querySelectorAll('.filter-chips .chip').forEach(c => {
+						c.classList.toggle('active', c.dataset.filter === filter);
+					});
+					renderIngredientCards(1, INVENTORY_PAGE_LIMIT);
+				}, 80);
+			};
+		});
 
 		await renderStockChart();
 		await renderBestSellerChart();
@@ -2229,7 +2225,7 @@ function renderPaginationControls(container, meta, onPageClick) {
 	}
 }
 
-async function renderIngredientCards(page = 1, limit = 5) {
+async function renderIngredientCards(page = 1, limit = INVENTORY_PAGE_LIMIT) {
 	const container = q('ingredientList');
 	if (!container) return;
 
@@ -2297,6 +2293,7 @@ async function renderIngredientCards(page = 1, limit = 5) {
             <th style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06)">Unit</th>
             <th style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06)">Threshold</th>
             <th style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06)">Min</th>
+            <th style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06)">Cost/unit</th>
             <th style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06)">In</th>
             <th style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06)">Out</th>
             <th style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06)">Actions</th>
@@ -2310,20 +2307,62 @@ async function renderIngredientCards(page = 1, limit = 5) {
 			const isMaterial = (i.type === 'ingredient');
 			const threshold = isMaterial ? computeThresholdForIngredient(i) : '';
 			const lowBadge = (isMaterial && (Number(i.qty || 0) <= (Number(i.min_qty || 0) || threshold))) ? '<span class="badge low">Low</span>' : '';
-			const expiryNote = (isMaterial && i.expiry ? `<div class="muted small">${daysUntil(i.expiry)}d</div>` : '');
+
+			// #7 — Expiry urgency: critical (≤3d) / expiring (≤7d) / soon (≤30d)
+			let expiryNote = '';
+			if (isMaterial && i.expiry) {
+				const dLeft = daysUntil(i.expiry);
+				if (dLeft <= 3 && dLeft >= 0) {
+					expiryNote = `<div style="font-size:11px;font-weight:800;color:#dc2626">⚠ CRITICAL ${dLeft}d</div>`;
+				} else if (dLeft <= 7 && dLeft >= 0) {
+					expiryNote = `<div style="font-size:11px;font-weight:700;color:#dc2626">${dLeft}d left</div>`;
+				} else if (dLeft <= 30 && dLeft >= 0) {
+					expiryNote = `<div style="font-size:11px;color:#b45309">${dLeft}d left</div>`;
+				} else if (dLeft < 0) {
+					expiryNote = `<div style="font-size:11px;font-weight:800;color:#7f1d1d">EXPIRED</div>`;
+				}
+			}
+
+			// #8 — Days until stockout forecast
+			let forecastNote = '';
+			if (isMaterial && typeof computeThresholdForIngredient === 'function') {
+				try {
+					const dailyRate = (() => {
+						const now = new Date();
+						const cutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+						const hist = (DB.activity || []).filter(a => a.ingredient_id === i.id && new Date(a.time) >= cutoff);
+						let total = 0;
+						hist.forEach(a => {
+							const textL = String(a.text || '').toLowerCase();
+							const m = String(a.text || '').match(/([0-9]*\.?[0-9]+)/);
+							if (m && (textL.includes('stock out') || textL.includes('used'))) total += Number(m[0]) || 0;
+						});
+						return total / 7;
+					})();
+					if (dailyRate > 0.001) {
+						const daysLeft = Math.floor(Number(i.qty || 0) / dailyRate);
+						if (daysLeft <= 14) {
+							const color = daysLeft <= 3 ? '#dc2626' : daysLeft <= 7 ? '#b45309' : '#16a34a';
+							forecastNote = `<div style="font-size:11px;color:${color};font-weight:600">~${daysLeft}d stock</div>`;
+						}
+					}
+				} catch (_) {}
+			}
 
 			return `<tr data-id="${i.id}" data-type="${escapeHtml(i.type||'')}" style="background:var(--card);border-bottom:1px solid rgba(0,0,0,0.04)">
         <td data-label="ID" style="padding:10px;vertical-align:middle">${i.id}</td>
         <td data-label="Name" style="padding:10px;vertical-align:middle"><strong>${escapeHtml(i.name)}</strong><div class="muted small">${escapeHtml(i.type)}</div></td>
-        <td data-label="Supplier" style="padding:10px;vertical-align:middle">${isMaterial ? escapeHtml(i.supplier||'') : ''}</td>
-        <td data-label="Qty" style="padding:10px;vertical-align:middle"><span class="qty-value">${i.qty}</span> ${expiryNote} ${lowBadge}</td>
+        <td data-label="Supplier" style="padding:10px;vertical-align:middle">${isMaterial ? escapeHtml(i.supplier||'—') : ''}</td>
+        <td data-label="Qty" style="padding:10px;vertical-align:middle"><span class="qty-value">${i.qty}</span>${expiryNote}${forecastNote}${lowBadge ? ' '+lowBadge : ''}</td>
         <td data-label="Unit" style="padding:10px;vertical-align:middle">${isMaterial ? escapeHtml(i.unit||'') : ''}</td>
         <td data-label="Threshold" style="padding:10px;vertical-align:middle">${isMaterial ? threshold : ''}</td>
         <td data-label="Min" style="padding:10px;vertical-align:middle">${isMaterial ? `<input class="min-input" type="number" value="${i.min_qty||0}" step="0.01" style="width:80px" />` : ''}</td>
+        <td data-label="Cost/unit" style="padding:10px;vertical-align:middle">${isMaterial && i.unit_cost != null ? `<span class="muted small">₱${Number(i.unit_cost).toFixed(2)}</span>` : (isMaterial ? '<span class="muted small" style="opacity:.4">—</span>' : '')}</td>
         <td data-label="In" style="padding:10px;vertical-align:middle"><input class="in-input" type="number" step="0.01" style="width:90px" /></td>
         <td data-label="Out" style="padding:10px;vertical-align:middle"><input class="out-input" type="number" step="0.01" style="width:90px" /></td>
         <td data-label="Actions" style="padding:10px;vertical-align:middle">
-          <div style="display:flex;gap:8px;align-items:center">
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <input class="note-input" type="text" placeholder="note…" style="width:88px;height:28px;font-size:12px;padding:0 6px;border-radius:6px;border:1px solid rgba(0,0,0,.12);background:var(--bg,#fff);color:var(--text)" />
             <button class="btn small save-row" type="button">Save</button>
             <button class="btn small soft details-btn" data-id="${i.id}" type="button">Details</button>
             <button class="btn small soft edit-btn" type="button">Edit</button>
@@ -2331,7 +2370,7 @@ async function renderIngredientCards(page = 1, limit = 5) {
         </td>
         ${showDelete ? `<td data-label="Delete" style="padding:10px;vertical-align:middle"><button class="btn small danger delete-row" data-id="${i.id}" data-name="${escapeHtml(i.name)}" type="button" title="Delete ${escapeHtml(i.name)}"><i class="fa fa-trash"></i></button></td>` : ''}
       </tr>`;
-		}).join('') || `<tr><td colspan="${showDelete ? 11 : 10}" class="muted" style="padding:12px">No inventory items</td></tr>`;
+		}).join('') || `<tr><td colspan="${showDelete ? 12 : 11}" class="muted" style="padding:12px">No inventory items</td></tr>`;
 
 		const tableFooter = `</tbody></table></div>`;
 
@@ -2339,8 +2378,10 @@ async function renderIngredientCards(page = 1, limit = 5) {
 
 		container.innerHTML = header + tableHead + rowsHtml + tableFooter + paginationWrap;
 
+		// #18 — Debounce invType radio so rapid switching doesn't hammer the API
+		const _debouncedRender = debounce(() => renderIngredientCards(1, limit), 200);
 		Array.from(container.querySelectorAll('input[name="invType"]')).forEach(r => {
-			r.addEventListener('change', () => renderIngredientCards(1, limit));
+			r.addEventListener('change', _debouncedRender);
 		});
 
 		container.querySelectorAll('button.save-row').forEach(btn => {
@@ -2352,6 +2393,8 @@ async function renderIngredientCards(page = 1, limit = 5) {
 				const outVal = Number(tr.querySelector('.out-input')?.value || 0);
 				const minInput = tr.querySelector('.min-input');
 				const newMin = minInput ? Number(minInput.value || 0) : null;
+				// #14 — pick up note from the new note-input field
+				const noteVal = (tr.querySelector('.note-input')?.value || '').trim();
 
 				try {
 					if (newMin !== null && !Number.isNaN(newMin)) {
@@ -2364,10 +2407,10 @@ async function renderIngredientCards(page = 1, limit = 5) {
 					}
 					if (inVal > 0) {
 						// Use applyStockChange so the undo bar appears
-						applyStockChange(id, 'in', Number(inVal), 'Stock-in');
+						applyStockChange(id, 'in', Number(inVal), noteVal || 'Stock-in');
 					} else if (outVal > 0) {
 						// Use applyStockChange so the undo bar appears
-						applyStockChange(id, 'out', Number(outVal), 'Stock-out');
+							applyStockChange(id, 'out', Number(outVal), noteVal || 'Stock-out');
 					} else {
 						// Only min threshold changed — no stock movement
 						notify('Min threshold updated');
@@ -2853,65 +2896,62 @@ async function apiFetch(path, opts = {}) {
 	return json;
 }
 
-async function renderInventoryActivity(limit = 20) {
+async function renderInventoryActivity(limit = 30) {
 	const el = q('inventoryRecentActivity');
 	if (!el) return;
 
-	// ── Day-scope: clear history if the calendar day has rolled over ──
+	// #11 — Use date picker if present, otherwise default to today
+	const picker = q('invHistoryDatePicker');
 	const today = todayDateStr();
-	// Show the date in the heading
-	const dateLabel = q('invHistoryDateLabel');
-	if (dateLabel) dateLabel.textContent = new Date().toLocaleDateString(undefined, {weekday:'short', month:'short', day:'numeric'});
-	const storedDay = localStorage.getItem(INV_HIST_DAY_KEY);
-	if (storedDay && storedDay !== today) {
-		// New day — wipe the cached day-history so it shows fresh for today
-		localStorage.removeItem(INV_HIST_DAY_KEY);
+	const selectedDate = (picker && picker.value) ? picker.value : today;
+
+	// Wire up date picker and Today button once
+	if (picker && !picker._wired) {
+		picker._wired = true;
+		picker.value = today;
+		picker.max = today;
+		picker.addEventListener('change', () => renderInventoryActivity(limit));
+		q('invHistoryTodayBtn')?.addEventListener('click', () => {
+			picker.value = today;
+			renderInventoryActivity(limit);
+		});
 	}
-	// Record today as the active history day
-	localStorage.setItem(INV_HIST_DAY_KEY, today);
+
+	const dateLabel = q('invHistoryDateLabel');
+	if (dateLabel) dateLabel.textContent = new Date(selectedDate + 'T00:00:00').toLocaleDateString(undefined, {weekday:'short', month:'short', day:'numeric'});
 
 	const sess = getSession();
 	if (!sess || !sess.username) {
 		el.innerHTML = `
       <li class="muted" style="padding:12px">
         Sign in to view inventory activity.
-        <div style="margin-top:8px"><button id="signInForInvActivity" class="btn small primary">Sign in</button>
-        <button id="showLocalInvActivity" class="btn small ghost" style="margin-left:8px">Show local demo</button></div>
+        <div style="margin-top:8px"><button id="signInForInvActivity" class="btn small primary">Sign in</button></div>
       </li>`;
 		q('signInForInvActivity')?.addEventListener('click', () => showOverlay(true, true));
-		q('showLocalInvActivity')?.addEventListener('click', () => {
-			const items = (DB && Array.isArray(DB.activity)) ? DB.activity.slice(0, limit) : [];
-			if (!items.length) el.innerHTML = '<li class="muted">No local activity</li>';
-			else el.innerHTML = items.map(it => {
-				const time = it.time ? new Date(it.time).toLocaleString() : '';
-				return `<li tabindex="0" role="listitem"><div>${escapeHtml(it.text)}</div><div class="muted small">${escapeHtml(time)}</div></li>`;
-			}).join('');
-		});
 		return;
 	}
 
 	el.innerHTML = '<li class="muted">Loading…</li>';
 	try {
-		const resp = await apiFetch(`/api/activity?limit=${limit}`);
+		const resp = await apiFetch(`/api/activity?limit=${limit}&start=${selectedDate}&end=${selectedDate}`);
 		const allItems = (resp && resp.items) ? resp.items : [];
 
-		// ── Filter to today only ──
-		const todayStart = new Date(today + 'T00:00:00');
-		const todayEnd   = new Date(today + 'T23:59:59.999');
+		const dayStart = new Date(selectedDate + 'T00:00:00');
+		const dayEnd   = new Date(selectedDate + 'T23:59:59.999');
 		const items = allItems.filter(it => {
 			if (!it.time) return false;
 			const d = new Date(it.time);
-			return d >= todayStart && d <= todayEnd;
+			return d >= dayStart && d <= dayEnd;
 		}).slice(0, limit);
 
 		if (!items.length) {
-			el.innerHTML = `<li class="muted" style="padding:10px">No activity yet today — edits you make will appear here.</li>`;
+			const isToday = selectedDate === today;
+			el.innerHTML = `<li class="muted" style="padding:10px">${isToday ? 'No activity yet today — edits you make will appear here.' : 'No activity on this day.'}</li>`;
 			return;
 		}
 		el.innerHTML = items.map(it => {
 			const time = it.time ? new Date(it.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
 			const badge = it.action ? `<span class="inv-hist-badge inv-hist-badge--${(it.action||'').toLowerCase().replace(/\s+/g,'-')}">${escapeHtml(it.action)}</span>` : '';
-		const userBadge = it.username ? `<span style="font-size:10px;font-weight:700;padding:1px 7px;border-radius:999px;background:rgba(99,102,241,.12);color:#4f46e5;margin-left:4px">@${escapeHtml(it.username)}</span>` : '';
 			return `<li tabindex="0" role="listitem" style="padding:8px 0;border-bottom:1px solid rgba(0,0,0,0.05);display:flex;align-items:flex-start;gap:8px">
 				<div style="flex:1;min-width:0">
 					<div style="font-size:13px">${badge} ${escapeHtml(it.text)}</div>
@@ -2922,31 +2962,15 @@ async function renderInventoryActivity(limit = 20) {
 		}).join('');
 	} catch (err) {
 		console.error('renderInventoryActivity err:', err);
-
 		if (err && err.status === 401) {
 			el.innerHTML = '<li class="muted">You must sign in to view activity. <button class="btn small primary" id="invact-signin">Sign in</button></li>';
 			q('invact-signin')?.addEventListener('click', () => showOverlay(true, true));
 			return;
 		}
-
-		const fallback = (DB && Array.isArray(DB.activity)) ? DB.activity.filter(it => {
-			if (!it.time) return false;
-			const d = new Date(it.time);
-			const ts = todayDateStr();
-			const s = new Date(ts + 'T00:00:00'), e2 = new Date(ts + 'T23:59:59.999');
-			return d >= s && d <= e2;
-		}).slice(0, limit) : [];
-		if (fallback.length) {
-			el.innerHTML = fallback.map(it => {
-				const time = it.time ? new Date(it.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
-				return `<li tabindex="0" role="listitem"><div>${escapeHtml(it.text)}</div><div class="muted small">${escapeHtml(time)}</div></li>`;
-			}).join('');
-			notify('Showing local demo activity (server failed).');
-			return;
-		}
-		el.innerHTML = '<li class="muted">Failed to load activity</li>';
+		el.innerHTML = '<li class="muted">Could not load activity.</li>';
 	}
 }
+
 
 async function renderReports(rangeStart, rangeEnd, reportFilter) {
 	const startInput = rangeStart || q('reportStart')?.value || null;
@@ -2971,8 +2995,11 @@ async function renderReports(rangeStart, rangeEnd, reportFilter) {
 	const stockInMap  = {};
 	const stockOutMap = {};
 	try {
-		const actResp = await apiFetch('/api/activity?limit=5000');
+		const _startQ = start ? start.toISOString().slice(0,10) : '';
+		const _endQ = end ? end.toISOString().slice(0,10) : '';
+		const actResp = await apiFetch('/api/activity?limit=200' + (_startQ ? '&start='+_startQ+'&end='+_endQ : ''));
 		const liveActivity = (actResp && actResp.items) ? actResp.items : [];
+		if (actResp && actResp.meta && actResp.meta.total > 200) console.warn('[reports] activity truncated at 200 — consider a shorter date range');
 		liveActivity.forEach(a => {
 			const t = new Date(a.time || null);
 			if (!t || t < start || t > end) return;
@@ -3261,7 +3288,7 @@ async function printReports(rangeStartISO, rangeEndISO, filter) {
 		const printStockInMap  = {};
 		const printStockOutMap = {};
 		try {
-			const actResp = await apiFetch('/api/activity?limit=5000');
+			const actResp = await apiFetch('/api/activity?limit=200' + (start ? '&start='+start.toISOString().slice(0,10)+'&end='+end.toISOString().slice(0,10) : ''));
 			const liveAct = (actResp && actResp.items) ? actResp.items : [];
 			liveAct.forEach(a => {
 				const t = new Date(a.time || null);
@@ -3494,7 +3521,7 @@ async function exportReportsCSVReport(rangeStartISO, rangeEndISO, filter) {
 	const csvStockInMap  = {};
 	const csvStockOutMap = {};
 	try {
-		const actResp = await apiFetch('/api/activity?limit=5000');
+		const actResp = await apiFetch('/api/activity?limit=200' + (start ? '&start='+start.toISOString().slice(0,10)+'&end='+end.toISOString().slice(0,10) : ''));
 		const liveAct = (actResp && actResp.items) ? actResp.items : [];
 		liveAct.forEach(a => {
 			const t = new Date(a.time || null);
@@ -3848,9 +3875,12 @@ let currentCalendarYear = (new Date()).getFullYear();
 let currentCalendarMonth = (new Date()).getMonth();
 
 /* ================================================================
-   SCHEDULING ENGINE  (localStorage-backed)
+   SCHEDULING ENGINE  (localStorage cache + server sync)
    ================================================================ */
 const SCHED_KEY = 'bakery_schedules_v1';
+
+// #4 — Schedule functions now sync to server via /api/schedules.
+// localStorage is used as a fast local cache; server is source of truth.
 
 function getAllSchedules() {
 	try { return JSON.parse(localStorage.getItem(SCHED_KEY) || '[]'); } catch(e) { return []; }
@@ -3861,17 +3891,44 @@ function saveAllSchedules(arr) {
 function getSchedulesForDate(dateStr) {
 	return getAllSchedules().filter(s => s.date === dateStr);
 }
-function addSchedule(sched) {
-	const all = getAllSchedules();
+async function addSchedule(sched) {
 	sched.id = Date.now() + '_' + Math.random().toString(36).slice(2);
 	sched.createdAt = new Date().toISOString();
 	sched.notified  = false;
+	// Optimistic local save
+	const all = getAllSchedules();
 	all.push(sched);
 	saveAllSchedules(all);
+	// Sync to server (non-blocking)
+	try {
+		const res = await apiFetch('/api/schedules', { method: 'POST', body: sched });
+		if (res && res.id) {
+			// Replace local entry with server-assigned id
+			const local = getAllSchedules();
+			const idx = local.findIndex(s => s.id === sched.id);
+			if (idx !== -1) { local[idx].id = res.id; saveAllSchedules(local); sched.id = res.id; }
+		}
+	} catch (e) { console.warn('[schedules] server sync failed (offline?):', e.message); }
 	return sched;
 }
-function deleteSchedule(id) {
+async function deleteSchedule(id) {
 	saveAllSchedules(getAllSchedules().filter(s => s.id !== id));
+	try { await apiFetch('/api/schedules/' + id, { method: 'DELETE' }); } catch (e) {
+		console.warn('[schedules] server delete failed:', e.message);
+	}
+}
+// Pull schedules from server into localStorage on load
+async function syncSchedulesFromServer() {
+	try {
+		const res = await apiFetch('/api/schedules');
+		if (res && Array.isArray(res.items)) {
+			// Merge server items into local cache (server wins for existing ids)
+			const local = getAllSchedules();
+			const serverIds = new Set(res.items.map(s => String(s.id)));
+			const merged = local.filter(s => !serverIds.has(String(s.id))).concat(res.items);
+			saveAllSchedules(merged);
+		}
+	} catch (e) { console.warn('[schedules] sync from server failed:', e.message); }
 }
 
 /* ── Reminder checker — runs every 30 s ── */
@@ -3955,12 +4012,14 @@ function openScheduleModal(dateStr) {
 
 	const saveBtn = document.getElementById('saveSchedBtn');
 	if (saveBtn) {
-		saveBtn.addEventListener('click', () => {
+		saveBtn.addEventListener('click', async () => {
 			const title = (document.getElementById('newSchedTitle')?.value || '').trim();
 			if (!title) { if (typeof notify === 'function') notify('Title is required'); return; }
 			const time  = document.getElementById('newSchedTime')?.value  || '';
 			const note  = (document.getElementById('newSchedNote')?.value || '').trim();
-			addSchedule({ date: dateStr, title, time, note });
+			saveBtn.disabled = true;
+			await addSchedule({ date: dateStr, title, time, note });
+			saveBtn.disabled = false;
 			pushInAppNotif({
 				type:  'schedule',
 				title: `Scheduled: ${title}`,
@@ -4372,7 +4431,12 @@ function renderCalendar() {
 	if (header && q('calendarGrid')) {
 		header.textContent = `Calendar — ${new Date(currentCalendarYear, currentCalendarMonth).toLocaleString([], {month:'long', year:'numeric'})}`;
 	}
+	// #4 — Sync schedules from server, then re-render cells
+	syncSchedulesFromServer().then(() => {
 	renderCalendarForMonth(currentCalendarYear, currentCalendarMonth);
+	}).catch(() => {
+		renderCalendarForMonth(currentCalendarYear, currentCalendarMonth);
+	});
 }
 
 (function() {
@@ -4777,6 +4841,7 @@ async function openEditIngredient(id) {
         <label class="field"><span class="field-label">Name</span><input id="editName" type="text" value="${escapeHtml(ing.name)}" required/></label>
         <label class="field"><span class="field-label">Quantity</span><input id="editQty" type="number" step="0.01" value="${ing.qty||0}" required/></label>
         <label class="field"><span class="field-label">Minimum</span><input id="editMin" type="number" step="0.01" value="${ing.min_qty||0}" required/></label>
+        <label class="field"><span class="field-label">Unit cost (₱)</span><input id="editUnitCost" type="number" step="0.01" min="0" value="${ing.unit_cost != null ? ing.unit_cost : ''}" placeholder="e.g. 85.00"/></label>
         <div style="display:flex;gap:8px;margin-top:8px" class="modal-actions"><button class="btn primary" type="submit">Save</button><button class="btn ghost" id="cancelEdit" type="button">Cancel</button></div>
       </form>`);
 
@@ -4787,7 +4852,8 @@ async function openEditIngredient(id) {
 				name: q('editName')?.value || ing.name,
 
 				qty: Number(q('editQty')?.value || ing.qty || 0),
-				min_qty: Number(q('editMin')?.value || ing.min_qty || 0)
+				min_qty: Number(q('editMin')?.value || ing.min_qty || 0),
+				unit_cost: q('editUnitCost')?.value ? Number(q('editUnitCost').value) : null
 			};
 
 			try {
@@ -4797,6 +4863,7 @@ async function openEditIngredient(id) {
 					body: {
 						name: body.name,
 						min_qty: body.min_qty,
+						unit_cost: body.unit_cost,
 						attrs: ing.attrs || null
 					}
 				});
@@ -5181,12 +5248,19 @@ async function applyStockChange(id, type, qty, note) {
 })();
 
 // ── BATCH STOCK UPDATE ────────────────────────────────────────────────────────
-function openBatchStockModal() {
-	const ings = (DB.ingredients || []).filter(i => i && String(i.type||'').toLowerCase() === 'ingredient');
+// #9 — async so we can fetch fresh ingredients from server, not stale DB.ingredients
+async function openBatchStockModal() {
+	let ings;
+	try {
+		const resp = await apiFetch('/api/ingredients?type=ingredient&limit=200&page=1');
+		ings = (resp && resp.items) ? resp.items.filter(i => i && String(i.type||'').toLowerCase() === 'ingredient') : [];
+	} catch (_) {
+		ings = (DB.ingredients || []).filter(i => i && String(i.type||'').toLowerCase() === 'ingredient');
+	}
 	if (!ings.length) { notify('No ingredients found', { type: 'warn' }); return; }
 
 	const rows = ings.map(i => `
-		<tr data-id="${i.id}">
+		<tr data-id="${i.id}" data-name="${escapeHtml(i.name)}" data-unit="${escapeHtml(i.unit||'')}">
 			<td style="padding:6px 8px;font-weight:700">${escapeHtml(i.name)}</td>
 			<td style="padding:6px 8px;color:var(--muted,#888);font-size:12px">${i.qty} ${escapeHtml(i.unit||'')}</td>
 			<td style="padding:4px 6px">
@@ -5200,6 +5274,9 @@ function openBatchStockModal() {
 				<input class="batch-qty" type="number" inputmode="decimal" step="0.01" min="0.01" placeholder="qty"
 					style="width:80px;height:34px;padding:0 8px;border-radius:6px;border:1px solid rgba(0,0,0,.12);font-size:13px;font-weight:700"/>
 			</td>
+			<td style="padding:4px 6px">
+				<input class="batch-note" type="text" placeholder="note" style="width:80px;height:34px;padding:0 8px;border-radius:6px;border:1px solid rgba(0,0,0,.12);font-size:12px"/>
+			</td>
 		</tr>`).join('');
 
 	openModalHTML(`
@@ -5212,29 +5289,64 @@ function openBatchStockModal() {
 				<th style="padding:6px 8px;text-align:left">Current</th>
 				<th style="padding:6px 8px;text-align:left">Type</th>
 				<th style="padding:6px 8px;text-align:left">Qty</th>
+				<th style="padding:6px 8px;text-align:left">Note</th>
 			</tr></thead>
 			<tbody>${rows}</tbody>
 		</table>
 		</div>
 		<div style="display:flex;gap:8px;margin-top:14px">
-			<button class="btn primary" id="batchSubmitBtn" type="button" style="flex:1;height:44px;font-weight:800">Apply All</button>
+			<button class="btn primary" id="batchReviewBtn" type="button" style="flex:1;height:44px;font-weight:800"><i class="fa fa-eye" style="margin-right:6px"></i>Review Changes</button>
 			<button class="btn ghost" id="batchCancelBtn" type="button" style="height:44px;padding:0 20px">Cancel</button>
 		</div>`);
 
 	q('batchCancelBtn')?.addEventListener('click', closeModal);
 
-	q('batchSubmitBtn')?.addEventListener('click', async () => {
+	// #12 — Collect tasks first, show summary, then apply
+	q('batchReviewBtn')?.addEventListener('click', async () => {
 		const modal = document.querySelector('.modal-card');
-		const rows  = modal ? modal.querySelectorAll('tr[data-id]') : [];
+		const rowEls = modal ? modal.querySelectorAll('tr[data-id]') : [];
 		const tasks = [];
-		rows.forEach(row => {
+		rowEls.forEach(row => {
 			const id   = Number(row.dataset.id);
+			const name = row.dataset.name || `#${id}`;
+			const unit = row.dataset.unit || '';
 			const type = row.querySelector('.batch-type')?.value;
 			const qty  = Number(row.querySelector('.batch-qty')?.value || 0);
-			if (id && type && qty > 0) tasks.push({ id, type, qty });
+			const note = (row.querySelector('.batch-note')?.value || '').trim();
+			if (id && type && qty > 0) tasks.push({ id, name, unit, type, qty, note });
 		});
 		if (!tasks.length) { notify('No items to update', { type: 'warn' }); return; }
 
+		// Show confirmation summary
+		const summaryRows = tasks.map(t =>
+			`<tr><td style="padding:6px 10px;font-weight:700">${escapeHtml(t.name)}</td>
+			<td style="padding:6px 10px;color:${t.type==='in'?'#16a34a':'#dc2626'};font-weight:700">${t.type === 'in' ? '↑ In' : '↓ Out'}</td>
+			<td style="padding:6px 10px;font-weight:700">${t.qty} ${escapeHtml(t.unit)}</td>
+			<td style="padding:6px 10px;color:var(--muted,#888);font-size:12px">${escapeHtml(t.note)}</td></tr>`
+		).join('');
+
+		openModalHTML(`
+			<h3 style="margin:0 0 10px"><i class="fa fa-clipboard-check" style="margin-right:6px;color:var(--accent)"></i>Confirm Batch Update</h3>
+			<div class="muted small" style="margin-bottom:12px">${tasks.length} item${tasks.length>1?'s':''} will be updated. Review before applying.</div>
+			<div style="overflow:auto;max-height:50vh">
+			<table style="width:100%;border-collapse:collapse">
+				<thead><tr style="font-size:11px;font-weight:800;color:var(--muted,#888)">
+					<th style="padding:6px 10px;text-align:left">Item</th>
+					<th style="padding:6px 10px;text-align:left">Direction</th>
+					<th style="padding:6px 10px;text-align:left">Qty</th>
+					<th style="padding:6px 10px;text-align:left">Note</th>
+				</tr></thead>
+				<tbody>${summaryRows}</tbody>
+			</table>
+			</div>
+			<div style="display:flex;gap:8px;margin-top:14px">
+				<button class="btn primary" id="batchSubmitBtn" type="button" style="flex:1;height:44px;font-weight:800"><i class="fa fa-check" style="margin-right:6px"></i>Apply All (${tasks.length})</button>
+				<button class="btn ghost" id="batchBackBtn" type="button" style="height:44px;padding:0 20px">Back</button>
+			</div>`);
+
+		q('batchBackBtn')?.addEventListener('click', () => openBatchStockModal());
+
+		q('batchSubmitBtn')?.addEventListener('click', async () => {
 		const btn = q('batchSubmitBtn');
 		if (btn) { btn.disabled = true; btn.textContent = `Saving ${tasks.length} items…`; }
 
@@ -5248,7 +5360,7 @@ function openBatchStockModal() {
 				}
 				await apiFetch(`/api/ingredients/${t.id}/stock`, {
 					method: 'POST',
-					body: { type: t.type, qty: t.qty, note: '(batch update)' }
+						body: { type: t.type, qty: t.qty, note: t.note || '(batch update)' }
 				});
 				ok++;
 			} catch (_) { fail++; }
@@ -5260,6 +5372,7 @@ function openBatchStockModal() {
 		renderStockChart();
 		const reportsVisible = !document.getElementById('view-reports')?.classList.contains('hidden');
 		if (reportsVisible) renderReports();
+	});
 	});
 }
 function openAddIngredient() {
@@ -5293,6 +5406,8 @@ function openAddIngredient() {
       <label class="field field-expiry"><span class="field-label">Expiry date</span><input id="ingExpiry" type="date"/></label>
 
       <label class="field field-supplier"><span class="field-label">Supplier</span><input id="ingSupplier" type="text"/></label>
+
+      <label class="field field-cost"><span class="field-label">Unit cost (₱)</span><input id="ingUnitCost" type="number" step="0.01" min="0" placeholder="e.g. 85.00"/></label>
 
       <div class="modal-actions" style="margin-top:8px">
         <button class="btn primary" type="submit">Save</button>
@@ -5333,6 +5448,7 @@ function openAddIngredient() {
 			max_qty: q('ingMax')?.value ? Number(q('ingMax')?.value) : null,
 			expiry: q('ingExpiry')?.value || null,
 			supplier: q('ingSupplier')?.value || '',
+			unit_cost: q('ingUnitCost')?.value ? Number(q('ingUnitCost')?.value) : null,
 			attrs: {}
 
 		};
@@ -9433,7 +9549,7 @@ function makeHistoryItemHtml(it) {
 } */
 
 async function renderHistory(opts = {}) {
-	const limit = opts.limit || 200;
+	const limit = opts.limit || 50;  // #17 — reduced from 200; paginate instead
 	const page = opts.page || 1;
 	const wrapper = document.getElementById('activityList');
 	if (!wrapper) return;
@@ -9441,12 +9557,42 @@ async function renderHistory(opts = {}) {
 	wrapper.innerHTML = '<li class="muted small" style="padding:10px">Loading history…</li>';
 	const resp = await fetchHistory(limit, page);
 	const items = resp && resp.items ? resp.items : [];
+	const meta  = resp && resp.meta  ? resp.meta  : { total: items.length, page, limit };
+
 	if (!items || items.length === 0) {
 		wrapper.innerHTML = '<li class="muted small" style="padding:10px">No history yet.</li>';
-		return;
-	}
+	} else {
 	const html = items.map(it => makeHistoryItemHtml(it)).join('\n');
 	wrapper.innerHTML = html;
+}
+
+	// #17 — Pagination controls below the list
+	let pagEl = document.getElementById('activityPagination');
+	if (!pagEl) {
+		pagEl = document.createElement('div');
+		pagEl.id = 'activityPagination';
+		pagEl.style.cssText = 'display:flex;justify-content:center;gap:8px;margin-top:14px;flex-wrap:wrap;';
+		wrapper.parentElement?.appendChild(pagEl);
+	}
+	const totalPages = Math.max(1, Math.ceil((meta.total || 0) / limit));
+	if (totalPages <= 1) { pagEl.innerHTML = ''; return; }
+
+	let pagHtml = '';
+	if (page > 1) pagHtml += `<button class="btn small ghost act-page-btn" data-page="${page-1}">&lt; Prev</button>`;
+	// Show up to 5 page buttons centred around current
+	const start = Math.max(1, page - 2);
+	const end   = Math.min(totalPages, start + 4);
+	for (let p = start; p <= end; p++) {
+		pagHtml += `<button class="btn small ${p===page?'primary':'ghost'} act-page-btn" data-page="${p}">${p}</button>`;
+	}
+	if (page < totalPages) pagHtml += `<button class="btn small ghost act-page-btn" data-page="${page+1}">Next &gt;</button>`;
+	pagEl.innerHTML = pagHtml;
+	pagEl.querySelectorAll('.act-page-btn').forEach(btn => {
+		btn.addEventListener('click', () => {
+			renderHistory({ limit, page: Number(btn.dataset.page) });
+			wrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		});
+	});
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -9454,9 +9600,7 @@ document.addEventListener('DOMContentLoaded', () => {
 		btn.addEventListener('click', (ev) => {
 			const view = btn.getAttribute('data-view');
 			if (view === 'activity' || view === 'history') {
-				setTimeout(() => renderHistory({
-					limit: 200
-				}), 40);
+				setTimeout(() => renderHistory({ limit: 50 }), 40);
 			}
 		});
 	});
@@ -9464,9 +9608,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	if (!document.getElementById('app').classList.contains('hidden')) {
 		const activeNav = document.querySelector('.nav-item.active');
 		if (activeNav && (activeNav.dataset.view === 'activity' || activeNav.dataset.view === 'history')) {
-			renderHistory({
-				limit: 200
-			});
+			renderHistory({ limit: 50 });
 		}
 	}
 });
@@ -9487,9 +9629,7 @@ async function logClientActivity({
 		});
 		const activeNav = document.querySelector('.nav-item.active');
 		if (activeNav && (activeNav.dataset.view === 'activity' || activeNav.dataset.view === 'history')) {
-			renderHistory({
-				limit: 200
-			});
+			renderHistory({ limit: 50 });
 		}
 	} catch (e) {
 		console.warn('logClientActivity failed', e);

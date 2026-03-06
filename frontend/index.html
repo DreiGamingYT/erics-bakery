@@ -151,6 +151,10 @@
                 <div class="kpi-title">Equipment / Tools</div>
                 <div class="kpi-value" id="kpi-equipment">0</div>
               </div>
+              <div class="kpi-card" style="cursor:default">
+                <div class="kpi-title">Inventory Value</div>
+                <div class="kpi-value" id="kpi-inv-value" style="font-size:18px">—</div>
+              </div>
             </div>
             <div class="grid-2">
               <div class="card">
@@ -179,10 +183,13 @@
               <aside id="inventoryActivity" class="inv-right" aria-label="Recent inventory activity">
                 <div class="card">
                   <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px">
-                    <h3 style="margin:0">Recent Inventory History</h3>
+                    <h3 style="margin:0">Inventory History</h3>
                     <span id="invHistoryDateLabel" class="muted small" style="white-space:nowrap"></span>
                   </div>
-                  <div class="muted small" style="margin-bottom:8px">Today's stock changes only — resets each new day.</div>
+                  <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+                    <input type="date" id="invHistoryDatePicker" style="height:30px;padding:0 8px;border-radius:6px;border:1px solid rgba(0,0,0,.12);font-size:12px;background:var(--bg,#fff);color:var(--text);flex:1" />
+                    <button class="btn small ghost" id="invHistoryTodayBtn" type="button" title="Jump to today">Today</button>
+                  </div>
                   <ul id="inventoryRecentActivity" class="timeline" aria-live="polite" aria-atomic="true" style="margin-top:8px;max-height:56vh;overflow:auto;padding-right:6px"></ul>
                 </div>
               </aside>

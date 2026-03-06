@@ -489,7 +489,7 @@ app.get('/api/ingredients', authMiddleware, async (req, res) => {
 			`SELECT COUNT(*) as cnt FROM ingredients ${whereSql}`, params);
 		const total = countRows && countRows[0] ? Number(countRows[0].cnt) : 0;
 
-		const q = `SELECT id,name,type,supplier,qty,unit,min_qty,max_qty,expiry,attrs,created_at,updated_at,created_by
+		const q = `SELECT id,name,type,supplier,qty,unit,min_qty,max_qty,expiry,attrs,unit_cost,created_at,updated_at,created_by
                FROM ingredients
                ${whereSql}
                ORDER BY ${pool.escapeId ? pool.escapeId(sort) : sort} ${order}
@@ -533,7 +533,7 @@ app.get('/api/ingredients', authMiddleware, async (req, res) => {
 app.post('/api/ingredients', authMiddleware, async (req, res) => {
 	try {
 		const data = req.body || {};
-		if (!hasRole(req.user, ['Owner', 'Baker', 'Admin'])) {
+		if (!hasRole(req.user, ['Owner', 'Baker', 'Assistant', 'Admin'])) {
 			return res.status(403).json({
 				error: 'Forbidden: insufficient permissions to create items'
 			});
@@ -556,12 +556,13 @@ app.post('/api/ingredients', authMiddleware, async (req, res) => {
 		const max_qty = data.max_qty == null ? null : data.max_qty;
 		const expiry = data.expiry || null;
 		const attrs = data.attrs ? JSON.stringify(data.attrs) : null;
+		const unit_cost = data.unit_cost != null ? Number(data.unit_cost) : null;
 		const userId = (req.user && req.user.id) ? req.user.id : null;
 
 		const [r] = await pool.query(
-			`INSERT INTO ingredients (name, type, supplier, qty, unit, min_qty, max_qty, expiry, attrs, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			[name, type, supplier, qty, unit, min_qty, max_qty, expiry, attrs, userId]
+			`INSERT INTO ingredients (name, type, supplier, qty, unit, min_qty, max_qty, expiry, attrs, unit_cost, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			[name, type, supplier, qty, unit, min_qty, max_qty, expiry, attrs, unit_cost, userId]
 		);
 
 		const [rows] = await pool.query('SELECT * FROM ingredients WHERE id = ?', [r.insertId]);
@@ -602,7 +603,7 @@ app.get('/api/ingredients/:id', authMiddleware, async (req, res) => {
 			error: 'Invalid id'
 		});
 
-		const [rows] = await pool.query('SELECT id,name,type,supplier,qty,unit,min_qty,max_qty,expiry,attrs,created_at,updated_at FROM ingredients WHERE id = ?', [id]);
+		const [rows] = await pool.query('SELECT id,name,type,supplier,qty,unit,min_qty,max_qty,expiry,attrs,unit_cost,created_at,updated_at FROM ingredients WHERE id = ?', [id]);
 		if (!rows || rows.length === 0) return res.status(404).json({
 			error: 'Not found'
 		});
@@ -634,7 +635,7 @@ app.put('/api/ingredients/:id', authMiddleware, async (req, res) => {
 			error: 'Invalid id'
 		});
 
-		if (!hasRole(req.user, ['Owner', 'Baker', 'Admin'])) {
+		if (!hasRole(req.user, ['Owner', 'Baker', 'Assistant', 'Admin'])) {
 			return res.status(403).json({
 				error: 'Forbidden: insufficient permissions to edit items'
 			});
@@ -679,6 +680,10 @@ app.put('/api/ingredients/:id', authMiddleware, async (req, res) => {
 		if (body.attrs !== undefined) {
 			updates.push('attrs = ?');
 			params.push(body.attrs ? JSON.stringify(body.attrs) : null);
+		}
+		if (body.unit_cost !== undefined) {
+			updates.push('unit_cost = ?');
+			params.push(body.unit_cost != null ? Number(body.unit_cost) : null);
 		}
 
 		if (updates.length === 0) return res.status(400).json({
@@ -842,16 +847,32 @@ app.post('/api/ingredients/:id/stock', authMiddleware, async (req, res) => {
 });
 app.get('/api/activity', authMiddleware, async (req, res) => {
 	try {
-		const page = Math.max(1, Number(req.query.page || 1));
-		const limit = Math.max(1, Math.min(200, Number(req.query.limit || 50)));
+		const page  = Math.max(1, Number(req.query.page || 1));
+		// #3/#19 — raise cap to 1000 when a date range is provided so reports get accurate data
+		const hasDates = req.query.start && req.query.end;
+		const maxLimit = hasDates ? 1000 : 200;
+		const limit = Math.max(1, Math.min(maxLimit, Number(req.query.limit || 50)));
 		const offset = (page - 1) * limit;
-		const [rows] = await pool.query(`SELECT a.id, a.ingredient_id, a.user_id, a.text, a.time, u.username as username, i.name as ingredient_name
+
+		// #3/#11 — optional date-range filtering
+		const params = [limit, offset];
+		let whereSql = '';
+		if (req.query.start && req.query.end) {
+			whereSql = 'WHERE a.time >= ? AND a.time < DATE_ADD(?, INTERVAL 1 DAY) ';
+			params.unshift(req.query.end, req.query.start);
+		}
+
+		const [rows] = await pool.query(
+			`SELECT a.id, a.ingredient_id, a.user_id, a.text, a.time, a.action, u.username as username, i.name as ingredient_name
        FROM activity a
        LEFT JOIN users u ON u.id = a.user_id
        LEFT JOIN ingredients i ON i.id = a.ingredient_id
+       ${whereSql}
        ORDER BY a.time DESC
-       LIMIT ? OFFSET ?`, [limit, offset]);
-		const [count] = await pool.query('SELECT COUNT(*) as cnt FROM activity');
+       LIMIT ? OFFSET ?`, params);
+		const countParams = hasDates ? [req.query.start, req.query.end] : [];
+		const countWhere  = hasDates ? 'WHERE time >= ? AND time < DATE_ADD(?, INTERVAL 1 DAY)' : '';
+		const [count] = await pool.query(`SELECT COUNT(*) as cnt FROM activity ${countWhere}`, countParams);
 		res.json({
 			items: rows,
 			meta: {
@@ -862,9 +883,7 @@ app.get('/api/activity', authMiddleware, async (req, res) => {
 		});
 	} catch (e) {
 		console.error('GET /api/activity err', e);
-		res.status(500).json({
-			error: 'Server error'
-		});
+		res.status(500).json({ error: 'Server error' });
 	}
 });
 
@@ -1423,6 +1442,48 @@ app.post('/api/notifications/send-email', authMiddleware, async (req, res) => {
 	}
 });
 
+
+// ── SCHEDULES API (#4 — server-side schedule sync) ────────────────────────────
+
+app.get('/api/schedules', authMiddleware, async (req, res) => {
+	try {
+		const [rows] = await pool.query(
+			'SELECT * FROM schedules WHERE user_id = ? ORDER BY date ASC, time ASC',
+			[req.user.id]
+		);
+		res.json({ items: rows });
+	} catch (e) {
+		console.error('GET /api/schedules err', e);
+		res.status(500).json({ error: 'Server error' });
+	}
+});
+
+app.post('/api/schedules', authMiddleware, async (req, res) => {
+	try {
+		const { id, date, title, time, note, notified, createdAt } = req.body || {};
+		if (!date || !title) return res.status(400).json({ error: 'date and title required' });
+		const schedId = id || (Date.now() + '_' + Math.random().toString(36).slice(2));
+		await pool.query(
+			'INSERT INTO schedules (id, user_id, date, title, time, note, notified, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), time=VALUES(time), note=VALUES(note), notified=VALUES(notified)',
+			[schedId, req.user.id, date, title, time || null, note || null, notified ? 1 : 0, createdAt ? new Date(createdAt) : new Date()]
+		);
+		res.json({ ok: true, id: schedId });
+	} catch (e) {
+		console.error('POST /api/schedules err', e);
+		res.status(500).json({ error: 'Server error' });
+	}
+});
+
+app.delete('/api/schedules/:id', authMiddleware, async (req, res) => {
+	try {
+		await pool.query('DELETE FROM schedules WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
+		res.json({ ok: true });
+	} catch (e) {
+		console.error('DELETE /api/schedules err', e);
+		res.status(500).json({ error: 'Server error' });
+	}
+});
+
 async function runStartupMigrations() {
 	const conn = await pool.getConnection();
 	try {
@@ -1455,6 +1516,39 @@ async function runStartupMigrations() {
 			console.log('[startup] last_active_at column added to user_sessions');
 		} catch (e) {
 			if (e.code !== 'ER_DUP_FIELDNAME') console.warn('[startup] last_active_at:', e.message);
+		}
+
+		// 3. unit_cost column on ingredients (#6 — cost tracking)
+		try {
+			await conn.query(`ALTER TABLE ingredients ADD COLUMN unit_cost DECIMAL(10,4) DEFAULT NULL`);
+			console.log('[startup] unit_cost column added to ingredients');
+		} catch (e) {
+			if (e.code !== 'ER_DUP_FIELDNAME') console.warn('[startup] unit_cost:', e.message);
+		}
+
+		// 4. schedules table (#4 — server-side calendar schedule sync)
+		await conn.query(`
+			CREATE TABLE IF NOT EXISTS schedules (
+				id           VARCHAR(64)  NOT NULL PRIMARY KEY,
+				user_id      INT          NOT NULL,
+				date         DATE         NOT NULL,
+				title        VARCHAR(255) NOT NULL,
+				time         VARCHAR(10)  DEFAULT NULL,
+				note         TEXT         DEFAULT NULL,
+				notified     TINYINT(1)   NOT NULL DEFAULT 0,
+				created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				INDEX idx_schedules_date (date),
+				INDEX idx_schedules_user (user_id)
+			)
+		`);
+		console.log('[startup] schedules table ready');
+
+		// 5. action column on activity (if missing)
+		try {
+			await conn.query(`ALTER TABLE activity ADD COLUMN action VARCHAR(64) DEFAULT NULL`);
+			console.log('[startup] action column added to activity');
+		} catch (e) {
+			if (e.code !== 'ER_DUP_FIELDNAME') console.warn('[startup] activity.action:', e.message);
 		}
 	} catch (err) {
 		console.error('[startup] migration error:', err && err.message ? err.message : err);
