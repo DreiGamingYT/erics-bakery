@@ -12,6 +12,9 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   </head>
   <body>
+    <div id="offlineBanner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:20000;background:#d97706;color:#fff;text-align:center;padding:6px;font-size:13px;font-weight:700">
+      ⚡ You are offline — showing cached data
+    </div>
     <div id="splash" class="splash" aria-hidden="false">
       <div class="splash-inner"><img id="splashImg" src="./logo.jpg" alt="splash logo" />
         <div class="splash-text">ERIC'S BAKERY</div>
@@ -168,7 +171,7 @@
             <div class="page-header">
               <h2>Inventory</h2>
               <div class="page-actions"><input id="searchIng" placeholder="Search ingredient..." />
-                <div class="filter-chips"><button class="chip" data-filter="all" type="button">All</button><button class="chip" data-filter="low" type="button">Low stock</button><button class="chip" data-filter="expiring" type="button">Expiring</button></div><button id="addIngredientBtn" class="btn small primary" type="button"><i class="fa fa-plus"></i> Add</button>
+                <div class="filter-chips"><button class="chip" data-filter="all" type="button">All</button><button class="chip" data-filter="low" type="button">Low stock</button><button class="chip" data-filter="expiring" type="button">Expiring</button></div><button id="batchStockBtn" class="btn small" type="button" title="Batch stock update (press B)"><i class="fa fa-list-check"></i> Batch</button><button id="addIngredientBtn" class="btn small primary" type="button"><i class="fa fa-plus"></i> Add</button>
               </div>
             </div>
             <div class="inventory-layout">
@@ -388,6 +391,9 @@
     <script src="user-management-admin.js"></script>
     <script src="notifications.js"></script>
     <script src="app.js"></script>
-    
-  </body>
+    <script>
+      // Wire offline banner to service worker events
+      window.addEventListener('offline', () => { document.getElementById('offlineBanner').style.display = 'block'; });
+      window.addEventListener('online',  () => { document.getElementById('offlineBanner').style.display = 'none'; });
+    </script>
 </html>

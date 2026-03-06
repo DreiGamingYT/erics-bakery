@@ -830,58 +830,64 @@ document.querySelectorAll('.app-toast, .toast, .notification').forEach(t => {
 
 function notify(msg, opts = {}) {
 	try {
-		const timeout = Number(opts.timeout) || 3000;
+		const timeout = Number(opts.timeout) || 3500;
+		const type    = opts.type || 'info';   // 'info' | 'success' | 'error' | 'warn'
+		const onUndo  = opts.onUndo || null;   // callback for undo action
+
 		let wrap = document.getElementById('app-toast-wrap');
 		if (!wrap) {
 			wrap = document.createElement('div');
 			wrap.id = 'app-toast-wrap';
-			wrap.style.position = 'fixed';
-			wrap.style.right = '18px';
-			wrap.style.bottom = '20px';
-			wrap.style.zIndex = '16000';
-			wrap.style.display = 'flex';
-			wrap.style.flexDirection = 'column';
-			wrap.style.gap = '8px';
+			wrap.style.cssText = 'position:fixed;right:18px;bottom:20px;z-index:16000;display:flex;flex-direction:column;gap:8px;pointer-events:none';
 			document.body.appendChild(wrap);
 		}
+
+		const accent = type === 'success' ? '#16a34a'
+		             : type === 'error'   ? '#dc2626'
+		             : type === 'warn'    ? '#d97706'
+		             : 'var(--accent,#1b85ec)';
 
 		const t = document.createElement('div');
 		t.className = 'app-toast';
 		t.setAttribute('role', 'status');
 		t.setAttribute('aria-live', 'polite');
-		t.textContent = String(msg || '');
-		t.style.background = 'var(--card, #fff)';
-		t.style.color = 'var(--text, #12202f)';
-		t.style.padding = '10px 12px';
-		t.style.borderRadius = '10px';
-		t.style.boxShadow = '0 12px 30px rgba(19,28,38,0.08)';
-		t.style.border = '1px solid rgba(0,0,0,0.06)';
-		t.style.fontWeight = '700';
-		t.style.minWidth = '160px';
-		t.style.maxWidth = '320px';
+		t.style.cssText = `background:var(--card,#fff);color:var(--text,#12202f);padding:10px 14px;border-radius:12px;box-shadow:0 12px 30px rgba(19,28,38,0.13);border-left:3px solid ${accent};font-weight:600;min-width:180px;max-width:340px;opacity:0;transform:translateY(8px);transition:all .25s ease;pointer-events:auto;display:flex;align-items:center;gap:10px`;
+
+		const msgSpan = document.createElement('span');
+		msgSpan.style.flex = '1';
+		msgSpan.textContent = String(msg || '');
+		t.appendChild(msgSpan);
+
+		if (onUndo) {
+			const undoBtn = document.createElement('button');
+			undoBtn.textContent = 'Undo';
+			undoBtn.style.cssText = `background:${accent};color:#fff;border:none;border-radius:6px;padding:3px 10px;font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap`;
+			let undone = false;
+			undoBtn.onclick = () => {
+				if (undone) return;
+				undone = true;
+				onUndo();
 		t.style.opacity = '0';
-		t.style.transform = 'translateY(8px)';
-		t.style.transition = 'all .28s ease';
+				setTimeout(() => { try { t.remove(); } catch (_) {} }, 260);
+			};
+			t.appendChild(undoBtn);
+		}
 
 		wrap.appendChild(t);
-		setTimeout(() => {
+		requestAnimationFrame(() => {
 			t.style.opacity = '1';
 			t.style.transform = 'translateY(0)';
-		}, 20);
+		});
 
-		setTimeout(() => {
+		const hide = () => {
 			t.style.opacity = '0';
 			t.style.transform = 'translateY(8px)';
-			setTimeout(() => {
-				try {
-					t.remove();
-				} catch (e) {}
-			}, 260);
-		}, timeout);
+			setTimeout(() => { try { t.remove(); } catch (_) {} }, 260);
+		};
+		const tid = setTimeout(hide, timeout);
+		t.onclick = (e) => { if (e.target !== t) return; clearTimeout(tid); hide(); };
 	} catch (e) {
-		try {
-			console.warn('notify failed, fallback to console', msg);
-		} catch (_) {}
+		console.warn('notify failed', msg);
 	}
 }
 
@@ -1810,6 +1816,7 @@ function showView(name) {
 		renderStockChart();
 		renderBestSellerChart();
 		renderDashboard();
+		setTimeout(addAllChartDownloadBtns, 300);
 	}
 	if (name === 'reports') {
 		renderReports();
@@ -2932,6 +2939,7 @@ async function renderInventoryActivity(limit = 20) {
 		el.innerHTML = items.map(it => {
 			const time = it.time ? new Date(it.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
 			const badge = it.action ? `<span class="inv-hist-badge inv-hist-badge--${(it.action||'').toLowerCase().replace(/\s+/g,'-')}">${escapeHtml(it.action)}</span>` : '';
+		const userBadge = it.username ? `<span style="font-size:10px;font-weight:700;padding:1px 7px;border-radius:999px;background:rgba(99,102,241,.12);color:#4f46e5;margin-left:4px">@${escapeHtml(it.username)}</span>` : '';
 			return `<li tabindex="0" role="listitem" style="padding:8px 0;border-bottom:1px solid rgba(0,0,0,0.05);display:flex;align-items:flex-start;gap:8px">
 				<div style="flex:1;min-width:0">
 					<div style="font-size:13px">${badge} ${escapeHtml(it.text)}</div>
@@ -3055,6 +3063,27 @@ async function renderReports(rangeStart, rangeEnd, reportFilter) {
 		const totalStockIn  = +Object.values(stockInMap).reduce((s, v) => s + v, 0).toFixed(3);
 		const totalStockOut = +Object.values(stockOutMap).reduce((s, v) => s + v, 0).toFixed(3);
 
+		// ── Low stock alert list ──────────────────────────────────
+		const lowItems = (DB.ingredients || []).filter(i => {
+			if (!i) return false;
+			const minVal = (i.min != null) ? i.min : computeThresholdForIngredient(i);
+			return Number(i.qty || 0) <= Number(minVal || 0);
+		});
+		const criticalItems = lowItems.filter(i => Number(i.qty || 0) === 0);
+		const lowAlertHTML = lowItems.length ? `
+			<div style="margin-bottom:14px;border-radius:10px;overflow:hidden;border:1.5px solid rgba(249,115,22,.35)">
+				<div style="background:rgba(249,115,22,.12);padding:8px 14px;display:flex;align-items:center;gap:8px">
+					<span style="font-size:16px">⚠️</span>
+					<span style="font-weight:800;color:#c2410c">${lowItems.length} item${lowItems.length>1?'s':''} at or below minimum stock${criticalItems.length ? ` · ${criticalItems.length} completely out` : ''}</span>
+				</div>
+				<div style="display:flex;flex-wrap:wrap;gap:6px;padding:10px 14px;background:rgba(249,115,22,.04)">
+					${lowItems.map(i => {
+						const isEmpty = Number(i.qty||0) === 0;
+						return `<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700;background:${isEmpty?'rgba(239,68,68,.15)':'rgba(249,115,22,.15)'};color:${isEmpty?'#dc2626':'#c2410c'}">${escapeHtml(i.name)} — ${i.qty} ${escapeHtml(i.unit||'')} ${isEmpty?'⛔':'⚠️'}</span>`;
+					}).join('')}
+				</div>
+			</div>` : '';
+
 		const lowCount = (DB.ingredients || []).filter(i => {
 			const minVal = (i && (i.min != null)) ? i.min : computeThresholdForIngredient(i);
 			return Number(i.qty || 0) <= Number(minVal || 0);
@@ -3122,12 +3151,14 @@ async function renderReports(rangeStart, rangeEnd, reportFilter) {
         <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${escapeHtml(i.unit||'')}</td>
         <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${minVal != null ? minVal : ''}</td>
         <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${escapeHtml(i.type||'')}</td>
+        ${hasPermission('settings') ? `<td style="padding:8px;border:1px solid rgba(0,0,0,.07);font-size:12px">${escapeHtml(i.supplier||'—')}</td>` : ''}
         <td style="padding:8px;border:1px solid rgba(0,0,0,.07)">${expiryDisplay}</td>
       </tr>`;
-		}).filter(Boolean).join('') || `<tr><td colspan="9" style="padding:12px" class="muted">No items match the selected filter/range</td></tr>`;
+		}).filter(Boolean).join('') || `<tr><td colspan="10" style="padding:12px" class="muted">No items match the selected filter/range</td></tr>`;
 		const startISO = start.toISOString().slice(0,10);
 		const endISO   = end.toISOString().slice(0,10);
 		summaryEl.innerHTML = `
+      ${lowAlertHTML}
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap">
         <div>
           <div style="font-weight:800">Reports — ${filter === 'usage' ? 'Ingredient Usage' : filter === 'low' ? 'Low stock' : filter === 'expiring' ? 'Expiring items' : 'All items'}</div>
@@ -3136,10 +3167,10 @@ async function renderReports(rangeStart, rangeEnd, reportFilter) {
         <div id="summarybtns" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
           <div style="display:flex;gap:4px;align-items:center;background:rgba(0,0,0,0.03);border:1px solid rgba(0,0,0,0.08);border-radius:8px;padding:4px 8px;flex-wrap:wrap">
             <label style="font-size:11px;font-weight:700;color:var(--muted,#888);white-space:nowrap">From</label>
-            <input id="reportStart" type="date" value="${startISO}" style="height:30px;padding:0 6px;border-radius:6px;border:1px solid rgba(0,0,0,0.12);font-size:12px;background:var(--bg,#fff);color:var(--text);" />
+            <input id="reportStart" type="date" value="${startISO}" style="height:30px;padding:0 6px;border-radius:6px;border:1px solid rgba(0,0,0,0.12);font-size:12px;background:var(--bg,#fff)" />
             <label style="font-size:11px;font-weight:700;color:var(--muted,#888);white-space:nowrap">To</label>
-            <input id="reportEnd" type="date" value="${endISO}" style="height:30px;padding:0 6px;border-radius:6px;border:1px solid rgba(0,0,0,0.12);font-size:12px;background:var(--bg,#fff);color:var(--text);" />
-            <select id="reportPreset" style="height:30px;padding:0 6px;border-radius:6px;border:1px solid rgba(0,0,0,0.12);font-size:12px;background:var(--bg,#fff);color:var(--text);">
+            <input id="reportEnd" type="date" value="${endISO}" style="height:30px;padding:0 6px;border-radius:6px;border:1px solid rgba(0,0,0,0.12);font-size:12px;background:var(--bg,#fff)" />
+            <select id="reportPreset" style="height:30px;padding:0 6px;border-radius:6px;border:1px solid rgba(0,0,0,0.12);font-size:12px;background:var(--bg,#fff)">
               <option value="7">Last 7 days</option>
               <option value="30">Last 30 days</option>
               <option value="90">Last 90 days</option>
@@ -3175,6 +3206,7 @@ async function renderReports(rangeStart, rangeEnd, reportFilter) {
             <th style="padding:8px;border:1px solid #eee">Unit</th>
             <th style="padding:8px;border:1px solid #eee">Min</th>
             <th style="padding:8px;border:1px solid #eee">Type</th>
+            ${hasPermission('settings') ? '<th style="padding:8px;border:1px solid #eee">Supplier</th>' : ''}
             <th style="padding:8px;border:1px solid #eee">Expiry</th>
           </tr></thead>
           <tbody>${tableRows}</tbody>
@@ -3224,6 +3256,7 @@ async function renderReports(rangeStart, rangeEnd, reportFilter) {
 	}
 
 	try { chartIngredientUsage && chartIngredientUsage.resize && chartIngredientUsage.resize(); } catch (e) {}
+	setTimeout(addAllChartDownloadBtns, 200);
 }
 
 async function printReports(rangeStartISO, rangeEndISO, filter) {
@@ -4801,45 +4834,328 @@ async function openEditIngredient(id) {
 function openStockForm(id, type) {
 	const ing = DB.ingredients.find(x => x.id === id);
 	if (!ing) return;
-	openModalHTML(`<h3>${type==='in'?'Stock In':'Stock Out'} — ${ing.name}</h3><form id="stockForm" class="form"><label class="field"><span class="field-label">Quantity (${ing.unit})</span><input id="stockQty" type="number" step="0.01" required/></label><label class="field"><span class="field-label">Note</span><input id="stockNote" type="text"/></label><div style="display:flex;gap:8px;margin-top:8px"><button class="btn primary" type="submit">${type==='in'?'Add':'Remove'}</button><button class="btn ghost" id="cancelStock" type="button">Cancel</button></div></form>`);
+	const isIn = type === 'in';
+	const accentColor = isIn ? '#16a34a' : '#dc2626';
+	const icon = isIn ? '↑' : '↓';
+
+	// Quick-amount presets
+	const presets = [1, 5, 10, 25, 50].map(v =>
+		`<button type="button" class="stock-preset-btn" data-val="${v}"
+			style="flex:1;min-width:44px;min-height:44px;font-size:15px;font-weight:800;border:1.5px solid ${accentColor};color:${accentColor};background:transparent;border-radius:8px;cursor:pointer;touch-action:manipulation"
+		>${v}</button>`
+	).join('');
+
+	openModalHTML(`
+		<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+			<div style="width:36px;height:36px;border-radius:50%;background:${accentColor}20;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:900;color:${accentColor}">${icon}</div>
+			<div>
+				<div style="font-weight:800;font-size:16px">${isIn?'Stock In':'Stock Out'}</div>
+				<div style="font-weight:600;font-size:13px;color:var(--muted,#888)">${escapeHtml(ing.name)} · Current: <strong>${ing.qty} ${ing.unit}</strong></div>
+			</div>
+		</div>
+		<form id="stockForm" class="form">
+			<label class="field">
+				<span class="field-label">Quantity (${escapeHtml(ing.unit)})</span>
+				<input id="stockQty" type="number" inputmode="decimal" step="0.01" min="0.01"
+					style="font-size:24px;font-weight:800;text-align:center;height:56px;letter-spacing:1px"
+					placeholder="0" required autocomplete="off"/>
+			</label>
+			<div style="display:flex;gap:6px;margin:-4px 0 10px">
+				${presets}
+			</div>
+			<label class="field">
+				<span class="field-label">Note (optional)</span>
+				<input id="stockNote" type="text" placeholder="e.g. Delivery from supplier" inputmode="text"/>
+			</label>
+			<div style="display:flex;gap:8px;margin-top:12px">
+				<button class="btn primary" type="submit" style="flex:1;height:48px;font-size:15px;font-weight:800;background:${accentColor};border-color:${accentColor}">${isIn?'Add Stock':'Remove Stock'}</button>
+				<button class="btn ghost" id="cancelStock" type="button" style="height:48px;padding:0 20px">Cancel</button>
+			</div>
+		</form>`);
+
+	// Preset buttons fill the qty input
+	document.querySelectorAll('.stock-preset-btn').forEach(btn => {
+		btn.addEventListener('click', () => {
+			const qtyEl = q('stockQty');
+			if (qtyEl) { qtyEl.value = btn.dataset.val; qtyEl.focus(); }
+		});
+	});
+
 	q('cancelStock')?.addEventListener('click', closeModal);
 	q('stockForm')?.addEventListener('submit', (e) => {
 		e.preventDefault();
 		const qty = Number(q('stockQty')?.value || 0);
 		const note = q('stockNote')?.value || '';
+		if (qty <= 0) { notify('Enter a quantity greater than 0', { type: 'error' }); return; }
 		applyStockChange(id, type, qty, note);
 		closeModal();
 	});
+
+	// Auto-focus the qty input
+	setTimeout(() => { q('stockQty')?.focus(); q('stockQty')?.select(); }, 80);
 }
 
+
+// ── CHART EXPORT ─────────────────────────────────────────────────────────────
+function addChartDownloadBtn(canvasId, filename) {
+	const canvas = document.getElementById(canvasId);
+	if (!canvas) return;
+	const wrap = canvas.closest('.chart-container') || canvas.parentElement;
+	if (!wrap) return;
+	// Remove any existing button
+	const old = wrap.querySelector('.chart-dl-btn');
+	if (old) old.remove();
+
+	wrap.style.position = 'relative';
+	const btn = document.createElement('button');
+	btn.className = 'chart-dl-btn';
+	btn.title = 'Download chart as PNG';
+	btn.innerHTML = '<i class="fa fa-download"></i>';
+	btn.style.cssText = 'position:absolute;top:6px;right:6px;z-index:10;width:30px;height:30px;border-radius:6px;border:1px solid rgba(0,0,0,.1);background:var(--card,#fff);color:var(--muted,#888);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;opacity:.7;transition:opacity .2s';
+	btn.onmouseenter = () => btn.style.opacity = '1';
+	btn.onmouseleave = () => btn.style.opacity = '.7';
+	btn.onclick = () => {
+		const link = document.createElement('a');
+		link.download = filename || (canvasId + '.png');
+		link.href = canvas.toDataURL('image/png');
+		link.click();
+		notify('Chart downloaded', { type: 'success', timeout: 2000 });
+	};
+	wrap.appendChild(btn);
+}
+
+function addAllChartDownloadBtns() {
+	const charts = [
+		{ id: 'stockChart',           name: 'stock-movement.png' },
+		{ id: 'bestSellerChart',      name: 'top-ingredients.png' },
+		{ id: 'ingredientUsageChart', name: 'ingredient-usage.png' },
+		{ id: 'inventoryStockChart',  name: 'stock-history.png' },
+		{ id: 'salesTimelineChart',   name: 'sales-timeline.png' },
+	];
+	charts.forEach(c => addChartDownloadBtn(c.id, c.name));
+}
 async function applyStockChange(id, type, qty, note) {
 	if (!id || !['in', 'out'].includes(type) || !(qty > 0)) {
-		notify('Invalid stock change');
+		notify('Invalid stock change', { type: 'error' });
 		return;
 	}
+
+	// ── Optimistic UI update ──────────────────────────────────
+	const ing = DB.ingredients.find(x => x.id === id);
+	const prevQty = ing ? ing.qty : null;
+	if (ing) {
+		const delta = type === 'in' ? +qty : -qty;
+		ing.qty = +(Math.max(0, (ing.qty || 0) + delta)).toFixed(3);
+		renderIngredientCards();
+		renderDashboard();
+	}
+
+	let undone = false;
+	const revert = () => {
+		if (undone) return;
+		undone = true;
+		if (ing && prevQty !== null) {
+			ing.qty = prevQty;
+			renderIngredientCards();
+			renderDashboard();
+		}
+		notify('Stock change undone', { type: 'warn' });
+	};
+
+	const label = type === 'in' ? '↑ Stock In' : '↓ Stock Out';
+	notify(`${label}: ${qty} ${ing?.unit || ''} — ${ing?.name || ''}`, {
+		type: type === 'in' ? 'success' : 'warn',
+		timeout: 6000,
+		onUndo: async () => {
+			revert();
+			// Best-effort reverse on server — stock the other way
 	try {
 		await apiFetch(`/api/ingredients/${id}/stock`, {
 			method: 'POST',
-			body: {
-				type,
-				qty: Number(qty),
-				note: note || ''
-			}
+					body: { type: type === 'in' ? 'out' : 'in', qty: Number(qty), note: '(undo)' }
+				});
+				await renderIngredientCards();
+				await renderInventoryActivity();
+				renderDashboard();
+			} catch (_) {}
+		}
+	});
+
+	try {
+		await apiFetch(`/api/ingredients/${id}/stock`, {
+			method: 'POST',
+			body: { type, qty: Number(qty), note: note || '' }
 		});
-		notify('Stock updated');
+		// Sync real qty from server after save
 		await renderIngredientCards();
 		await renderInventoryActivity();
-		renderDashboard();
 		renderStockChart();
-		// Refresh the reports summary so stock in/out shows immediately
 		const reportsVisible = !document.getElementById('view-reports')?.classList.contains('hidden');
 		if (reportsVisible) renderReports();
 	} catch (e) {
 		console.error('applyStockChange err', e);
-		notify(e.message || 'Server error');
+		revert();
+		notify(e.message || 'Server error', { type: 'error' });
 	}
 }
 
+
+
+// ── KEYBOARD SHORTCUTS ────────────────────────────────────────────────────────
+(function initKeyboardShortcuts() {
+	let shownHint = false;
+
+	const SHORTCUTS = [
+		{ key: '/', label: 'Focus search' },
+		{ key: 'I', label: 'Go to Inventory' },
+		{ key: 'R', label: 'Go to Reports' },
+		{ key: 'D', label: 'Go to Dashboard' },
+		{ key: 'B', label: 'Batch stock update' },
+		{ key: '?', label: 'Show shortcuts' },
+	];
+
+	function showShortcutsHelp() {
+		const rows = SHORTCUTS.map(s =>
+			`<tr><td style="padding:6px 12px;font-weight:800;font-family:monospace;font-size:14px;background:rgba(0,0,0,.05);border-radius:4px;text-align:center">${s.key}</td><td style="padding:6px 12px">${s.label}</td></tr>`
+		).join('');
+		if (typeof openModalHTML === 'function') {
+			openModalHTML(`<h3 style="margin:0 0 12px">Keyboard Shortcuts</h3>
+				<table style="border-collapse:separate;border-spacing:0 4px;width:100%">${rows}</table>
+				<div class="muted small" style="margin-top:12px">Shortcuts are disabled while typing in input fields.</div>`);
+		}
+	}
+
+	document.addEventListener('keydown', (e) => {
+		// Skip if typing in an input
+		const tag = (e.target?.tagName || '').toLowerCase();
+		if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target?.isContentEditable) return;
+		// Skip if a modal is open
+		const modal = document.getElementById('modal');
+		if (modal && !modal.classList.contains('hidden')) return;
+		// Skip with modifiers
+		if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+		switch (e.key) {
+			case '/':
+				e.preventDefault();
+				(document.getElementById('topSearch') || document.getElementById('searchIng'))?.focus();
+				break;
+			case 'i': case 'I':
+				e.preventDefault();
+				if (typeof showView === 'function') showView('inventory');
+				break;
+			case 'r': case 'R':
+				e.preventDefault();
+				if (typeof showView === 'function') showView('reports');
+				break;
+			case 'd': case 'D':
+				e.preventDefault();
+				if (typeof showView === 'function') showView('dashboard');
+				break;
+			case 'b': case 'B':
+				e.preventDefault();
+				if (typeof openBatchStockModal === 'function') openBatchStockModal();
+				break;
+			case '?':
+				e.preventDefault();
+				showShortcutsHelp();
+				break;
+			case 'Escape':
+				if (typeof closeModal === 'function') closeModal();
+				break;
+		}
+
+		if (!shownHint) {
+			shownHint = true;
+			setTimeout(() => {
+				if (typeof notify === 'function') notify('Tip: Press ? to see keyboard shortcuts', { timeout: 4000 });
+			}, 3000);
+		}
+	});
+})();
+
+// ── BATCH STOCK UPDATE ────────────────────────────────────────────────────────
+function openBatchStockModal() {
+	const ings = (DB.ingredients || []).filter(i => i && String(i.type||'').toLowerCase() === 'ingredient');
+	if (!ings.length) { notify('No ingredients found', { type: 'warn' }); return; }
+
+	const rows = ings.map(i => `
+		<tr data-id="${i.id}">
+			<td style="padding:6px 8px;font-weight:700">${escapeHtml(i.name)}</td>
+			<td style="padding:6px 8px;color:var(--muted,#888);font-size:12px">${i.qty} ${escapeHtml(i.unit||'')}</td>
+			<td style="padding:4px 6px">
+				<select class="batch-type" style="height:34px;padding:0 6px;border-radius:6px;border:1px solid rgba(0,0,0,.12);font-size:12px">
+					<option value="">—</option>
+					<option value="in">Stock In</option>
+					<option value="out">Stock Out</option>
+				</select>
+			</td>
+			<td style="padding:4px 6px">
+				<input class="batch-qty" type="number" inputmode="decimal" step="0.01" min="0.01" placeholder="qty"
+					style="width:80px;height:34px;padding:0 8px;border-radius:6px;border:1px solid rgba(0,0,0,.12);font-size:13px;font-weight:700"/>
+			</td>
+		</tr>`).join('');
+
+	openModalHTML(`
+		<h3 style="margin:0 0 10px">Batch Stock Update</h3>
+		<div class="muted small" style="margin-bottom:10px">Set type + qty for each item you want to update. Leave blank to skip.</div>
+		<div style="overflow:auto;max-height:55vh">
+		<table style="width:100%;border-collapse:collapse">
+			<thead><tr style="font-size:12px;font-weight:800;color:var(--muted,#888)">
+				<th style="padding:6px 8px;text-align:left">Item</th>
+				<th style="padding:6px 8px;text-align:left">Current</th>
+				<th style="padding:6px 8px;text-align:left">Type</th>
+				<th style="padding:6px 8px;text-align:left">Qty</th>
+			</tr></thead>
+			<tbody>${rows}</tbody>
+		</table>
+		</div>
+		<div style="display:flex;gap:8px;margin-top:14px">
+			<button class="btn primary" id="batchSubmitBtn" type="button" style="flex:1;height:44px;font-weight:800">Apply All</button>
+			<button class="btn ghost" id="batchCancelBtn" type="button" style="height:44px;padding:0 20px">Cancel</button>
+		</div>`);
+
+	q('batchCancelBtn')?.addEventListener('click', closeModal);
+
+	q('batchSubmitBtn')?.addEventListener('click', async () => {
+		const modal = document.querySelector('.modal-card');
+		const rows  = modal ? modal.querySelectorAll('tr[data-id]') : [];
+		const tasks = [];
+		rows.forEach(row => {
+			const id   = Number(row.dataset.id);
+			const type = row.querySelector('.batch-type')?.value;
+			const qty  = Number(row.querySelector('.batch-qty')?.value || 0);
+			if (id && type && qty > 0) tasks.push({ id, type, qty });
+		});
+		if (!tasks.length) { notify('No items to update', { type: 'warn' }); return; }
+
+		const btn = q('batchSubmitBtn');
+		if (btn) { btn.disabled = true; btn.textContent = `Saving ${tasks.length} items…`; }
+
+		let ok = 0, fail = 0;
+		for (const t of tasks) {
+			try {
+				const ing = DB.ingredients.find(x => x.id === t.id);
+				if (ing) {
+					const delta = t.type === 'in' ? +t.qty : -t.qty;
+					ing.qty = +(Math.max(0, (ing.qty||0) + delta)).toFixed(3);
+				}
+				await apiFetch(`/api/ingredients/${t.id}/stock`, {
+					method: 'POST',
+					body: { type: t.type, qty: t.qty, note: '(batch update)' }
+				});
+				ok++;
+			} catch (_) { fail++; }
+		}
+		closeModal();
+		notify(`Batch done: ${ok} updated${fail ? `, ${fail} failed` : ''}`, { type: ok > 0 ? 'success' : 'error' });
+		await renderIngredientCards();
+		renderDashboard();
+		renderStockChart();
+		const reportsVisible = !document.getElementById('view-reports')?.classList.contains('hidden');
+		if (reportsVisible) renderReports();
+	});
+}
 function openAddIngredient() {
 	const defaultUnit = 'kg';
 	const suggestedMin = 1;
@@ -5455,6 +5771,7 @@ function startApp() {
 
 	on('createOrderBtn', 'click', openNewOrderModal);
 	on('refreshReports', 'click', () => renderReports());
+	on('batchStockBtn', 'click', () => openBatchStockModal());
 	on('reportPeriod', 'change', () => renderReports());
 	on('searchOrder', 'input', () => renderOrders());
 
@@ -9110,3 +9427,35 @@ document.addEventListener('DOMContentLoaded', () => {
 		if (document.visibilityState === 'visible') sendHeartbeat();
 	});
 })();
+
+// ── SERVICE WORKER REGISTRATION (offline support) ────────────────────────────
+if ('serviceWorker' in navigator) {
+	window.addEventListener('load', () => {
+		navigator.serviceWorker.register('/sw.js')
+			.then(reg => {
+				console.info('[SW] registered', reg.scope);
+				reg.addEventListener('updatefound', () => {
+					const newWorker = reg.installing;
+					if (!newWorker) return;
+					newWorker.addEventListener('statechange', () => {
+						if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+							if (typeof notify === 'function') {
+								notify('App updated — reload to get the latest version', { timeout: 8000, type: 'info' });
+							}
+						}
+					});
+				});
+			})
+			.catch(err => console.warn('[SW] registration failed', err));
+	});
+
+	// Detect going offline / online
+	window.addEventListener('offline', () => {
+		if (typeof notify === 'function') notify('You are offline — viewing cached data', { type: 'warn', timeout: 5000 });
+		document.getElementById('app')?.setAttribute('data-offline', '1');
+	});
+	window.addEventListener('online', () => {
+		if (typeof notify === 'function') notify('Back online ✓', { type: 'success', timeout: 3000 });
+		document.getElementById('app')?.removeAttribute('data-offline');
+	});
+}
