@@ -1394,6 +1394,71 @@ app.post('/api/notifications/send-email', authMiddleware, async (req, res) => {
 	}
 });
 
+// ── Schedules ─────────────────────────────────────────────────────────────────
+app.get('/api/schedules', authMiddleware, async (req, res) => {
+	try {
+		const date = (req.query.date || '').slice(0, 10);
+		let rows;
+		if (date) {
+			[rows] = await pool.query(
+				`SELECT id, user_id, date, title, time, note, notified, created_at FROM schedules WHERE date = ? ORDER BY time ASC, created_at ASC`,
+				[date]
+			);
+		} else {
+			[rows] = await pool.query(
+				`SELECT id, user_id, date, title, time, note, notified, created_at FROM schedules ORDER BY date ASC, time ASC, created_at ASC`
+			);
+		}
+		res.json({ items: rows });
+	} catch (e) {
+		console.error('GET /api/schedules err', e);
+		res.status(500).json({ error: 'Server error' });
+	}
+});
+
+app.post('/api/schedules', authMiddleware, async (req, res) => {
+	try {
+		const { date, title, time, note } = req.body || {};
+		if (!date || !title) return res.status(400).json({ error: 'date and title required' });
+		const dateStr = String(date).slice(0, 10);
+		const titleStr = String(title).slice(0, 200).trim();
+		const timeStr = time ? String(time).slice(0, 10).trim() : null;
+		const noteStr = note ? String(note).slice(0, 500).trim() : null;
+		const [result] = await pool.query(
+			`INSERT INTO schedules (user_id, date, title, time, note) VALUES (?, ?, ?, ?, ?)`,
+			[req.user.id, dateStr, titleStr, timeStr, noteStr]
+		);
+		res.json({ id: result.insertId, date: dateStr, title: titleStr, time: timeStr, note: noteStr });
+	} catch (e) {
+		console.error('POST /api/schedules err', e);
+		res.status(500).json({ error: 'Server error' });
+	}
+});
+
+app.patch('/api/schedules/:id/notified', authMiddleware, async (req, res) => {
+	try {
+		const id = Number(req.params.id);
+		if (!id) return res.status(400).json({ error: 'Invalid id' });
+		await pool.query(`UPDATE schedules SET notified = 1 WHERE id = ?`, [id]);
+		res.json({ ok: true });
+	} catch (e) {
+		console.error('PATCH /api/schedules/:id/notified err', e);
+		res.status(500).json({ error: 'Server error' });
+	}
+});
+
+app.delete('/api/schedules/:id', authMiddleware, async (req, res) => {
+	try {
+		const id = Number(req.params.id);
+		if (!id) return res.status(400).json({ error: 'Invalid id' });
+		await pool.query(`DELETE FROM schedules WHERE id = ?`, [id]);
+		res.json({ ok: true });
+	} catch (e) {
+		console.error('DELETE /api/schedules/:id err', e);
+		res.status(500).json({ error: 'Server error' });
+	}
+});
+
 async function runStartupMigrations() {
 	const conn = await pool.getConnection();
 	try {
@@ -1427,6 +1492,23 @@ async function runStartupMigrations() {
 		} catch (e) {
 			if (e.code !== 'ER_DUP_FIELDNAME') console.warn('[startup] last_active_at:', e.message);
 		}
+
+		// 3. schedules table
+		await conn.query(`
+			CREATE TABLE IF NOT EXISTS schedules (
+				id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+				user_id    INT NOT NULL,
+				date       DATE NOT NULL,
+				title      VARCHAR(200) NOT NULL,
+				time       VARCHAR(10) DEFAULT NULL,
+				note       VARCHAR(500) DEFAULT NULL,
+				notified   TINYINT(1) NOT NULL DEFAULT 0,
+				created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				INDEX idx_schedules_date (date),
+				INDEX idx_schedules_user (user_id)
+			)
+		`);
+		console.log('[startup] schedules table ready');
 	} catch (err) {
 		console.error('[startup] migration error:', err && err.message ? err.message : err);
 	} finally {
