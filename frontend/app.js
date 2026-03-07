@@ -851,7 +851,7 @@ function notify(msg, opts = {}) {
 		t.className = 'app-toast';
 		t.setAttribute('role', 'status');
 		t.setAttribute('aria-live', 'polite');
-		t.style.cssText = `background:var(--card,#fff);color:var(--text,#12202f);padding:10px 14px;border-radius:12px;box-shadow:0 12px 30px rgba(19,28,38,0.13);border-left:3px solid ${accent};font-weight:600;min-width:180px;max-width:340px;opacity:0;transform:translateY(8px);transition:all .25s ease;pointer-events:auto;display:flex;align-items:center;gap:10px`;
+		t.style.cssText = `background:var(--card,#fff);color:var(--text,#12202f);padding:10px 14px;border-radius:12px;box-shadow:0 12px 30px rgba(19,28,38,0.13);font-weight:600;min-width:180px;max-width:340px;opacity:0;transform:translateY(8px);transition:all .25s ease;pointer-events:auto;display:flex;align-items:center;gap:10px`;
 
 		const msgSpan = document.createElement('span');
 		msgSpan.style.flex = '1';
