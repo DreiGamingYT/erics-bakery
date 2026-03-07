@@ -44,7 +44,7 @@ const INVENTORY_PAGE_LIMIT = 10;
 		}
 	}
 	if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', hideProductOrderUI);
-	else setTimeout(hideProductOrderUI, 20);
+	else hideProductOrderUI();
 
 	function wrapApiFetchIfPresent() {
 		try {
@@ -2362,7 +2362,6 @@ async function renderIngredientCards(page = 1, limit = INVENTORY_PAGE_LIMIT) {
         <td data-label="Out" style="padding:10px;vertical-align:middle"><input class="out-input" type="number" step="0.01" style="width:90px" /></td>
         <td data-label="Actions" style="padding:10px;vertical-align:middle">
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-            <input class="note-input" type="text" placeholder="note…" style="width:88px;height:28px;font-size:12px;padding:0 6px;border-radius:6px;border:1px solid rgba(0,0,0,.12);background:var(--bg,#fff);color:var(--text)" />
             <button class="btn small save-row" type="button">Save</button>
             <button class="btn small soft details-btn" data-id="${i.id}" type="button">Details</button>
             <button class="btn small soft edit-btn" type="button">Edit</button>
@@ -2393,8 +2392,6 @@ async function renderIngredientCards(page = 1, limit = INVENTORY_PAGE_LIMIT) {
 				const outVal = Number(tr.querySelector('.out-input')?.value || 0);
 				const minInput = tr.querySelector('.min-input');
 				const newMin = minInput ? Number(minInput.value || 0) : null;
-				// #14 — pick up note from the new note-input field
-				const noteVal = (tr.querySelector('.note-input')?.value || '').trim();
 
 				try {
 					if (newMin !== null && !Number.isNaN(newMin)) {
@@ -2407,10 +2404,10 @@ async function renderIngredientCards(page = 1, limit = INVENTORY_PAGE_LIMIT) {
 					}
 					if (inVal > 0) {
 						// Use applyStockChange so the undo bar appears
-						applyStockChange(id, 'in', Number(inVal), noteVal || 'Stock-in');
+						applyStockChange(id, 'in', Number(inVal), 'Stock-in');
 					} else if (outVal > 0) {
 						// Use applyStockChange so the undo bar appears
-							applyStockChange(id, 'out', Number(outVal), noteVal || 'Stock-out');
+							applyStockChange(id, 'out', Number(outVal), 'Stock-out');
 					} else {
 						// Only min threshold changed — no stock movement
 						notify('Min threshold updated');
