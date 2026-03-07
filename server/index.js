@@ -136,19 +136,6 @@ function hasRole(user, roles) {
 	return roles.map(x => String(x).toLowerCase()).includes(r);
 }
 
-let mailer = null;
-if (process.env.MAIL_HOST && process.env.MAIL_USER && process.env.MAIL_PASS) {
-	mailer = nodemailer.createTransport({
-		host: process.env.MAIL_HOST,
-		port: Number(process.env.MAIL_PORT || 587),
-		secure: (process.env.MAIL_SECURE === 'true') || false,
-		auth: {
-			user: process.env.MAIL_USER,
-			pass: process.env.MAIL_PASS
-		}
-	});
-}
-
 app.post('/api/auth/signup', async (req, res) => {
 	try {
 		const {
@@ -364,7 +351,7 @@ app.post('/api/auth/logout', async (req, res) => {
 			}
 		}
 	} catch {} // expired / missing token — that's fine, just clear the cookie
-	res.clearCookie(TOKEN_NAME, { httpOnly: true });
+	res.clearCookie(TOKEN_NAME, buildCookieOptions());
 	res.json({ ok: true });
 });
 
@@ -492,7 +479,7 @@ app.get('/api/ingredients', authMiddleware, async (req, res) => {
 		const q = `SELECT id,name,type,supplier,qty,unit,min_qty,max_qty,expiry,attrs,created_at,updated_at,created_by
                FROM ingredients
                ${whereSql}
-               ORDER BY ${pool.escapeId ? pool.escapeId(sort) : sort} ${order}
+               ORDER BY \`${sort}\` ${order}
                LIMIT ? OFFSET ?`;
 		const finalParams = params.concat([limit, offset]);
 
@@ -592,6 +579,48 @@ app.post('/api/ingredients', authMiddleware, async (req, res) => {
 			error: 'Server error',
 			detail: err && err.message ? err.message : String(err)
 		});
+	}
+});
+
+app.get('/api/ingredients/export/csv', authMiddleware, async (req, res) => {
+	try {
+		const type = (req.query.type || 'all');
+		const filter = (req.query.filter || 'all');
+		const search = (req.query.search || '').trim();
+		const where = [];
+		const params = [];
+		if (type !== 'all') {
+			where.push('`type` = ?');
+			params.push(type);
+		}
+		if (search) {
+			where.push('(name LIKE ? OR supplier LIKE ?)');
+			params.push(`%${search}%`, `%${search}%`);
+		}
+		if (filter === 'low') {
+			where.push('qty <= COALESCE(min_qty, 0)');
+		} else if (filter === 'expiring') {
+			const days = process.env.REPORT_EXPIRY_DAYS ? Number(process.env.REPORT_EXPIRY_DAYS) :
+				7;
+			where.push('expiry IS NOT NULL AND DATEDIFF(expiry, CURDATE()) BETWEEN 0 AND ?');
+			params.push(days);
+		}
+		const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
+		const [rows] = await pool.query(
+			`SELECT id,name,type,supplier,qty,unit,min_qty,max_qty,expiry FROM ingredients ${whereSql} ORDER BY id ASC`,
+			params);
+		let csv = 'id,name,type,supplier,qty,unit,min_qty,max_qty,expiry\n';
+		for (const r of rows) {
+			csv +=
+				`${r.id},"${(r.name||'').replace(/"/g,'""')}",${r.type},"${(r.supplier||'').replace(/"/g,'""')}",${r.qty},${r.unit},${r.min_qty||0},${r.max_qty||''},${r.expiry||''}\n`;
+		}
+		res.setHeader('Content-Type', 'text/csv');
+		res.setHeader('Content-Disposition',
+			`attachment; filename="inventory_${new Date().toISOString().slice(0,10)}.csv"`);
+		res.send(csv);
+	} catch (e) {
+		console.error('export csv err', e);
+		res.status(500).send('Server error');
 	}
 });
 
@@ -843,9 +872,9 @@ app.post('/api/ingredients/:id/stock', authMiddleware, async (req, res) => {
 app.get('/api/activity', authMiddleware, async (req, res) => {
 	try {
 		const page = Math.max(1, Number(req.query.page || 1));
-		const limit = Math.max(1, Math.min(200, Number(req.query.limit || 50)));
+		const limit = Math.max(1, Math.min(2000, Number(req.query.limit || 50)));
 		const offset = (page - 1) * limit;
-		const [rows] = await pool.query(`SELECT a.id, a.ingredient_id, a.user_id, a.text, a.time, u.username as username, i.name as ingredient_name
+		const [rows] = await pool.query(`SELECT a.id, a.ingredient_id, a.user_id, a.action, a.text, a.time, u.username as username, i.name as ingredient_name
        FROM activity a
        LEFT JOIN users u ON u.id = a.user_id
        LEFT JOIN ingredients i ON i.id = a.ingredient_id
@@ -857,7 +886,8 @@ app.get('/api/activity', authMiddleware, async (req, res) => {
 			meta: {
 				total: (count && count[0] ? count[0].cnt : 0),
 				page,
-				limit
+				limit,
+				totalPages: Math.ceil((count && count[0] ? count[0].cnt : 0) / limit)
 			}
 		});
 	} catch (e) {
@@ -892,48 +922,6 @@ app.post('/api/activity', authMiddleware, async (req, res) => {
 		return res.status(500).json({
 			error: 'Server error'
 		});
-	}
-});
-
-app.get('/api/ingredients/export/csv', authMiddleware, async (req, res) => {
-	try {
-		const type = (req.query.type || 'all');
-		const filter = (req.query.filter || 'all');
-		const search = (req.query.search || '').trim();
-		const where = [];
-		const params = [];
-		if (type !== 'all') {
-			where.push('`type` = ?');
-			params.push(type);
-		}
-		if (search) {
-			where.push('(name LIKE ? OR supplier LIKE ?)');
-			params.push(`%${search}%`, `%${search}%`);
-		}
-		if (filter === 'low') {
-			where.push('qty <= COALESCE(min_qty, 0)');
-		} else if (filter === 'expiring') {
-			const days = process.env.REPORT_EXPIRY_DAYS ? Number(process.env.REPORT_EXPIRY_DAYS) :
-				7;
-			where.push('expiry IS NOT NULL AND DATEDIFF(expiry, CURDATE()) BETWEEN 0 AND ?');
-			params.push(days);
-		}
-		const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
-		const [rows] = await pool.query(
-			`SELECT id,name,type,supplier,qty,unit,min_qty,max_qty,expiry FROM ingredients ${whereSql} ORDER BY id ASC`,
-			params);
-		let csv = 'id,name,type,supplier,qty,unit,min_qty,max_qty,expiry\n';
-		for (const r of rows) {
-			csv +=
-				`${r.id},"${(r.name||'').replace(/"/g,'""')}",${r.type},"${(r.supplier||'').replace(/"/g,'""')}",${r.qty},${r.unit},${r.min_qty||0},${r.max_qty||''},${r.expiry||''}\n`;
-		}
-		res.setHeader('Content-Type', 'text/csv');
-		res.setHeader('Content-Disposition',
-			`attachment; filename="inventory_${new Date().toISOString().slice(0,10)}.csv"`);
-		res.send(csv);
-	} catch (e) {
-		console.error('export csv err', e);
-		res.status(500).send('Server error');
 	}
 });
 
@@ -1198,28 +1186,10 @@ async function sendResetEmail(toEmail, code) {
       </div>
     </body></html>`;
 
-		if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-			const nodemailer = require('nodemailer');
-			const transporter = nodemailer.createTransport({
-				host: (process.env.SMTP_HOST || '').trim(),
-				port: Number((process.env.SMTP_PORT || '587').trim()),
-				secure: ((process.env.SMTP_PORT || '587').trim() === '465'),
-				auth: {
-					user: (process.env.SMTP_USER || '').trim(),
-					pass: (process.env.SMTP_PASS || '').trim()
-				}
-			});
-
-			try {
-				await transporter.verify();
-				console.info('[sendResetEmail] SMTP transporter verified');
-			} catch (verr) {
-				console.warn('[sendResetEmail] transporter verify failed (continuing):', verr && verr.message ? verr.message : verr);
-			}
-
+		if (mailTransporter) {
 			const fromAddress = (process.env.EMAIL_FROM && process.env.EMAIL_FROM.trim()) ? process.env.EMAIL_FROM.trim() : process.env.SMTP_USER;
 
-			const info = await transporter.sendMail({
+			const info = await mailTransporter.sendMail({
 				from: fromAddress,
 				to: toEmail,
 				subject,
@@ -1323,7 +1293,8 @@ app.get('/api/notifications/alerts', authMiddleware, async (req, res) => {
 
 		const lowStock = ingredients.filter(i => {
 			const min = Number(i.min_qty || 0);
-			return Number(i.qty || 0) <= min;
+			const qty = Number(i.qty || 0);
+			return min > 0 && qty <= min;
 		});
 
 		const expiringSoon = ingredients.filter(i => {
