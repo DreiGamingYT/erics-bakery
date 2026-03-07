@@ -3909,9 +3909,15 @@ async function addSchedule(sched) {
 	return sched;
 }
 async function deleteSchedule(id) {
-	saveAllSchedules(getAllSchedules().filter(s => s.id !== id));
-	try { await apiFetch('/api/schedules/' + id, { method: 'DELETE' }); } catch (e) {
-		console.warn('[schedules] server delete failed:', e.message);
+	const snapshot = getAllSchedules();
+	saveAllSchedules(snapshot.filter(s => s.id !== id));
+	try {
+		await apiFetch('/api/schedules/' + id, { method: 'DELETE' });
+	} catch (e) {
+		// Server delete failed — restore local state so ghost resurrection can't happen
+		saveAllSchedules(snapshot);
+		console.warn('[schedules] server delete failed (rolled back):', e.message);
+		throw e; // re-throw so the UI caller can show an error
 	}
 }
 // Pull schedules from server into localStorage on load
@@ -3919,11 +3925,12 @@ async function syncSchedulesFromServer() {
 	try {
 		const res = await apiFetch('/api/schedules');
 		if (res && Array.isArray(res.items)) {
-			// Merge server items into local cache (server wins for existing ids)
+			// Server is the source of truth — replace local cache entirely.
+			// Preserve any locally-added entries whose temp id hasn't synced yet
+			// (those have string ids like "1234567890_abc", not numeric).
 			const local = getAllSchedules();
-			const serverIds = new Set(res.items.map(s => String(s.id)));
-			const merged = local.filter(s => !serverIds.has(String(s.id))).concat(res.items);
-			saveAllSchedules(merged);
+			const pendingLocal = local.filter(s => isNaN(Number(s.id)));
+			saveAllSchedules(pendingLocal.concat(res.items));
 		}
 	} catch (e) { console.warn('[schedules] sync from server failed:', e.message); }
 }
@@ -3941,6 +3948,10 @@ function checkScheduleReminders() {
 		const diff     = target - now;            // ms until scheduled time
 		if (diff <= 0 && diff > -120000) {        // within 2-min window after
 			s.notified = true; changed = true;
+			// Persist notified flag to server so it survives across sessions/devices
+			if (!isNaN(Number(s.id))) {
+				apiFetch('/api/schedules/' + s.id + '/notified', { method: 'PATCH' }).catch(() => {});
+			}
 			pushInAppNotif({
 				type: 'reminder',
 				title: `🔔 Reminder: ${s.title}`,
@@ -3997,13 +4008,17 @@ function openScheduleModal(dateStr) {
 	}
 
 	document.querySelectorAll('.sched-delete-btn').forEach(btn => {
-		btn.addEventListener('click', e => {
+		btn.addEventListener('click', async e => {
 			e.stopPropagation();
 			if (!confirm('Remove this schedule?')) return;
-			deleteSchedule(btn.dataset.id);
+			try {
+				await deleteSchedule(btn.dataset.id);
 			pushInAppNotif({ type: 'info', title: 'Schedule removed', sub: displayDate, icon: 'fa-calendar-xmark' });
 			closeModal();
 			refreshCalendarCell(dateStr);
+			} catch (err) {
+				if (typeof notify === 'function') notify('Failed to remove schedule — please try again.');
+			}
 		});
 	});
 
@@ -4429,9 +4444,11 @@ function renderCalendar() {
 		header.textContent = `Calendar — ${new Date(currentCalendarYear, currentCalendarMonth).toLocaleString([], {month:'long', year:'numeric'})}`;
 	}
 	// #4 — Sync schedules from server, then re-render cells
-	syncSchedulesFromServer().then(() => {
+	syncSchedulesFromServer()
+		.then(() => {
 	renderCalendarForMonth(currentCalendarYear, currentCalendarMonth);
-	}).catch(() => {
+		})
+		.catch(() => {
 		renderCalendarForMonth(currentCalendarYear, currentCalendarMonth);
 	});
 }
