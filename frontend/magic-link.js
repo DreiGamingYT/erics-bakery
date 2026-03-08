@@ -150,21 +150,80 @@
 	// ── Inject "Email me a sign-in link" button into login form ───────────────
 
 	function injectMagicLinkButton() {
-		if (document.getElementById('magicLinkBtn')) return; // already injected
+		if (document.getElementById('magicLinkBtn')) return;
 		const forgotBtn = document.getElementById('forgotPasswordBtn');
-		if (!forgotBtn) return; // login form not yet rendered
+		if (!forgotBtn) return;
 
+		// ── Inject scoped CSS once ─────────────────────────────────────────────
+		if (!document.getElementById('mlBtnStyles')) {
+			const style = document.createElement('style');
+			style.id = 'mlBtnStyles';
+			style.textContent = `
+				/* Magic-link login button layout */
+				#loginForm .form-actions {
+					display: flex !important;
+					flex-direction: column !important;
+					gap: 8px !important;
+					padding-top: 12px !important;
+				}
+				#overlaySignInBtn {
+					width: 100% !important;
+				}
+				#ml-secondary-row {
+					display: flex;
+					flex-wrap: wrap;
+					gap: 6px;
+					width: 100%;
+				}
+				#forgotPasswordBtn,
+				#magicLinkBtn {
+					flex: 1 1 0;
+					min-width: 130px;
+					justify-content: center;
+					display: inline-flex !important;
+					align-items: center;
+					gap: 6px;
+					padding: 10px 10px !important;
+					font-size: 13px;
+					white-space: nowrap;
+					text-align: center;
+				}
+				@media (max-width: 380px) {
+					#forgotPasswordBtn,
+					#magicLinkBtn {
+						flex: 1 1 100%;
+					}
+				}
+			`;
+			document.head.appendChild(style);
+		}
+
+		// ── Build the magic link button ────────────────────────────────────────
 		const btn = document.createElement('button');
 		btn.id        = 'magicLinkBtn';
 		btn.type      = 'button';
 		btn.className = 'btn ghost small';
-		btn.style.cssText = 'padding:12px 16px;display:inline-flex;align-items:center;gap:7px';
-		btn.innerHTML = '<i class="fa fa-envelope" style="opacity:.75"></i> Email sign-in link';
-
-		// Insert next to the forgot password button
-		forgotBtn.parentNode.insertBefore(btn, forgotBtn.nextSibling);
-
+		btn.innerHTML = '<i class="fa fa-envelope" aria-hidden="true"></i> Email sign-in';
 		btn.addEventListener('click', openMagicLinkModal);
+
+		// ── Restructure: pull forgotBtn out of its wrapper div,
+		//    put both secondary buttons in a new #ml-secondary-row div ───────────
+		const forgotParent = forgotBtn.parentElement;
+		const formActions  = forgotBtn.closest('.form-actions');
+
+		// Create the secondary row container
+		const row = document.createElement('div');
+		row.id = 'ml-secondary-row';
+		row.appendChild(forgotBtn);   // move forgotBtn into row
+		row.appendChild(btn);         // add magic link btn into row
+
+		if (forgotParent && forgotParent !== formActions) {
+			// forgotBtn was inside a wrapper <div> — replace that div with our row
+			forgotParent.replaceWith(row);
+		} else if (formActions) {
+			// forgotBtn was directly in form-actions — just append the row
+			formActions.appendChild(row);
+		}
 	}
 
 	// ── Magic link request modal ───────────────────────────────────────────────
