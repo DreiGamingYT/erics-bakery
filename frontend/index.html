@@ -130,41 +130,82 @@
         </aside>
         <main class="main">
           <section id="view-dashboard" class="view">
+            <!-- Greeting bar -->
+            <div id="dashGreeting" class="dash-greeting"></div>
             <div class="page-header">
               <h2>Dashboard</h2>
               <div class="page-actions"><button id="quickAddIng" class="btn small primary" type="button"><i class="fa fa-plus"></i> Add Ingredient</button><button id="quickBake" class="btn small" type="button"><i class="fa fa-fire"></i> Bake</button></div>
             </div>
+            <!-- KPI row — each card has icon + value + title + trend -->
             <div class="kpi-row">
-              <div class="kpi-card">
+              <div class="kpi-card" id="kpicard-total">
+                <div class="kpi-icon kpi-icon-blue"><i class="fa fa-boxes-stacked"></i></div>
+                <div class="kpi-body">
                 <div class="kpi-title">Total items</div>
                 <div class="kpi-value" id="kpi-total-ing">0</div>
+                  <div class="kpi-trend" id="kpi-total-trend"></div>
+                </div>
               </div>
-              <div class="kpi-card">
-                <div class="kpi-title">Low stock items</div>
+              <div class="kpi-card" id="kpicard-low">
+                <div class="kpi-icon kpi-icon-orange"><i class="fa fa-triangle-exclamation"></i></div>
+                <div class="kpi-body">
+                  <div class="kpi-title">Low stock</div>
                 <div class="kpi-value" id="kpi-low">0</div>
+                  <div class="kpi-trend" id="kpi-low-trend"></div>
+                </div>
               </div>
-              <div class="kpi-card">
-                <div class="kpi-title">Expiring (next 7d)</div>
+              <div class="kpi-card" id="kpicard-exp">
+                <div class="kpi-icon kpi-icon-red"><i class="fa fa-clock"></i></div>
+                <div class="kpi-body">
+                  <div class="kpi-title">Expiring (7d)</div>
                 <div class="kpi-value" id="kpi-exp">0</div>
+                  <div class="kpi-trend" id="kpi-exp-trend"></div>
+                </div>
               </div>
-              <div class="kpi-card">
-                <div class="kpi-title">Equipment / Tools</div>
+              <div class="kpi-card" id="kpicard-equip">
+                <div class="kpi-icon kpi-icon-purple"><i class="fa fa-screwdriver-wrench"></i></div>
+                <div class="kpi-body">
+                  <div class="kpi-title">Equipment</div>
                 <div class="kpi-value" id="kpi-equipment">0</div>
+                  <div class="kpi-trend" id="kpi-equip-trend"></div>
+                </div>
               </div>
             </div>
+            <!-- Alert strips -->
+            <div id="dash-alert-low" class="dash-alert dash-alert-orange" style="display:none"></div>
+            <div id="dash-alert-exp" class="dash-alert dash-alert-red" style="display:none"></div>
+            <!-- Charts -->
             <div class="grid-2">
               <div class="card">
-                <h3>Stock Movement (7 days)</h3>
+                <div class="dash-card-header">
+                  <h3>Stock Movement</h3>
+                  <div class="dash-range-pills" id="stockRangePills">
+                    <button class="range-pill active" data-days="7">7d</button>
+                    <button class="range-pill" data-days="30">30d</button>
+                    <button class="range-pill" data-days="90">90d</button>
+                  </div>
+                </div>
                 <div class="chart-container"><canvas id="stockChart" width="400" height="220"></canvas></div>
               </div>
               <div class="card">
-                <h3>Top used ingredients (30 days)</h3>
+                <div class="dash-card-header">
+                  <h3>Top used ingredients</h3>
+                  <div class="dash-range-pills" id="usageRangePills">
+                    <button class="range-pill active" data-days="30">30d</button>
+                    <button class="range-pill" data-days="7">7d</button>
+                    <button class="range-pill" data-days="90">90d</button>
+                  </div>
+                </div>
                 <div class="chart-container"><canvas id="bestSellerChart" width="400" height="220"></canvas></div>
               </div>
             </div>
+            <!-- Recent activity with view-all -->
             <div class="card">
-              <h3>Recent History</h3>
-              <ul id="recentActivity" class="timeline"></ul>
+              <div class="dash-card-header">
+                <h3>Recent Activity</h3>
+                <button class="btn ghost small" id="dashViewAllActivity" type="button">View all <i class="fa fa-arrow-right" style="margin-left:4px;font-size:11px"></i></button>
+              </div>
+              <ul id="recentActivity" class="dash-timeline"></ul>
             </div>
           </section>
           <section id="view-inventory" class="view hidden">

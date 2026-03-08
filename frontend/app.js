@@ -1860,77 +1860,93 @@ async function fetchAllIngredientsMap() {
 		};
 	}
 }
-async function renderActivity(limit = 6) {
+async function renderActivity(limit = 8) {
 	const container = q('recentActivity');
 	if (!container) return;
 
 	const sess = getSession();
 	if (!sess || !sess.username) {
 		container.innerHTML = `
-      <li class="muted" style="padding:12px">
-        Sign in to see recent activity.
-        <div style="margin-top:8px">
+			<li class="dash-tl-item">
+				<div class="dash-tl-icon dash-tl-icon-muted"><i class="fa fa-user"></i></div>
+				<div class="dash-tl-body">
+					<div>Sign in to see recent activity.</div>
+					<div style="margin-top:8px;display:flex;gap:8px">
           <button id="ctaSignInForActivity" class="btn small primary" type="button">Sign in</button>
-          <button id="ctaShowLocalActivity" class="btn small ghost" type="button" style="margin-left:8px">Show local demo</button>
+					</div>
         </div>
       </li>`;
 		q('ctaSignInForActivity')?.addEventListener('click', () => showOverlay(true, true));
-		q('ctaShowLocalActivity')?.addEventListener('click', () => {
-			const items = (DB && Array.isArray(DB.activity)) ? DB.activity.slice(0, limit) : [];
-			if (!items.length) {
-				container.innerHTML = '<li class="muted">No local activity available.</li>';
-				return;
-			}
-			container.innerHTML = items.map(a => {
-				const time = a.time ? new Date(a.time).toLocaleString() : '';
-				return `<li><div>${escapeHtml(a.text||a.ingredient_name||'')}</div><div class="muted small">${escapeHtml(time)}</div></li>`;
-			}).join('');
-		});
 		return;
 	}
 
-	container.innerHTML = '<li class="muted">Loading…</li>';
+	container.innerHTML = '<li class="dash-tl-item"><div class="dash-tl-icon dash-tl-icon-muted"><i class="fa fa-spinner fa-spin"></i></div><div class="dash-tl-body muted">Loading…</div></li>';
 	try {
 		const resp = await apiFetch(`/api/activity?limit=${limit}`);
 		const items = (resp && resp.items) ? resp.items : [];
 		if (!items.length) {
-			const fallback = (DB && Array.isArray(DB.activity)) ? DB.activity.slice(0, limit) : [];
-			if (fallback.length) {
-				container.innerHTML = fallback.map(a => {
-					const time = a.time ? new Date(a.time).toLocaleString() : '';
-					return `<li><div>${escapeHtml(a.text||a.ingredient_name||'')}</div><div class="muted small">${escapeHtml(time)}</div></li>`;
-				}).join('');
+			container.innerHTML = '<li class="dash-tl-item"><div class="dash-tl-icon dash-tl-icon-muted"><i class="fa fa-inbox"></i></div><div class="dash-tl-body muted">No recent activity</div></li>';
 				return;
 			}
-			container.innerHTML = '<li class="muted">No recent activity</li>';
-			return;
-		}
-
-		container.innerHTML = items.slice(0, limit).map(a => {
-			const time = a.time ? new Date(a.time).toLocaleString() : '';
-			const left = escapeHtml(a.text || a.ingredient_name || (a.username ? `${a.username}` : ''));
-			return `<li><div>${left}</div><div class="muted small">${escapeHtml(time)}</div></li>`;
-		}).join('');
-
+		container.innerHTML = items.map(a => _activityItemHTML(a)).join('');
 	} catch (err) {
 		console.error('renderActivity error:', err);
 		if (err && err.status === 401) {
-			container.innerHTML = '<li class="muted">You must sign in to view activity. <button class="btn small primary" id="act-signin">Sign in</button></li>';
-			q('act-signin')?.addEventListener('click', () => showOverlay(true, true));
+			container.innerHTML = '<li class="dash-tl-item"><div class="dash-tl-icon dash-tl-icon-muted"><i class="fa fa-lock"></i></div><div class="dash-tl-body muted">You must sign in to view activity.</div></li>';
 			return;
 		}
 		const fallback = (DB && Array.isArray(DB.activity)) ? DB.activity.slice(0, limit) : [];
 		if (fallback.length) {
-			container.innerHTML = fallback.map(a => {
-				const time = a.time ? new Date(a.time).toLocaleString() : '';
-				return `<li><div>${escapeHtml(a.text||a.ingredient_name||'')}</div><div class="muted small">${escapeHtml(time)}</div></li>`;
-			}).join('');
-			notify('Showing local demo activity (server failed).');
+			container.innerHTML = fallback.map(a => _activityItemHTML(a)).join('');
 			return;
 		}
-
-		container.innerHTML = '<li class="muted">Failed to load activity</li>';
+		container.innerHTML = '<li class="dash-tl-item"><div class="dash-tl-icon dash-tl-icon-muted"><i class="fa fa-circle-exclamation"></i></div><div class="dash-tl-body muted">Failed to load activity</div></li>';
 	}
+}
+
+function _activityItemHTML(a) {
+	const txt  = (a.text || a.ingredient_name || a.username || '').toLowerCase();
+	const time = a.time ? _timeAgo(new Date(a.time)) : '';
+	const full = a.time ? new Date(a.time).toLocaleString() : '';
+	const label = escapeHtml(a.text || a.ingredient_name || a.username || '—');
+
+	let iconCls = 'fa-clock-rotate-left';
+	let colorCls = 'dash-tl-icon-blue';
+
+	if (txt.includes('stock in') || txt.includes('added') || txt.includes('received')) {
+		iconCls = 'fa-arrow-up';   colorCls = 'dash-tl-icon-green';
+	} else if (txt.includes('stock out') || txt.includes('used') || txt.includes('consumed')) {
+		iconCls = 'fa-arrow-down'; colorCls = 'dash-tl-icon-red';
+	} else if (txt.includes('bake') || txt.includes('batch') || txt.includes('produced')) {
+		iconCls = 'fa-fire';       colorCls = 'dash-tl-icon-orange';
+	} else if (txt.includes('expir')) {
+		iconCls = 'fa-clock';      colorCls = 'dash-tl-icon-red';
+	} else if (txt.includes('low') || txt.includes('min')) {
+		iconCls = 'fa-triangle-exclamation'; colorCls = 'dash-tl-icon-orange';
+	} else if (txt.includes('edit') || txt.includes('update') || txt.includes('changed')) {
+		iconCls = 'fa-pen';        colorCls = 'dash-tl-icon-purple';
+	} else if (txt.includes('delete') || txt.includes('remov')) {
+		iconCls = 'fa-trash';      colorCls = 'dash-tl-icon-red';
+	} else if (txt.includes('login') || txt.includes('sign in') || txt.includes('sign-in')) {
+		iconCls = 'fa-right-to-bracket'; colorCls = 'dash-tl-icon-blue';
+	}
+
+	return `<li class="dash-tl-item">
+		<div class="dash-tl-icon ${colorCls}"><i class="fa ${iconCls}"></i></div>
+		<div class="dash-tl-body">
+			<div class="dash-tl-text">${label}</div>
+			<div class="dash-tl-time muted small" title="${escapeHtml(full)}">${time}</div>
+		</div>
+	</li>`;
+}
+
+function _timeAgo(date) {
+	const s = Math.floor((Date.now() - date) / 1000);
+	if (s < 60)   return 'Just now';
+	if (s < 3600) return `${Math.floor(s/60)}m ago`;
+	if (s < 86400) return `${Math.floor(s/3600)}h ago`;
+	if (s < 604800) return `${Math.floor(s/86400)}d ago`;
+	return date.toLocaleDateString();
 }
 
 function _parseQtyFromText(text) {
@@ -1943,7 +1959,7 @@ function _parseQtyFromText(text) {
 // NOTE: renderStockChart is defined below (live version). The old duplicate has been removed.
 
 
-async function renderBestSellerChart() {
+async function renderBestSellerChart(days) {
 
 	const ctx = q('bestSellerChart')?.getContext('2d');
 	if (!ctx) return;
@@ -1955,9 +1971,11 @@ async function renderBestSellerChart() {
 		const ingredients = (ingsResp && ingsResp.items) ? ingsResp.items : [];
 		const act = (actResp && actResp.items) ? actResp.items : [];
 
+		const daysBack = days || 30;
+		const cutoff   = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000);
 		const usageMap = {};
 
-		act.forEach(a => {
+		act.filter(a => !a.time || new Date(a.time) >= cutoff).forEach(a => {
 			const txt = (a.text || '').toLowerCase();
 			const qty = _parseQtyFromText(a.text || '') || 0;
 			if (qty === 0) return;
@@ -2013,36 +2031,43 @@ async function renderBestSellerChart() {
 }
 
 async function renderDashboard() {
+	// ── Greeting ─────────────────────────────────────────────────────────────
+	_renderDashGreeting();
+
 	try {
-		const [totalResp, lowResp, expResp, equipResp] = await Promise.all([
+		const [totalResp, lowResp, expResp, equipResp, lowItemsResp, expItemsResp] = await Promise.all([
 			apiFetch('/api/ingredients?type=ingredient&limit=1&page=1'),
 			apiFetch('/api/ingredients?filter=low&limit=1&page=1'),
 			apiFetch('/api/ingredients?filter=expiring&limit=1&page=1'),
-			apiFetch('/api/ingredients?type=equipment&limit=1&page=1')
-		].map(p => p.catch(e => null)).map(async req => req ? req : null).map(x => x));
+			apiFetch('/api/ingredients?type=equipment&limit=1&page=1'),
+			apiFetch('/api/ingredients?filter=low&limit=8&page=1'),
+			apiFetch('/api/ingredients?filter=expiring&limit=8&page=1')
+		].map(p => p.catch(() => null)));
 
-		const total = totalResp && totalResp.meta ? totalResp.meta.total : ((DB.ingredients && DB.ingredients.length) || 0);
-		const low = lowResp && lowResp.meta ? lowResp.meta.total : 0;
-		const exp = expResp && expResp.meta ? expResp.meta.total : 0;
-		const equipmentCount = equipResp && equipResp.meta ? equipResp.meta.total : 0;
+		const total          = totalResp?.meta?.total ?? (DB.ingredients?.length ?? 0);
+		const low            = lowResp?.meta?.total   ?? 0;
+		const exp            = expResp?.meta?.total   ?? 0;
+		const equipmentCount = equipResp?.meta?.total ?? 0;
+		const lowItems       = lowItemsResp?.items    ?? [];
+		const expItems       = expItemsResp?.items    ?? [];
 
 		if (q('kpi-total-ing')) q('kpi-total-ing').textContent = total;
-		if (q('kpi-low')) q('kpi-low').textContent = low;
-		if (q('kpi-exp')) q('kpi-exp').textContent = exp;
+		if (q('kpi-low'))       q('kpi-low').textContent       = low;
+		if (q('kpi-exp'))       q('kpi-exp').textContent       = exp;
 		if (q('kpi-equipment')) q('kpi-equipment').textContent = equipmentCount;
 
-		// #6 — Calculate total inventory value (requires unit_cost set on ingredients)
-		try {
-			const valResp = await apiFetch('/api/ingredients?type=ingredient&limit=1000&page=1');
-			const allIngs = (valResp && valResp.items) ? valResp.items : [];
-			const total_val = allIngs.reduce((sum, i) => {
-				if (i.unit_cost != null && i.qty != null) return sum + (Number(i.unit_cost) * Number(i.qty));
-				return sum;
-			}, 0);
-			if (q('kpi-inv-value')) {
-				q('kpi-inv-value').textContent = total_val > 0 ? `₱${total_val.toLocaleString('en-PH', {minimumFractionDigits:2, maximumFractionDigits:2})}` : '—';
-			}
-		} catch (_) {}
+		// ── Trend arrows (vs last week) ───────────────────────────────────────
+		_renderKpiTrends(low, exp);
+
+		// ── Alert strips ─────────────────────────────────────────────────────
+		_renderAlertStrip('dash-alert-low', lowItems, low,
+			'fa-triangle-exclamation', 'kpi-icon-orange',
+			'Low stock', 'low', '#d97706');
+		_renderAlertStrip('dash-alert-exp', expItems, exp,
+			'fa-clock', 'kpi-icon-red',
+			'Expiring soon', 'expiring', '#dc2626');
+
+		// ── Empty state ───────────────────────────────────────────────────────
 		const emptyEl = document.getElementById('dashboardEmptyState');
 		if (total === 0) {
 			if (!emptyEl) {
@@ -2068,17 +2093,18 @@ async function renderDashboard() {
 					});
 					document.getElementById('emptyStateInvBtn')?.addEventListener('click', () => showView('inventory'));
 				}
-			} else {
-				emptyEl.style.display = '';
 			}
+			emptyEl && (emptyEl.style.display = '');
 		} else if (emptyEl) {
 			emptyEl.style.display = 'none';
 		}
+
+		// ── KPI card click-to-filter ──────────────────────────────────────────
 		const kpiNav = [
-			{ id: 'kpi-total-ing', filter: 'all', type: 'ingredient' },
-			{ id: 'kpi-low', filter: 'low', type: null },
-			{ id: 'kpi-exp', filter: 'expiring', type: null },
-			{ id: 'kpi-equipment', filter: 'all', type: 'equipment' }
+			{ id: 'kpi-total-ing', filter: 'all',      type: 'ingredient' },
+			{ id: 'kpi-low',       filter: 'low',       type: null         },
+			{ id: 'kpi-exp',       filter: 'expiring',  type: null         },
+			{ id: 'kpi-equipment', filter: 'all',       type: 'equipment'  }
 		];
 		kpiNav.forEach(({ id, filter, type }) => {
 			const card = q(id)?.closest('.kpi-card');
@@ -2088,12 +2114,10 @@ async function renderDashboard() {
 			card.onclick = () => {
 				showView('inventory');
 				setTimeout(() => {
-					// Set type radio
 					if (type) {
 						const radio = document.querySelector(`input[name="invType"][value="${type}"]`);
 						if (radio) { radio.checked = true; radio.dispatchEvent(new Event('change')); }
 					}
-					// Set chip filter
 					document.querySelectorAll('.filter-chips .chip').forEach(c => {
 						c.classList.toggle('active', c.dataset.filter === filter);
 					});
@@ -2102,21 +2126,119 @@ async function renderDashboard() {
 			};
 		});
 
+		// ── Chart range pills wiring ──────────────────────────────────────────
+		_wireRangePills('stockRangePills',  (days) => renderStockChart(null, null, days));
+		_wireRangePills('usageRangePills',  (days) => renderBestSellerChart(days));
+
+		// ── View-all activity button ──────────────────────────────────────────
+		const vaa = q('dashViewAllActivity');
+		if (vaa && !vaa._wired) {
+			vaa._wired = true;
+			vaa.addEventListener('click', () => showView('reports'));
+		}
+
 		await renderStockChart();
 		await renderBestSellerChart();
-		await renderActivity(6);
+		await renderActivity(8);
 
 	} catch (e) {
 		console.error('renderDashboard err', e);
-
 		try {
 			if (q('kpi-total-ing')) q('kpi-total-ing').textContent = (DB.ingredients || []).length;
-			if (q('kpi-low')) q('kpi-low').textContent = (DB.ingredients || []).filter(i => i.qty <= i.min).length;
+			if (q('kpi-low'))       q('kpi-low').textContent       = (DB.ingredients || []).filter(i => i.qty <= (i.min_qty || 0)).length;
 			renderStockChart();
 			renderBestSellerChart();
-			renderActivity(6);
+			renderActivity(8);
 		} catch (_) {}
 	}
+}
+
+// ── Dashboard helpers ──────────────────────────────────────────────────────
+
+function _renderDashGreeting() {
+	const el = q('dashGreeting');
+	if (!el) return;
+	const sess = getSession();
+	if (!sess) { el.style.display = 'none'; return; }
+	const name = sess.name || sess.username || 'there';
+	const hour = new Date().getHours();
+	const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+	const emoji    = hour < 12 ? '🌅' : hour < 17 ? '☀️' : '🌙';
+	const dateStr  = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+	el.innerHTML = `
+		<span class="dash-greeting-text">${emoji} ${greeting}, <strong>${escapeHtml(name)}</strong>!</span>
+		<span class="dash-greeting-date">${dateStr}</span>`;
+	el.style.display = '';
+}
+
+function _renderKpiTrends(lowNow, expNow) {
+	// Compare vs last week using cached activity — just show up/down arrow + delta
+	try {
+		const act = (DB && Array.isArray(DB.activity)) ? DB.activity : [];
+		const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+		const recentStockOuts = act.filter(a => {
+			const txt = (a.text || '').toLowerCase();
+			return new Date(a.time) >= weekAgo && (txt.includes('stock out') || txt.includes('used'));
+		}).length;
+		const prevStockOuts = act.filter(a => {
+			const t = new Date(a.time).getTime();
+			const txt = (a.text || '').toLowerCase();
+			return t >= weekAgo - 7*86400000 && t < weekAgo && (txt.includes('stock out') || txt.includes('used'));
+		}).length;
+		const diff = recentStockOuts - prevStockOuts;
+		const trendEl = q('kpi-low-trend');
+		if (trendEl) {
+			if (diff > 0)       trendEl.innerHTML = `<span class="trend-up">↑ ${diff} more uses this week</span>`;
+			else if (diff < 0)  trendEl.innerHTML = `<span class="trend-down">↓ ${Math.abs(diff)} fewer uses this week</span>`;
+			else                trendEl.innerHTML = `<span class="trend-flat">→ Same as last week</span>`;
+		}
+	} catch (_) {}
+	// Low count change
+	const lowTrend = q('kpi-low-trend');
+	if (lowTrend && lowNow > 0) {
+		lowTrend.innerHTML = lowNow > 3
+			? `<span class="trend-up">⚠ Needs attention</span>`
+			: `<span class="trend-flat">Looking okay</span>`;
+	}
+	// Expiring
+	const expTrend = q('kpi-exp-trend');
+	if (expTrend) {
+		expTrend.innerHTML = expNow > 0
+			? `<span class="trend-up">Act before they expire</span>`
+			: `<span class="trend-flat">All clear ✓</span>`;
+	}
+}
+
+function _renderAlertStrip(elId, items, total, iconCls, colorCls, label, filter, color) {
+	const el = document.getElementById(elId);
+	if (!el) return;
+	if (!items.length) { el.style.display = 'none'; return; }
+	const names = items.slice(0, 5).map(i => `<span class="dash-alert-pill">${escapeHtml(i.name)}</span>`).join('');
+	const more  = total > 5 ? `<span class="dash-alert-pill dash-alert-more">+${total - 5} more</span>` : '';
+	el.innerHTML = `
+		<div class="dash-alert-icon"><i class="fa ${iconCls}" style="color:${color}"></i></div>
+		<div class="dash-alert-content">
+			<span class="dash-alert-label" style="color:${color}">${label}:</span>
+			<div class="dash-alert-pills">${names}${more}</div>
+		</div>
+		<button class="btn ghost small dash-alert-btn" type="button"
+			onclick="showView('inventory');setTimeout(()=>{document.querySelectorAll('.filter-chips .chip').forEach(c=>c.classList.toggle('active',c.dataset.filter==='${filter}'));renderIngredientCards(1,INVENTORY_PAGE_LIMIT);},80)">
+			View all <i class="fa fa-arrow-right" style="font-size:10px;margin-left:3px"></i>
+		</button>`;
+	el.style.display = '';
+}
+
+function _wireRangePills(containerId, callback) {
+	const wrap = q(containerId);
+	if (!wrap || wrap._wired) return;
+	wrap._wired = true;
+	wrap.querySelectorAll('.range-pill').forEach(btn => {
+		btn.addEventListener('click', () => {
+			wrap.querySelectorAll('.range-pill').forEach(b => b.classList.remove('active'));
+			btn.classList.add('active');
+			callback(Number(btn.dataset.days));
+		});
+	});
 }
 
 /* async function fetchAllIngredientsMap() {
@@ -2702,27 +2824,31 @@ function aggregateSalesRange(startISO, endISO) {
 	};
 }
 
-async function renderStockChart(rangeStart, rangeEnd) {
+async function renderStockChart(rangeStart, rangeEnd, days) {
 	const ctx = q('stockChart')?.getContext('2d');
 	if (!ctx) return;
-	const end = rangeEnd ? new Date(rangeEnd) : new Date();
-	end.setHours(0, 0, 0, 0);
+
+	const daysBack = days || 7;
+	const end   = rangeEnd   ? new Date(rangeEnd)   : new Date();
+	end.setHours(23, 59, 59, 0);
 	const start = rangeStart ? new Date(rangeStart) : new Date(end);
-	start.setDate(end.getDate() - 6);
+	start.setDate(end.getDate() - daysBack + 1);
 	start.setHours(0, 0, 0, 0);
 
-	const days = [];
-	const map = {};
+	const dayKeys = [];
+	const inMap  = {};
+	const outMap = {};
 	const cur = new Date(start);
 	while (cur <= end) {
 		const key = cur.toISOString().slice(0, 10);
-		days.push(key);
-		map[key] = 0;
+		dayKeys.push(key);
+		inMap[key]  = 0;
+		outMap[key] = 0;
 		cur.setDate(cur.getDate() + 1);
 	}
 
 	try {
-		const resp = await apiFetch('/api/activity?limit=2000');
+		const resp  = await apiFetch('/api/activity?limit=2000');
 		const items = (resp && resp.items) ? resp.items : [];
 
 		items.forEach(a => {
@@ -2730,54 +2856,70 @@ async function renderStockChart(rangeStart, rangeEnd) {
 			const d = new Date(a.time);
 			d.setHours(0, 0, 0, 0);
 			const key = d.toISOString().slice(0, 10);
-			if (map[key] === undefined) return;
+			if (inMap[key] === undefined) return;
 			const txt = (a.text || '').toLowerCase();
 			const qty = _parseQtyFromText(a.text || '') || 0;
 			if (qty === 0) return;
-			if (txt.includes('stock out') || txt.includes('used')) map[key] -= qty;
-			else if (txt.includes('stock in')) map[key] += qty;
+			if (txt.includes('stock out') || txt.includes('used')) outMap[key] += qty;
+			else if (txt.includes('stock in'))                     inMap[key]  += qty;
 		});
 
-		const labels = days;
-		const data = days.map(d => Math.max(0, Math.round((map[d] || 0) * 100) / 100));
+		const labels  = daysBack <= 14
+			? dayKeys.map(k => new Date(k).toLocaleDateString('en-US', { month:'short', day:'numeric' }))
+			: dayKeys.map(k => new Date(k).toLocaleDateString('en-US', { month:'short', day:'numeric' }));
+		const inData  = dayKeys.map(k => Math.round(inMap[k]  * 100) / 100);
+		const outData = dayKeys.map(k => Math.round(outMap[k] * 100) / 100);
 
-		if (chartStock) try {
-			chartStock.destroy();
-		} catch (e) {}
+		if (chartStock) try { chartStock.destroy(); } catch (_) {}
 		chartStock = new Chart(ctx, {
 			type: 'bar',
 			data: {
 				labels,
-				datasets: [{
-					label: 'Net units (in-out)',
-					data,
-					borderWidth: 0,
-					backgroundColor: 'rgba(27,133,236,0.85)'
-				}]
+				datasets: [
+					{
+						label: 'Stock In',
+						data: inData,
+						backgroundColor: 'rgba(34,197,94,0.80)',
+						borderRadius: 4,
+						borderSkipped: false
+					},
+					{
+						label: 'Stock Out',
+						data: outData,
+						backgroundColor: 'rgba(239,68,68,0.75)',
+						borderRadius: 4,
+						borderSkipped: false
+					}
+				]
 			},
 			options: {
 				responsive: true,
 				maintainAspectRatio: false,
+				interaction: { mode: 'index', intersect: false },
 				scales: {
-					y: {
-						beginAtZero: true
-					}
+					x: {
+						grid: { display: false },
+						ticks: { maxTicksLimit: daysBack <= 14 ? daysBack : 10, font: { size: 11 } }
+					},
+					y: { beginAtZero: true, ticks: { font: { size: 11 } } }
 				},
 				plugins: {
-					legend: {
-						display: false
+					legend: { display: true, position: 'top', labels: { usePointStyle: true, boxWidth: 8, padding: 12, font: { size: 12 } } },
+					tooltip: {
+						callbacks: {
+							afterBody: (items) => {
+								const inV  = items.find(i => i.dataset.label === 'Stock In')?.parsed?.y  || 0;
+								const outV = items.find(i => i.dataset.label === 'Stock Out')?.parsed?.y || 0;
+								return [`Net: ${inV - outV >= 0 ? '+' : ''}${(inV - outV).toFixed(1)}`];
+							}
+						}
 					}
 				}
 			}
 		});
-
 	} catch (e) {
 		console.error('renderStockChart err', e);
-
-		if (chartStock) try {
-			chartStock.destroy();
-			chartStock = null;
-		} catch (e) {}
+		if (chartStock) try { chartStock.destroy(); chartStock = null; } catch (_) {}
 	}
 }
 
