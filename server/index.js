@@ -934,20 +934,50 @@ app.post('/api/ingredients/:id/stock', authMiddleware, async (req, res) => {
 });
 app.get('/api/activity', authMiddleware, async (req, res) => {
 	try {
-		const page = Math.max(1, Number(req.query.page || 1));
+		const page  = Math.max(1, Number(req.query.page  || 1));
 		const limit = Math.max(1, Math.min(2000, Number(req.query.limit || 50)));
 		const offset = (page - 1) * limit;
-		const [rows] = await pool.query(`SELECT a.id, a.ingredient_id, a.user_id, a.action, a.text, a.time, u.username as username, i.name as ingredient_name
+
+		// Optional date-range filter (YYYY-MM-DD strings sent by the frontend)
+		const startParam = req.query.start || null; // e.g. '2026-03-09'
+		const endParam   = req.query.end   || null;
+
+		const conditions = [];
+		const params     = [];
+
+		if (startParam) {
+			// Cover the whole start day in UTC
+			conditions.push('a.time >= ?');
+			params.push(startParam + ' 00:00:00');
+		}
+		if (endParam) {
+			conditions.push('a.time <= ?');
+			params.push(endParam + ' 23:59:59');
+		}
+
+		const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+
+		const [rows] = await pool.query(
+			`SELECT a.id, a.ingredient_id, a.user_id, a.action, a.text, a.time,
+			        u.username AS username, i.name AS ingredient_name
        FROM activity a
        LEFT JOIN users u ON u.id = a.user_id
        LEFT JOIN ingredients i ON i.id = a.ingredient_id
+			 ${where}
        ORDER BY a.time DESC
-       LIMIT ? OFFSET ?`, [limit, offset]);
-		const [count] = await pool.query('SELECT COUNT(*) as cnt FROM activity');
+			 LIMIT ? OFFSET ?`,
+			[...params, limit, offset]
+		);
+
+		const [count] = await pool.query(
+			`SELECT COUNT(*) AS cnt FROM activity a ${where}`,
+			params
+		);
+
 		res.json({
 			items: rows,
 			meta: {
-				total: (count && count[0] ? count[0].cnt : 0),
+				total: count && count[0] ? count[0].cnt : 0,
 				page,
 				limit,
 				totalPages: Math.ceil((count && count[0] ? count[0].cnt : 0) / limit)
@@ -955,9 +985,7 @@ app.get('/api/activity', authMiddleware, async (req, res) => {
 		});
 	} catch (e) {
 		console.error('GET /api/activity err', e);
-		res.status(500).json({
-			error: 'Server error'
-		});
+		res.status(500).json({ error: 'Server error' });
 	}
 });
 

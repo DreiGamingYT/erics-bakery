@@ -1,6 +1,6 @@
 /* app.js */
 
-const INVENTORY_PAGE_LIMIT = 10;
+const INVENTORY_PAGE_LIMIT = 5;
 
 (function() {
 	const DISABLED = '[features-disabled]';
@@ -2241,63 +2241,6 @@ function _wireRangePills(containerId, callback) {
 	});
 }
 
-/* async function fetchAllIngredientsMap() {
-	try {
-		const resp = await apiFetch('/api/ingredients?limit=1000&page=1');
-		const items = (resp && resp.items) ? resp.items : [];
-		const map = {};
-		items.forEach(i => {
-			map[i.id] = i;
-		});
-		return {
-			items,
-			map
-		};
-	} catch (e) {
-		console.error('fetchAllIngredientsMap err', e);
-
-		const fallback = (DB && DB.ingredients) ? DB.ingredients : [];
-		const map = {};
-		fallback.forEach(i => map[i.id] = i);
-		return {
-			items: fallback,
-			map
-		};
-	}
-} */
-
-/* async function renderActivity(limit = 6) {
-
-	const container = q('recentActivity');
-	if (!container) return;
-	container.innerHTML = '<li class="muted">Loading…</li>';
-	try {
-		const resp = await apiFetch(`/api/activity?limit=${limit}`);
-		const items = (resp && resp.items) ? resp.items : [];
-		if (items.length === 0) {
-			container.innerHTML = '<li class="muted">No recent activity</li>';
-			return;
-		}
-		container.innerHTML = items.slice(0, limit).map(a => {
-			const time = a.time ? new Date(a.time).toLocaleString() : '';
-
-			const left = escapeHtml(a.text || a.ingredient_name || '');
-			return `<li><div>${left}</div><div class="muted small">${escapeHtml(time)}</div></li>`;
-		}).join('');
-	} catch (e) {
-		console.error('renderActivity err', e);
-		container.innerHTML = '<li class="muted">Failed to load activity</li>';
-	}
-} */
-
-/* function _parseQtyFromText(text) {
-	if (!text) return 0;
-
-	const m = text.match(/(\d+(?:\.\d+)?)/);
-	if (!m) return 0;
-	return parseFloat(m[1]) || 0;
-} */
-
 function debounce(fn, wait = 250) {
 	let t = null;
 	return function(...args) {
@@ -2415,7 +2358,6 @@ async function renderIngredientCards(page = 1, limit = INVENTORY_PAGE_LIMIT) {
             <th style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06)">Unit</th>
             <th style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06)">Threshold</th>
             <th style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06)">Min</th>
-            <th style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06)">Cost/unit</th>
             <th style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06)">In</th>
             <th style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06)">Out</th>
             <th style="padding:8px;border-bottom:1px solid rgba(0,0,0,0.06)">Actions</th>
@@ -2479,7 +2421,6 @@ async function renderIngredientCards(page = 1, limit = INVENTORY_PAGE_LIMIT) {
         <td data-label="Unit" style="padding:10px;vertical-align:middle">${isMaterial ? escapeHtml(i.unit||'') : ''}</td>
         <td data-label="Threshold" style="padding:10px;vertical-align:middle">${isMaterial ? threshold : ''}</td>
         <td data-label="Min" style="padding:10px;vertical-align:middle">${isMaterial ? `<input class="min-input" type="number" value="${i.min_qty||0}" step="0.01" style="width:80px" />` : ''}</td>
-        <td data-label="Cost/unit" style="padding:10px;vertical-align:middle">${isMaterial && i.unit_cost != null ? `<span class="muted small">₱${Number(i.unit_cost).toFixed(2)}</span>` : (isMaterial ? '<span class="muted small" style="opacity:.4">—</span>' : '')}</td>
         <td data-label="In" style="padding:10px;vertical-align:middle"><input class="in-input" type="number" step="0.01" style="width:90px" /></td>
         <td data-label="Out" style="padding:10px;vertical-align:middle"><input class="out-input" type="number" step="0.01" style="width:90px" /></td>
         <td data-label="Actions" style="padding:10px;vertical-align:middle">
@@ -3075,12 +3016,18 @@ async function renderInventoryActivity(limit = 30) {
 		const resp = await apiFetch(`/api/activity?limit=${limit}&start=${selectedDate}&end=${selectedDate}`);
 		const allItems = (resp && resp.items) ? resp.items : [];
 
-		const dayStart = new Date(selectedDate + 'T00:00:00');
-		const dayEnd   = new Date(selectedDate + 'T23:59:59.999');
+		// Backend already filters by date via ?start=&end=
+		// Client-side guard: compare the LOCAL date string of each item's time
+		// so timezone differences between the server (UTC) and browser never
+		// cause items to disappear.
 		const items = allItems.filter(it => {
 			if (!it.time) return false;
-			const d = new Date(it.time);
-			return d >= dayStart && d <= dayEnd;
+			// Convert the timestamp to the browser's local YYYY-MM-DD for comparison
+			const d = (it.time instanceof Date) ? it.time : new Date(it.time);
+			const localDate = d.getFullYear() + '-' +
+				String(d.getMonth() + 1).padStart(2, '0') + '-' +
+				String(d.getDate()).padStart(2, '0');
+			return localDate === selectedDate;
 		}).slice(0, limit);
 
 		if (!items.length) {
