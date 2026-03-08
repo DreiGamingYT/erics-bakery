@@ -17,7 +17,7 @@ app.use(cookieParser());
 
 app.use(express.static(path.join(__dirname, '..', 'frontend')));
 
-const frontendOrigin = process.env.FRONTEND_ORIGIN || 'http://localhost:3000';
+const frontendOrigin = process.env.FRONTEND_ORIGIN || 'https://erics-bakery.vercel.app';
 
 app.use(cors({
 	origin: frontendOrigin, 
@@ -1459,7 +1459,7 @@ app.post('/api/auth/magic-link/request', async (req, res) => {
 		}
 
 		// ── 6. Send email ───────────────────────────────────────────────────────
-		const frontendBase = (process.env.FRONTEND_ORIGIN || 'http://localhost:3000').replace(/\/$/, '');
+		const frontendBase = (process.env.FRONTEND_ORIGIN || 'https://erics-bakery.vercel.app').replace(/\/$/, '');
 		const magicLink    = `${frontendBase}/?mltoken=${rawToken}`;
 		let emailError = null;
 		try {
