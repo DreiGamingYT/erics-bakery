@@ -2197,28 +2197,7 @@ body {
   }
   .auth-card {
     max-width: 100%;
-    width: 100%;
-    box-sizing: border-box;
-    padding: 18px 16px;
-    overflow: hidden;
-  }
-  .auth-panels {
-    width: 200%;
-    overflow: hidden;
-  }
-  .auth-panel {
-    width: 50%;
-    box-sizing: border-box;
-    min-width: 0;
-    overflow: hidden;
-  }
-  .landing-overlay {
     padding: 16px;
-    overflow-x: hidden;
-  }
-  .forms-inner {
-    padding: 0;
-    width: 100%;
   }
   .top-center {
     display: none;
@@ -3609,124 +3588,35 @@ html {
   }
 }
 
-/* Mobile / narrow: stack columns, fix overflow, constrain auth card */
+/* Mobile / narrow: stack columns and use vertical swap (accordion-like) */
 @media (max-width: 820px) {
-  /* Overlay: center content, allow scroll, safe padding */
-  .landing-overlay {
-    padding: 16px;
-    align-items: flex-start;
-    overflow-y: auto;
-    overflow-x: hidden;
-  }
-
-  /* Split becomes single column, full width, no overflow */
   .landing-split {
     grid-template-columns: 1fr !important;
-    gap: 0 !important;
-    width: 100%;
-    max-width: 100%;
-    overflow: hidden;
+    gap: 12px; /* slightly smaller gap on mobile */
   }
 
-  /* Hide the decorative visual panel on mobile */
-  .landing-visual {
-    display: none !important;
-  }
-
-  /* Forms column takes full width, no overflow */
+  /* make sure stacked children take full width */
+  .landing-visual,
   .landing-forms {
     width: 100%;
-    max-width: 100%;
     display: block;
-    transform: none !important;
-    overflow: hidden;
+    transform: translateY(0);
   }
 
-  /* forms-inner: center the card, no side padding bleed */
-  .forms-inner {
-    padding: 0;
-    width: 100%;
+  /* When signup-mode: move visual down 100% of its own height and forms up — simple, robust */
+  .landing-overlay.signup-mode .landing-visual {
+    transform: translateY(100%);
+    opacity: 0.97;
+  }
+  .landing-overlay.signup-mode .landing-forms {
+    transform: translateY(0);
+    opacity: 1;
   }
 
-  /* Auth card: full width, proper box model, no overflow */
-  .auth-card {
-    width: 100%;
-    max-width: 100%;
-    box-sizing: border-box;
-    padding: 18px 16px;
-    border-radius: 12px;
-    overflow: hidden;
-    margin: 0;
-  }
-
-  /* CRITICAL: auth-panels is width:200% for the slide animation.
-     On mobile this causes double-width overflow. Clip it to the card. */
-  .auth-panels {
-    width: 200%;
-    max-width: 200%;
-    overflow: hidden;
-  }
-
-  /* Each panel is 50% of auth-panels = 100% of auth-card */
-  .auth-panel {
-    width: 50%;
-    box-sizing: border-box;
-    padding: 4px 2px;
-    min-width: 0;
-    overflow: hidden;
-  }
-
-  /* Auth form fields: full width, no overflow */
-  .auth-form {
-    width: 100%;
-    box-sizing: border-box;
-  }
-  .auth-form input,
-  .auth-form select {
-    width: 100%;
-    box-sizing: border-box;
-    max-width: 100%;
-  }
-
-  /* Auth title readable on small screens */
-  .auth-title h2 {
-    font-size: 1.3rem;
-  }
-
-  /* No horizontal swap animation on mobile — just show/hide */
-  .landing-overlay.signup-mode .landing-visual,
-  .landing-overlay:not(.signup-mode) .landing-visual {
-    display: none !important;
-  }
-  .landing-overlay.signup-mode .landing-forms,
-  .landing-overlay:not(.signup-mode) .landing-forms {
-    transform: none !important;
-    opacity: 1 !important;
-  }
-}
-
-/* Extra small phones */
-@media (max-width: 400px) {
-  .landing-overlay {
-    padding: 10px;
-  }
-  .auth-card {
-    padding: 16px 12px;
-    border-radius: 10px;
-  }
-  .auth-panel {
-    padding: 2px 0;
-  }
-  .auth-title h2 {
-    font-size: 1.15rem;
-  }
-  .auth-form .field-label {
-    font-size: 12px;
-  }
-  .auth-form input,
-  .auth-form select {
-    font-size: 15px; /* prevent iOS zoom on focus */
-    padding: 9px 10px;
+  /* While animating, disable pointer events for off-screen panel */
+  .landing-overlay.signup-mode .landing-visual[aria-hidden="true"],
+  .landing-overlay:not(.signup-mode) .landing-forms[aria-hidden="true"] {
+    pointer-events: none;
   }
 }
 
@@ -3739,14 +3629,6 @@ html {
   visibility: visible !important;
   opacity: 1 !important;
   pointer-events: auto !important;
-  /* On mobile the visual is always hidden — don't fight that rule */
-}
-@media (max-width: 820px) {
-  .landing-visual[hidden],
-  .landing-visual.hidden,
-  .landing-visual {
-    display: none !important;
-  }
 }
 /* ============================================================
    COLOR PALETTE THEMES
@@ -4359,4 +4241,520 @@ html {
   .page-actions:not(#view-inventory .page-actions) { flex-wrap: wrap; gap: 6px !important; }
   .page-actions .btn { min-height: 40px; font-size: 13px; }
   #batchStockBtn { order: -1; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LANDING OVERLAY — REDESIGN
+   One unified card: blue brand left | white form right
+   Pure CSS override — all IDs, classes, JS behaviour completely unchanged.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Backdrop ─────────────────────────────────────────────────────────────── */
+.landing-overlay {
+  background: linear-gradient(145deg, #030b1c 0%, #061428 45%, #0b2060 100%) !important;
+  padding: 24px !important;
+  overflow: hidden !important;
+}
+/* Soft glow orbs in background */
+.landing-overlay::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(ellipse 60% 70% at 20% 55%, rgba(27,133,236,.25) 0%, transparent 65%),
+    radial-gradient(ellipse 45% 45% at 75% 20%, rgba(62,169,245,.14) 0%, transparent 60%),
+    radial-gradient(ellipse 30% 40% at 80% 85%, rgba(6,61,162,.30) 0%, transparent 65%);
+}
+
+/* ── One unified card container ──────────────────────────────────────────── */
+.landing-split {
+  max-width: 960px !important;
+  grid-template-columns: 340px 1fr !important;
+  gap: 0 !important;
+  border-radius: 22px !important;
+  overflow: hidden !important;
+  box-shadow:
+    0 50px 100px rgba(2,5,18,.70),
+    0 0 0 1px rgba(255,255,255,.07) !important;
+  position: relative !important;
+  z-index: 1 !important;
+  align-items: stretch !important;
+  min-height: 580px !important;
+}
+
+/* ── LEFT — blue brand panel ─────────────────────────────────────────────── */
+.landing-visual {
+  background: linear-gradient(165deg,
+    #063da2 0%,
+    #1055c4 35%,
+    #1b85ec 72%,
+    #3ea9f5 100%) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 44px 30px 36px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+/* Wavy blobs at bottom for depth */
+.landing-visual::before {
+  content: '';
+  position: absolute;
+  bottom: -80px; left: -30%; right: -30%;
+  height: 260px;
+  background: rgba(255,255,255,.06);
+  border-radius: 50%;
+  pointer-events: none;
+}
+.landing-visual::after {
+  content: '';
+  position: absolute;
+  bottom: -110px; left: -50%; right: -50%;
+  height: 210px;
+  background: rgba(255,255,255,.04);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+/* ── BIG transparent bread SVG watermark ─────────────────────────────────── */
+.visual-inner {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 0 !important;
+  text-align: center !important;
+  padding: 0 !important;
+  position: relative !important;
+  z-index: 2 !important;
+  width: 100% !important;
+}
+/* Bread watermark via generated content */
+.visual-inner::before {
+  content: '';
+  display: block;
+  width: 230px;
+  height: 190px;
+  flex-shrink: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 260 220'%3E%3C!-- main loaf body --%3E%3Cpath d='M18 148 Q14 68 130 40 Q246 68 242 148 Q240 180 130 184 Q20 180 18 148Z' fill='rgba(255,255,255,0.11)'/%3E%3C!-- top highlight dome --%3E%3Cpath d='M46 130 Q50 64 130 46 Q210 64 214 130' fill='none' stroke='rgba(255,255,255,0.12)' stroke-width='1.5'/%3E%3C!-- base shadow ellipse --%3E%3Cellipse cx='130' cy='154' rx='112' ry='28' fill='rgba(255,255,255,0.07)'/%3E%3C!-- score lines --%3E%3Cpath d='M78 100 Q100 88 124 100' stroke='rgba(255,255,255,0.30)' stroke-width='3.5' fill='none' stroke-linecap='round'/%3E%3Cpath d='M136 94 Q158 82 182 94' stroke='rgba(255,255,255,0.30)' stroke-width='3.5' fill='none' stroke-linecap='round'/%3E%3Cpath d='M60 130 Q130 118 200 130' stroke='rgba(255,255,255,0.18)' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3Cpath d='M46 150 Q130 141 214 150' stroke='rgba(255,255,255,0.10)' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C!-- sesame seeds --%3E%3Cellipse cx='102' cy='70' rx='6' ry='2.8' transform='rotate(-18 102 70)' fill='rgba(255,255,255,0.22)'/%3E%3Cellipse cx='130' cy='62' rx='6' ry='2.8' transform='rotate(8 130 62)' fill='rgba(255,255,255,0.22)'/%3E%3Cellipse cx='158' cy='68' rx='6' ry='2.8' transform='rotate(-14 158 68)' fill='rgba(255,255,255,0.22)'/%3E%3Cellipse cx='116' cy='80' rx='5' ry='2.2' transform='rotate(22 116 80)' fill='rgba(255,255,255,0.16)'/%3E%3Cellipse cx='144' cy='76' rx='5' ry='2.2' transform='rotate(-28 144 76)' fill='rgba(255,255,255,0.16)'/%3E%3C!-- steam wisps --%3E%3Cpath d='M90 34 C88 22 95 13 93 3' stroke='rgba(255,255,255,0.25)' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3Cpath d='M130 26 C128 14 135 5 133 -5' stroke='rgba(255,255,255,0.25)' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3Cpath d='M170 34 C168 22 175 13 173 3' stroke='rgba(255,255,255,0.25)' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3C!-- wheat left --%3E%3Cg stroke='rgba(255,255,255,0.20)' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M30 164 L30 190'/%3E%3Cellipse cx='30' cy='173' rx='7' ry='4' transform='rotate(-30 30 173)' fill='rgba(255,255,255,0.14)' stroke='none'/%3E%3Cellipse cx='30' cy='165' rx='7' ry='4' transform='rotate(30 30 165)' fill='rgba(255,255,255,0.14)' stroke='none'/%3E%3C/g%3E%3C!-- wheat right --%3E%3Cg stroke='rgba(255,255,255,0.20)' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M230 164 L230 190'/%3E%3Cellipse cx='230' cy='173' rx='7' ry='4' transform='rotate(30 230 173)' fill='rgba(255,255,255,0.14)' stroke='none'/%3E%3Cellipse cx='230' cy='165' rx='7' ry='4' transform='rotate(-30 230 165)' fill='rgba(255,255,255,0.14)' stroke='none'/%3E%3C/g%3E%3C!-- rolling pin accent --%3E%3Crect x='62' y='196' width='136' height='10' rx='5' fill='rgba(255,255,255,0.09)'/%3E%3Crect x='56' y='194' width='12' height='14' rx='6' fill='rgba(255,255,255,0.10)'/%3E%3Crect x='192' y='194' width='12' height='14' rx='6' fill='rgba(255,255,255,0.10)'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  margin-bottom: 8px;
+}
+
+/* Hide the original hero image — bread is drawn via CSS above */
+.visual-hero { display: none !important; }
+
+/* Logo */
+.visual-logo {
+  position: static !important;
+  width: 72px !important;
+  height: 72px !important;
+  border-radius: 18px !important;
+  object-fit: cover !important;
+  padding: 0 !important;
+  box-shadow: 0 10px 32px rgba(0,0,0,.32) !important;
+  margin-bottom: 12px;
+  order: -1;
+}
+
+/* Caption */
+.visual-caption {
+  position: relative;
+  z-index: 2;
+  margin-top: 10px;
+}
+.visual-caption h1 {
+  font-size: 20px !important;
+  font-weight: 800 !important;
+  color: #fff !important;
+  margin: 0 0 4px !important;
+  letter-spacing: .4px;
+  text-shadow: 0 2px 12px rgba(0,0,0,.28);
+}
+.visual-caption p.muted {
+  color: rgba(255,255,255,.68) !important;
+  font-size: 11px !important;
+  margin: 0 !important;
+  letter-spacing: 1.5px;
+  text-transform: uppercase !important;
+}
+
+/* Recent profiles */
+#recentProfiles {
+  position: relative;
+  z-index: 2;
+  margin-top: 18px !important;
+  margin-bottom: 0 !important;
+}
+
+/* ── RIGHT — white form panel ────────────────────────────────────────────── */
+.landing-forms {
+  background: #ffffff !important;
+  border-radius: 0 !important;
+  position: relative !important;
+}
+.theme-dark .landing-overlay { background: linear-gradient(145deg,#030b1c,#061428,#0b2060) !important; }
+.theme-dark .landing-forms   { background: #0c1828 !important; }
+
+.forms-inner {
+  height: 100% !important;
+  padding: 40px 36px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  box-sizing: border-box !important;
+}
+
+/* auth-card is now transparent — forms panel provides the bg */
+.auth-card {
+  background: transparent !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  max-width: 100% !important;
+  color: var(--text) !important;
+  overflow: hidden !important;
+}
+.theme-dark .auth-card { color: #d6e8f9 !important; }
+
+/* Keep the .signup-mode translateY off (we don't want it anymore) */
+.landing-overlay.signup-mode .auth-card { transform: none !important; }
+
+/* ── Auth panels — preserve the sliding mechanism exactly ─────────────────── */
+.auth-panels {
+  display: flex !important;
+  width: 200% !important;
+  transform: translateX(0) !important;
+  transition: transform 480ms cubic-bezier(.22,.9,.32,1) !important;
+  will-change: transform !important;
+}
+.auth-panel {
+  width: 50% !important;
+  box-sizing: border-box !important;
+  padding: 0 !important;
+}
+.auth-panel.hidden {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+.landing-overlay.signup-mode .auth-panels       { transform: translateX(-50%) !important; }
+.landing-overlay .auth-panel                    { transform: translateY(0) !important; }
+.landing-overlay.signup-mode .auth-panel:first-child { transform: translateX(-6px) !important; opacity: .96 !important; }
+.landing-overlay.signup-mode .auth-panel:last-child  { transform: translateX(0)    !important; opacity: 1   !important; }
+.landing-overlay.signup-mode .landing-forms[aria-hidden="true"],
+.landing-overlay:not(.signup-mode) .landing-visual[aria-hidden="true"] { pointer-events: none !important; }
+
+/* ── Column swap animation ────────────────────────────────────────────────── */
+.landing-visual, .landing-forms {
+  will-change: transform, opacity !important;
+  transition: transform 520ms cubic-bezier(.22,.9,.32,1), opacity 320ms ease !important;
+  z-index: 2 !important;
+}
+.landing-overlay.signup-mode .landing-visual {
+  transform: translateX(var(--swap-shift, 340px)) !important;
+  opacity: .95 !important;
+}
+.landing-overlay.signup-mode .landing-forms {
+  transform: translateX(calc(-1 * var(--swap-shift, 340px))) !important;
+}
+.landing-overlay:not(.signup-mode) .landing-visual,
+.landing-overlay:not(.signup-mode) .landing-forms { transform: translateX(0) !important; }
+
+/* ── Form typography & fields ────────────────────────────────────────────── */
+.auth-head { margin-bottom: 20px !important; }
+.auth-title h2 {
+  font-size: 23px !important;
+  font-weight: 800 !important;
+  color: #063da2 !important;
+  margin: 0 0 3px !important;
+}
+.theme-dark .auth-title h2 { color: #3ea9f5 !important; }
+.auth-title .small {
+  color: #64748b !important;
+  font-size: 13px !important;
+}
+.theme-dark .auth-title .small { color: rgba(160,200,255,.55) !important; }
+
+.auth-form .field .field-label {
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  color: #64748b !important;
+  text-transform: uppercase !important;
+  letter-spacing: .6px !important;
+  padding-top: 4px !important;
+}
+.theme-dark .auth-form .field .field-label { color: rgba(160,200,255,.55) !important; }
+
+/* Remember-me row label */
+.auth-form label[style*="flex-direction:row"] .field-label {
+  color: #475569 !important;
+  font-weight: 600 !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  font-size: 13px !important;
+  padding: 0 !important;
+}
+.theme-dark .auth-form label[style*="flex-direction:row"] .field-label { color: rgba(160,200,255,.65) !important; }
+
+.auth-form input[type="text"],
+.auth-form input[type="email"],
+.auth-form input[type="password"],
+.auth-form select {
+  height: 46px !important;
+  border-radius: 10px !important;
+  border: 1.5px solid #e2e8f0 !important;
+  background: #f8fafc !important;
+  color: #12202f !important;
+  font-size: 14px !important;
+  padding: 10px 14px !important;
+  transition: border-color .15s, box-shadow .15s !important;
+  outline: none !important;
+}
+.theme-dark .auth-form input,
+.theme-dark .auth-form select {
+  background: #111e32 !important;
+  border-color: rgba(255,255,255,.1) !important;
+  color: #d6e8f9 !important;
+}
+.auth-form input:focus,
+.auth-form select:focus {
+  border-color: #1b85ec !important;
+  background: #fff !important;
+  box-shadow: 0 0 0 4px rgba(27,133,236,.12) !important;
+}
+.theme-dark .auth-form input:focus,
+.theme-dark .auth-form select:focus {
+  background: #152030 !important;
+  box-shadow: 0 0 0 4px rgba(62,169,245,.12) !important;
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────────── */
+.auth-card .form-actions {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 8px !important;
+  padding-top: 16px !important;
+}
+
+/* Primary CTA — gradient blue, full width */
+.auth-card .btn.primary,
+#overlaySignInBtn,
+#overlaySignUpBtn {
+  background: linear-gradient(135deg, #063da2 0%, #1b85ec 100%) !important;
+  color: #fff !important;
+  border: none !important;
+  height: 48px !important;
+  width: 100% !important;
+  font-size: 15px !important;
+  font-weight: 800 !important;
+  letter-spacing: .5px !important;
+  box-shadow: 0 6px 22px rgba(27,133,236,.40) !important;
+  transition: filter .15s, transform .1s, box-shadow .15s !important;
+  flex: unset !important;
+}
+.auth-card .btn.primary:hover,
+#overlaySignInBtn:hover,
+#overlaySignUpBtn:hover {
+  filter: brightness(1.09) !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 10px 28px rgba(27,133,236,.48) !important;
+}
+
+/* Ghost / secondary buttons */
+.auth-card .btn.ghost,
+#forgotPasswordBtn,
+#magicLinkBtn,
+#overlayToSignup,
+#overlayBackToLogin {
+  background: transparent !important;
+  border: 1.5px solid #dde4ee !important;
+  color: #3b5176 !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  flex: 1 !important;
+  min-width: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  padding: 10px 12px !important;
+  white-space: nowrap !important;
+  transition: border-color .14s, color .14s, background .14s !important;
+}
+.auth-card .btn.ghost:hover,
+#forgotPasswordBtn:hover,
+#magicLinkBtn:hover {
+  border-color: #1b85ec !important;
+  color: #1b85ec !important;
+  background: rgba(27,133,236,.05) !important;
+}
+.theme-dark .auth-card .btn.ghost,
+.theme-dark #forgotPasswordBtn,
+.theme-dark #magicLinkBtn,
+.theme-dark #overlayToSignup,
+.theme-dark #overlayBackToLogin {
+  border-color: rgba(255,255,255,.13) !important;
+  color: rgba(160,200,255,.70) !important;
+}
+.theme-dark .auth-card .btn.ghost:hover {
+  border-color: #3ea9f5 !important;
+  color: #3ea9f5 !important;
+  background: rgba(62,169,245,.08) !important;
+}
+
+/* Wrapper div holding secondary buttons */
+#ml-secondary-row,
+.auth-card .form-actions > div:not([id]) {
+  display: flex !important;
+  gap: 6px !important;
+  flex-wrap: wrap !important;
+  width: 100% !important;
+}
+
+/* Sign-in/up should NOT be flex:1 */
+#overlaySignInBtn, #overlaySignUpBtn { flex: unset !important; }
+
+/* Focus ring */
+.auth-card .btn:focus {
+  outline: none !important;
+  box-shadow: 0 0 0 4px rgba(27,133,236,.22) !important;
+}
+
+/* ── Footer row ───────────────────────────────────────────────────────────── */
+.auth-foot {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  margin-top: 16px !important;
+  padding-top: 14px !important;
+  border-top: 1px solid #f0f3f8 !important;
+  gap: 10px !important;
+  flex-wrap: wrap !important;
+}
+.theme-dark .auth-foot { border-top-color: rgba(255,255,255,.07) !important; }
+.auth-foot .muted { color: #64748b !important; font-size: 13px !important; }
+.theme-dark .auth-foot .muted { color: rgba(160,200,255,.5) !important; }
+.auth-foot .btn.ghost.small,
+#overlayToSignup,
+#overlayBackToLogin {
+  flex: unset !important;
+  background: rgba(27,133,236,.07) !important;
+  border-color: transparent !important;
+  color: #1b85ec !important;
+  font-weight: 700 !important;
+  padding: 8px 14px !important;
+  font-size: 13px !important;
+}
+.theme-dark .auth-foot .btn.ghost.small,
+.theme-dark #overlayToSignup,
+.theme-dark #overlayBackToLogin {
+  background: rgba(62,169,245,.10) !important;
+  color: #3ea9f5 !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE — MOBILE / TABLET
+   ≤900px: blue strip header on top, white form fills rest of screen
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (max-width: 900px) {
+  .landing-overlay {
+    padding: 0 !important;
+    background: #ffffff !important;
+    align-items: stretch !important;
+    overflow-y: auto !important;
+  }
+  .landing-overlay::before { display: none !important; }
+  .theme-dark .landing-overlay { background: #0c1828 !important; }
+
+  .landing-split {
+    grid-template-columns: 1fr !important;
+    grid-template-rows: auto 1fr !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    min-height: 100dvh !important;
+    overflow-y: unset !important;
+    max-width: 100% !important;
+  }
+
+  /* ── Blue strip — compact horizontal header ── */
+  .landing-visual {
+    display: flex !important;
+    border-radius: 0 !important;
+    padding: 16px 20px !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 14px !important;
+    min-height: unset !important;
+  }
+  .landing-visual::before,
+  .landing-visual::after { display: none !important; }
+
+  /* Horizontal visual-inner */
+  .visual-inner {
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 12px !important;
+    justify-content: flex-start !important;
+    width: 100% !important;
+  }
+  /* Hide the bread on mobile — keep header clean */
+  .visual-inner::before { display: none !important; }
+
+  .visual-logo {
+    width: 46px !important;
+    height: 46px !important;
+    border-radius: 12px !important;
+    margin-bottom: 0 !important;
+    order: 0 !important;
+    flex-shrink: 0 !important;
+  }
+  .visual-caption { margin-top: 0 !important; text-align: left !important; }
+  .visual-caption h1 { font-size: 17px !important; margin-bottom: 1px !important; }
+  .visual-caption p.muted { display: none !important; }
+  #recentProfiles { display: none !important; }
+
+  /* ── White form area ── */
+  .landing-forms {
+    border-radius: 0 !important;
+    background: #fff !important;
+    overflow-y: auto !important;
+  }
+  .theme-dark .landing-forms { background: #0c1828 !important; }
+  .forms-inner {
+    padding: 30px 22px 48px !important;
+    align-items: flex-start !important;
+    height: auto !important;
+    min-height: 0 !important;
+  }
+  .auth-card { max-width: 100% !important; width: 100% !important; }
+
+  /* On mobile the column-swap animation doesn't apply — just slide panels */
+  .landing-overlay.signup-mode .landing-visual { transform: none !important; opacity: 1 !important; }
+  .landing-overlay.signup-mode .landing-forms  { transform: none !important; }
+}
+
+@media (max-width: 480px) {
+  .landing-visual { padding: 14px 16px !important; }
+  .visual-logo { width: 40px !important; height: 40px !important; }
+  .visual-caption h1 { font-size: 15px !important; }
+  .forms-inner { padding: 24px 16px 44px !important; }
+  .auth-title h2 { font-size: 20px !important; }
+  .auth-foot {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 8px !important;
+  }
+  .auth-foot .btn.ghost.small,
+  #overlayToSignup,
+  #overlayBackToLogin { text-align: center !important; width: 100% !important; }
+  #forgotPasswordBtn, #magicLinkBtn { font-size: 12px !important; padding: 9px 8px !important; }
 }
