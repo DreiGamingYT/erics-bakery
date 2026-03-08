@@ -463,7 +463,7 @@ body {
 /* small visual polish while swapping */
 .landing-overlay.signup-mode .landing-visual {
   /* translate right by computed CSS var --swap-shift (set by JS) */
-  transform: translateX(var(--swap-shift, 560px));
+  transform: translateX(var(--swap-shift, 620px));
   opacity: 0.98;
 }
 
@@ -4251,7 +4251,7 @@ html {
 
 /* ── Backdrop ─────────────────────────────────────────────────────────────── */
 .landing-overlay {
-  background: linear-gradient(145deg, #030b1c 0%, #061428 45%, #0b2060 100%) !important;
+  background: linear-gradient(145deg, #08499e 0%, #1366bf 45%, #2095f5 100%) !important;
   padding: 24px !important;
   overflow: hidden !important;
 }
@@ -4356,7 +4356,6 @@ html {
   width: 72px !important;
   height: 72px !important;
   border-radius: 18px !important;
-  object-fit: cover !important;
   padding: 0 !important;
   box-shadow: 0 10px 32px rgba(0,0,0,.32) !important;
   margin-bottom: 12px;
@@ -4556,7 +4555,6 @@ html {
   font-size: 15px !important;
   font-weight: 800 !important;
   letter-spacing: .5px !important;
-  box-shadow: 0 6px 22px rgba(27,133,236,.40) !important;
   transition: filter .15s, transform .1s, box-shadow .15s !important;
   flex: unset !important;
 }
