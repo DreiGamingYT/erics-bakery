@@ -1409,7 +1409,6 @@ app.post('/api/auth/magic-link/request', async (req, res) => {
 			await pool.query(`CREATE TABLE IF NOT EXISTS magic_links (
 				id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
 				user_id    INT NOT NULL,
-				email      VARCHAR(255) NOT NULL,
 				token_hash CHAR(64)     NOT NULL,
 				expires_at DATETIME     NOT NULL,
 				used       TINYINT(1)   NOT NULL DEFAULT 0,
@@ -1450,8 +1449,8 @@ app.post('/api/auth/magic-link/request', async (req, res) => {
 		const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
 		try {
 		await pool.query(
-			'INSERT INTO magic_links (user_id, email, token_hash, expires_at) VALUES (?, ?, ?, ?)',
-			[user.id, email, tokenHash, expiresAt]
+				'INSERT INTO magic_links (user_id, token_hash, expires_at) VALUES (?, ?, ?)',
+				[user.id, tokenHash, expiresAt]
 		);
 		} catch (e) {
 			console.error('[magic-link] INSERT token error:', e.message);
@@ -1898,12 +1897,21 @@ async function runStartupMigrations() {
 		console.log('[startup] schedules table ready');
 
 		// 4. magic_links table — passwordless sign-in (isolated so any earlier error can't skip it)
+		// If table exists with old 'email NOT NULL' schema, make it nullable so INSERTs work
+		try {
+			await conn.query(`ALTER TABLE magic_links MODIFY COLUMN email VARCHAR(255) DEFAULT NULL`);
+			console.log('[startup] magic_links.email made nullable');
+		} catch (e) {
+			// ER_BAD_FIELD_ERROR = column doesn't exist (already dropped/never added) — fine
+			if (e.code !== 'ER_BAD_FIELD_ERROR' && e.code !== 'ER_NO_SUCH_TABLE') {
+				console.warn('[startup] magic_links email alter (non-fatal):', e.message);
+			}
+		}
 		try {
 		await conn.query(`
 			CREATE TABLE IF NOT EXISTS magic_links (
 				id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
 				user_id    INT NOT NULL,
-				email      VARCHAR(255) NOT NULL,
 				token_hash CHAR(64)     NOT NULL,
 				expires_at DATETIME     NOT NULL,
 				used       TINYINT(1)   NOT NULL DEFAULT 0,

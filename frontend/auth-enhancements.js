@@ -15,8 +15,8 @@
 	// 1. IDLE AUTO-LOGOUT
 	// ═══════════════════════════════════════════════════════════════════════════
 
-	const IDLE_WARN_MS  = 25 * 60 * 1000; // 25 minutes → show warning modal
-	const IDLE_LIMIT_MS = 30 * 60 * 1000; // 30 minutes → force logout
+	const IDLE_WARN_MS  = 1 * 60 * 1000; // 25 minutes → show warning modal
+	const IDLE_LIMIT_MS = 5 * 60 * 1000; // 30 minutes → force logout
 	const WARN_SECONDS  = Math.round((IDLE_LIMIT_MS - IDLE_WARN_MS) / 1000); // countdown start (300s)
 
 	let idleWarnTimer     = null;
