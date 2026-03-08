@@ -1827,12 +1827,30 @@ async function runStartupMigrations() {
 		`);
 		console.log('[startup] user_sessions table ready');
 
-		// 2. notif_prefs column (ER_DUP_FIELDNAME = already exists, safe to ignore)
+		// 2. Optional user columns — add if missing, each isolated so one failure can't block others
+		try {
+			await conn.query(`ALTER TABLE users ADD COLUMN email VARCHAR(255) DEFAULT NULL`);
+			console.log('[startup] users.email column added');
+		} catch (e) {
+			if (e.code !== 'ER_DUP_FIELDNAME') console.warn('[startup] users.email:', e.message);
+		}
+		try {
+			await conn.query(`ALTER TABLE users ADD COLUMN phone VARCHAR(30) DEFAULT NULL`);
+			console.log('[startup] users.phone column added');
+		} catch (e) {
+			if (e.code !== 'ER_DUP_FIELDNAME') console.warn('[startup] users.phone:', e.message);
+		}
+		try {
+			await conn.query(`ALTER TABLE users ADD COLUMN updated_at DATETIME DEFAULT NULL`);
+			console.log('[startup] users.updated_at column added');
+		} catch (e) {
+			if (e.code !== 'ER_DUP_FIELDNAME') console.warn('[startup] users.updated_at:', e.message);
+		}
 		try {
 			await conn.query(`ALTER TABLE users ADD COLUMN notif_prefs JSON DEFAULT NULL`);
-			console.log('[startup] notif_prefs column added');
+			console.log('[startup] users.notif_prefs column added');
 		} catch (e) {
-			if (e.code !== 'ER_DUP_FIELDNAME') console.warn('[startup] notif_prefs:', e.message);
+			if (e.code !== 'ER_DUP_FIELDNAME') console.warn('[startup] users.notif_prefs:', e.message);
 		}
 
 		// 2b. token_version — used to invalidate all other sessions on password change
