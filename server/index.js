@@ -1385,23 +1385,28 @@ async function sendRoleChangeEmail(toEmail, userName, oldRole, newRole, changedB
 // ── Magic link: request ────────────────────────────────────────────────────
 app.post('/api/auth/magic-link/request', async (req, res) => {
 	const email = ((req.body && req.body.email) || '').trim().toLowerCase();
-	if (!email) return res.status(400).json({ error: 'email required' });
+	if (!email) return res.status(400).json({ error: 'Email is required.' });
 
 	const SAFE_RESPONSE = { ok: true, message: 'If this email is registered, a sign-in link has been sent.' };
 
 	try {
-		// Step 1: look up the user — if not found return safe response immediately
+		// ── 1. Look up user by email ──────────────────────────────────────────
+		let user = null;
+		try {
 		const [rows] = await pool.query(
 			'SELECT id, username, name, email FROM users WHERE email = ? LIMIT 1',
 			[email]
 		);
-		const user = rows && rows[0];
+			user = rows && rows[0] ? rows[0] : null;
+		} catch (e) {
+			console.error('[magic-link] user lookup error:', e.message);
+			return res.status(500).json({ error: `DB error (user lookup): ${e.message}` });
+		}
 		if (!user) return res.json(SAFE_RESPONSE);
 
-		// Step 2: ensure magic_links table exists (self-healing for first deploy)
+		// ── 2. Ensure magic_links table exists ────────────────────────────────
 		try {
-		await pool.query(`
-			CREATE TABLE IF NOT EXISTS magic_links (
+			await pool.query(`CREATE TABLE IF NOT EXISTS magic_links (
 				id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
 				user_id    INT NOT NULL,
 				email      VARCHAR(255) NOT NULL,
@@ -1409,58 +1414,64 @@ app.post('/api/auth/magic-link/request', async (req, res) => {
 				expires_at DATETIME     NOT NULL,
 				used       TINYINT(1)   NOT NULL DEFAULT 0,
 				created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-				UNIQUE INDEX idx_ml_token  (token_hash),
-				       INDEX idx_ml_user   (user_id),
+				UNIQUE INDEX idx_ml_token (token_hash),
+				INDEX idx_ml_user (user_id),
 				       INDEX idx_ml_expire (expires_at)
-			)
-			`);
-		} catch (tableErr) {
-			// 'already exists' codes are fine; permission errors are logged but non-fatal
-			console.warn('[magic-link] CREATE TABLE:', tableErr && tableErr.message ? tableErr.message : tableErr);
+			)`);
+		} catch (e) {
+			console.warn('[magic-link] CREATE TABLE (non-fatal):', e.message);
 		}
 
-		// Step 3: rate-limit — ignore if table still doesn't exist somehow
-		let recentCount = 0;
+		// ── 3. Rate-limit: max 1 request per 60 seconds ───────────────────────
 		try {
 			const [rr] = await pool.query(
 				'SELECT COUNT(*) AS n FROM magic_links WHERE user_id = ? AND created_at > NOW() - INTERVAL 60 SECOND AND used = 0',
 			[user.id]
 		);
-			recentCount = (rr && rr[0] && rr[0].n) ? Number(rr[0].n) : 0;
+			if (rr && rr[0] && Number(rr[0].n) > 0) {
+				return res.status(429).json({ error: 'A sign-in link was sent recently — please wait a minute.' });
+			}
 		} catch (e) {
-			if (e.code !== 'ER_NO_SUCH_TABLE') throw e;
-		}
-		if (recentCount > 0) {
-			return res.status(429).json({ error: 'A sign-in link was sent recently. Please wait a minute before trying again.' });
+			if (e.code !== 'ER_NO_SUCH_TABLE') {
+				console.warn('[magic-link] rate-limit check error (non-fatal):', e.message);
+			}
 		}
 
-		// Step 4: invalidate previous tokens
-		await pool.query('UPDATE magic_links SET used = 1 WHERE user_id = ? AND used = 0', [user.id])
-			.catch(e => { if (e.code !== 'ER_NO_SUCH_TABLE') throw e; });
+		// ── 4. Invalidate old tokens ──────────────────────────────────────────
+		try {
+			await pool.query('UPDATE magic_links SET used = 1 WHERE user_id = ? AND used = 0', [user.id]);
+		} catch (e) {
+			if (e.code !== 'ER_NO_SUCH_TABLE') console.warn('[magic-link] invalidate old tokens (non-fatal):', e.message);
+		}
 
-		// Step 5: create new token
+		// ── 5. Generate and store token ───────────────────────────────────────
 		const rawToken  = crypto.randomBytes(32).toString('hex');
 		const tokenHash = sha256(rawToken);
 		const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+		try {
 		await pool.query(
 			'INSERT INTO magic_links (user_id, email, token_hash, expires_at) VALUES (?, ?, ?, ?)',
 			[user.id, email, tokenHash, expiresAt]
 		);
+		} catch (e) {
+			console.error('[magic-link] INSERT token error:', e.message);
+			return res.status(500).json({ error: `DB error (insert token): ${e.message}` });
+		}
 
-		// Step 6: send email (non-blocking — SMTP failure never causes 500)
+		// ── 6. Send email (non-blocking) ─────────────────────────────────────
 		const frontendBase = (process.env.FRONTEND_ORIGIN || 'http://localhost:3000').replace(/\/$/, '');
 		const magicLink    = `${frontendBase}/?mltoken=${rawToken}`;
 		sendMagicLinkEmail(email, user.name || user.username, magicLink)
-			.catch(e => console.error('[magic-link] email failed (non-blocking):', e && e.message ? e.message : e));
+			.catch(e => console.error('[magic-link] email send (non-blocking):', e && e.message ? e.message : e));
 
 		return res.json(SAFE_RESPONSE);
+
 	} catch (err) {
 		const detail = err && err.message ? err.message : String(err);
-		console.error('[magic-link/request] FATAL:', detail, err && err.stack ? '\n' + err.stack : '');
+		console.error('[magic-link/request] UNHANDLED:', detail, err && err.stack ? '\n' + err.stack : '');
 		return res.status(500).json({ error: `Server error: ${detail}` });
 	}
 });
-
 // ── Magic link: verify (called by frontend when token is in URL) ───────────
 app.post('/api/auth/magic-link/verify', async (req, res) => {
 	const rawToken = ((req.body && req.body.token) || '').trim();
@@ -1912,6 +1923,19 @@ async function runStartupMigrations() {
 		conn.release();
 	}
 }
+
+// ── Global Express error handler — ensures every crash returns JSON, never HTML ──
+app.use((err, req, res, next) => {
+	const detail = err && err.message ? err.message : String(err);
+	console.error('[express] unhandled error:', detail, err && err.stack ? '\n' + err.stack : '');
+	if (res.headersSent) return next(err);
+	res.status(err.status || 500).json({ error: `Server error: ${detail}` });
+});
+
+// Safety net: log unhandled promise rejections (don't crash on Vercel serverless)
+process.on('unhandledRejection', (reason) => {
+	console.error('[unhandledRejection]', reason && reason.message ? reason.message : reason);
+});
 
 runStartupMigrations().then(() => {
 	app.listen(PORT, () => console.log('API + static server listening on', PORT));

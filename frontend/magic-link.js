@@ -251,10 +251,15 @@
 				headers: { 'Content-Type': 'application/json' },
 				body:    JSON.stringify({ email })
 			});
-			const data = await res.json().catch(() => ({}));
+			const rawText = await res.text();
+			let data = {};
+			try { data = JSON.parse(rawText); } catch (e) {
+				console.error('[magic-link] Server returned non-JSON:', res.status, rawText.slice(0, 500));
+			}
 
 			if (!res.ok) {
-				setModalStatus(data.error || 'Failed to send sign-in link. Please try again.', 'error');
+				const msg = data.error || `Server error ${res.status}: ${rawText.slice(0, 200)}`;
+				setModalStatus(msg, 'error');
 				if (sendBtn) {
 					sendBtn.disabled  = false;
 					sendBtn.innerHTML = '<i class="fa fa-paper-plane" style="margin-right:6px"></i>Send link';
