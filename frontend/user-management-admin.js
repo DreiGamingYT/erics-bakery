@@ -24,6 +24,13 @@
 		return apiFetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
 	}
 
+	async function changeUserRole(userId, newRole) {
+		return apiFetch(`/api/admin/users/${userId}/role`, {
+			method: 'PATCH',
+			body: JSON.stringify({ role: newRole })
+		});
+	}
+
 	// ── Role check ────────────────────────────────────────────────────────────
 
 	function isAdminOrOwner() {

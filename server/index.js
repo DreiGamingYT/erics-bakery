@@ -1310,6 +1310,7 @@ function sha256(str) {
 }
 
 function buildEmailWrapper(logoUrl, bodyHtml) {
+	const logo = logoUrl || process.env.RESET_EMAIL_LOGO_URL || 'https://i.ibb.co/9HshkkkB/logo.png';
 	return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
 <style>
   body{background:#f3f6fb;margin:0;padding:24px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial;color:#12202f}
@@ -1325,7 +1326,7 @@ function buildEmailWrapper(logoUrl, bodyHtml) {
 </head><body>
 <div class="wrapper" role="article">
   <div class="card">
-    <img src="${process.env.RESET_EMAIL_LOGO_URL || 'https://i.ibb.co/9HshkkkB/logo.png'}" alt="Eric's Bakery" class="logo"/>
+    <img src="${logo}" alt="Eric's Bakery" class="logo"/>
     ${bodyHtml}
   </div>
 </div>
@@ -1390,6 +1391,25 @@ app.post('/api/auth/magic-link/request', async (req, res) => {
 	const SAFE_RESPONSE = { ok: true, message: 'If this email is registered, a sign-in link has been sent.' };
 
 	try {
+		// Ensure magic_links table exists — self-healing in case migration was skipped
+		await pool.query(`
+			CREATE TABLE IF NOT EXISTS magic_links (
+				id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+				user_id    INT NOT NULL,
+				email      VARCHAR(255) NOT NULL,
+				token_hash CHAR(64)     NOT NULL,
+				expires_at DATETIME     NOT NULL,
+				used       TINYINT(1)   NOT NULL DEFAULT 0,
+				created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				UNIQUE INDEX idx_ml_token  (token_hash),
+				       INDEX idx_ml_user   (user_id),
+				       INDEX idx_ml_expire (expires_at)
+			)
+		`).catch(e => {
+			// Already exists is fine; anything else gets logged but we continue
+			if (e.code !== 'ER_TABLE_EXISTS_ERROR') console.warn('[magic-link] table ensure:', e.message);
+		});
+
 		const [rows] = await pool.query('SELECT id, username, name, email FROM users WHERE email = ? LIMIT 1', [email]);
 		const user = rows && rows[0];
 		if (!user) { return res.json(SAFE_RESPONSE); }
@@ -1417,12 +1437,17 @@ app.post('/api/auth/magic-link/request', async (req, res) => {
 
 		const frontendBase = (process.env.FRONTEND_ORIGIN || 'http://localhost:3000').replace(/\/$/, '');
 		const magicLink    = `${frontendBase}/?mltoken=${rawToken}`;
-		await sendMagicLinkEmail(email, user.name || user.username, magicLink);
+
+		// Fire-and-forget — SMTP failure must never cause a 500 for the user
+		sendMagicLinkEmail(email, user.name || user.username, magicLink)
+			.catch(e => console.error('[magic-link] sendMagicLinkEmail failed (non-blocking):', e && e.message ? e.message : e));
 
 		return res.json(SAFE_RESPONSE);
 	} catch (err) {
-		console.error('[magic-link/request]', err && err.stack ? err.stack : err);
-		return res.status(500).json({ error: 'Server error' });
+		const detail = err && err.message ? err.message : String(err);
+		console.error('[magic-link/request] ERROR:', detail, err && err.stack ? '\n' + err.stack : '');
+		const isDev = process.env.NODE_ENV !== 'production';
+		return res.status(500).json({ error: isDev ? `Server error: ${detail}` : 'Server error' });
 	}
 });
 
@@ -1471,8 +1496,9 @@ app.post('/api/auth/magic-link/verify', async (req, res) => {
 
 		return res.json({ ok: true, user: { id: ml.uid, username: ml.username, role: ml.role, name: ml.name } });
 	} catch (err) {
-		console.error('[magic-link/verify]', err && err.stack ? err.stack : err);
-		return res.status(500).json({ error: 'Server error' });
+		console.error('[magic-link/verify] ERROR:', err && err.message ? err.message : err, err && err.stack ? '\n' + err.stack : '');
+		const isDev = process.env.NODE_ENV !== 'production';
+		return res.status(500).json({ error: isDev ? `Server error: ${err && err.message}` : 'Server error' });
 	}
 });
 
@@ -1832,7 +1858,8 @@ async function runStartupMigrations() {
 		`);
 		console.log('[startup] schedules table ready');
 
-		// 4. magic_links table — passwordless sign-in
+		// 4. magic_links table — passwordless sign-in (isolated so any earlier error can't skip it)
+		try {
 		await conn.query(`
 			CREATE TABLE IF NOT EXISTS magic_links (
 				id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -1848,6 +1875,9 @@ async function runStartupMigrations() {
 			)
 		`);
 		console.log('[startup] magic_links table ready');
+		} catch (e) {
+			console.error('[startup] magic_links table creation failed:', e && e.message ? e.message : e);
+		}
 	} catch (err) {
 		console.error('[startup] migration error:', err && err.message ? err.message : err);
 	} finally {
