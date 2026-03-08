@@ -1334,6 +1334,7 @@ function buildEmailWrapper(logoUrl, bodyHtml) {
 }
 
 async function sendMagicLinkEmail(toEmail, name, magicLink) {
+	name = (name || toEmail || 'there');
 	const subject = `Eric's Bakery — Your sign-in link`;
 	const plain   = `Hi ${name},\n\nClick the link below to sign in (valid for 15 minutes, single-use):\n\n${magicLink}\n\nIf you did not request this, ignore this message.`;
 	const html    = buildEmailWrapper(
@@ -1457,12 +1458,21 @@ app.post('/api/auth/magic-link/request', async (req, res) => {
 			return res.status(500).json({ error: `DB error (insert token): ${e.message}` });
 		}
 
-		// ── 6. Send email (non-blocking) ─────────────────────────────────────
+		// ── 6. Send email ───────────────────────────────────────────────────────
 		const frontendBase = (process.env.FRONTEND_ORIGIN || 'http://localhost:3000').replace(/\/$/, '');
 		const magicLink    = `${frontendBase}/?mltoken=${rawToken}`;
-		sendMagicLinkEmail(email, user.name || user.username, magicLink)
-			.catch(e => console.error('[magic-link] email send (non-blocking):', e && e.message ? e.message : e));
+		let emailError = null;
+		try {
+			await sendMagicLinkEmail(email, user.name || user.username, magicLink);
+		} catch (e) {
+			emailError = e && e.message ? e.message : String(e);
+			console.error('[magic-link] sendMagicLinkEmail FAILED:', emailError);
+		}
 
+		if (emailError) {
+			// Token was saved — user can retry. Surface the real error.
+			return res.status(500).json({ error: `Sign-in link created but email failed to send: ${emailError}` });
+		}
 		return res.json(SAFE_RESPONSE);
 
 	} catch (err) {
