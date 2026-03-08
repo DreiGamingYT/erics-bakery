@@ -136,17 +136,33 @@ function hasRole(user, roles) {
 	return roles.map(x => String(x).toLowerCase()).includes(r);
 }
 
-let mailer = null;
-if (process.env.MAIL_HOST && process.env.MAIL_USER && process.env.MAIL_PASS) {
-	mailer = nodemailer.createTransport({
-		host: process.env.MAIL_HOST,
-		port: Number(process.env.MAIL_PORT || 587),
-		secure: (process.env.MAIL_SECURE === 'true') || false,
-		auth: {
-			user: process.env.MAIL_USER,
-			pass: process.env.MAIL_PASS
-		}
-	});
+// ── Auth audit log helper ─────────────────────────────────────────────────
+async function logAuthEvent(eventType, userId, req, meta = {}) {
+	try {
+		const ip = req?.headers?.['x-forwarded-for']?.split(',')[0]?.trim()
+			|| req?.socket?.remoteAddress || null;
+		const ua = req?.headers?.['user-agent']?.slice(0, 255) || null;
+		const metaJson = Object.keys(meta).length ? JSON.stringify(meta) : null;
+		await pool.query(
+			`INSERT INTO auth_audit_log (event_type, user_id, ip_address, user_agent, meta, created_at)
+			 VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+			[eventType, userId || null, ip, ua, metaJson]
+		);
+	} catch (e) {
+		console.warn('[audit] logAuthEvent failed (non-blocking):', e?.message);
+	}
+}
+
+// ── Email helper (generic) ────────────────────────────────────────────────
+async function sendMail({ to, subject, html, text }) {
+	if (!mailTransporter) {
+		console.warn('[mail] SMTP not configured — email not sent:', subject);
+		return;
+	}
+	const fromAddress = (process.env.EMAIL_FROM && process.env.EMAIL_FROM.trim())
+		? process.env.EMAIL_FROM.trim()
+		: process.env.SMTP_USER;
+	await mailTransporter.sendMail({ from: fromAddress, to, subject, text, html });
 }
 
 app.post('/api/auth/signup', async (req, res) => {
@@ -199,14 +215,20 @@ app.post('/api/auth/login', async (req, res) => {
 			password
 		} = req.body;
 		const user = await getUserByUsername(username);
-		if (!user) return res.status(401).json({
+		if (!user) {
+			setImmediate(() => logAuthEvent('login_failed', null, req, { username: username || '' }));
+			return res.status(401).json({
 			message: 'Invalid credentials'
 		});
+		}
 
 		const ok = await bcrypt.compare(password, user.password_hash);
-		if (!ok) return res.status(401).json({
+		if (!ok) {
+			setImmediate(() => logAuthEvent('login_failed', user.id, req, { username: user.username }));
+			return res.status(401).json({
 			message: 'Invalid credentials'
 		});
+		}
 
 		const token = signToken({
 			id: user.id,
@@ -228,6 +250,8 @@ app.post('/api/auth/login', async (req, res) => {
 				);
 			} catch (e) { console.warn('[sessions] login insert failed', e && e.message); }
 		});
+
+		setImmediate(() => logAuthEvent('login_success', user.id, req, { username: user.username }));
 
 		return res.json({
 			user: {
@@ -361,10 +385,11 @@ app.post('/api/auth/logout', async (req, res) => {
 					`UPDATE user_sessions SET logged_out_at = CURRENT_TIMESTAMP WHERE user_id = ? AND logged_out_at IS NULL ORDER BY logged_in_at DESC LIMIT 1`,
 					[data.id]
 				).catch(e => console.warn('[sessions] logout update failed', e && e.message));
+				setImmediate(() => logAuthEvent('logout', data.id, req, { username: data.username }));
 			}
 		}
 	} catch {} // expired / missing token — that's fine, just clear the cookie
-	res.clearCookie(TOKEN_NAME, { httpOnly: true });
+	res.clearCookie(TOKEN_NAME, buildCookieOptions());
 	res.json({ ok: true });
 });
 
@@ -492,7 +517,7 @@ app.get('/api/ingredients', authMiddleware, async (req, res) => {
 		const q = `SELECT id,name,type,supplier,qty,unit,min_qty,max_qty,expiry,attrs,created_at,updated_at,created_by
                FROM ingredients
                ${whereSql}
-               ORDER BY ${pool.escapeId ? pool.escapeId(sort) : sort} ${order}
+               ORDER BY \`${sort}\` ${order}
                LIMIT ? OFFSET ?`;
 		const finalParams = params.concat([limit, offset]);
 
@@ -592,6 +617,48 @@ app.post('/api/ingredients', authMiddleware, async (req, res) => {
 			error: 'Server error',
 			detail: err && err.message ? err.message : String(err)
 		});
+	}
+});
+
+app.get('/api/ingredients/export/csv', authMiddleware, async (req, res) => {
+	try {
+		const type = (req.query.type || 'all');
+		const filter = (req.query.filter || 'all');
+		const search = (req.query.search || '').trim();
+		const where = [];
+		const params = [];
+		if (type !== 'all') {
+			where.push('`type` = ?');
+			params.push(type);
+		}
+		if (search) {
+			where.push('(name LIKE ? OR supplier LIKE ?)');
+			params.push(`%${search}%`, `%${search}%`);
+		}
+		if (filter === 'low') {
+			where.push('qty <= COALESCE(min_qty, 0)');
+		} else if (filter === 'expiring') {
+			const days = process.env.REPORT_EXPIRY_DAYS ? Number(process.env.REPORT_EXPIRY_DAYS) :
+				7;
+			where.push('expiry IS NOT NULL AND DATEDIFF(expiry, CURDATE()) BETWEEN 0 AND ?');
+			params.push(days);
+		}
+		const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
+		const [rows] = await pool.query(
+			`SELECT id,name,type,supplier,qty,unit,min_qty,max_qty,expiry FROM ingredients ${whereSql} ORDER BY id ASC`,
+			params);
+		let csv = 'id,name,type,supplier,qty,unit,min_qty,max_qty,expiry\n';
+		for (const r of rows) {
+			csv +=
+				`${r.id},"${(r.name||'').replace(/"/g,'""')}",${r.type},"${(r.supplier||'').replace(/"/g,'""')}",${r.qty},${r.unit},${r.min_qty||0},${r.max_qty||''},${r.expiry||''}\n`;
+		}
+		res.setHeader('Content-Type', 'text/csv');
+		res.setHeader('Content-Disposition',
+			`attachment; filename="inventory_${new Date().toISOString().slice(0,10)}.csv"`);
+		res.send(csv);
+	} catch (e) {
+		console.error('export csv err', e);
+		res.status(500).send('Server error');
 	}
 });
 
@@ -843,9 +910,9 @@ app.post('/api/ingredients/:id/stock', authMiddleware, async (req, res) => {
 app.get('/api/activity', authMiddleware, async (req, res) => {
 	try {
 		const page = Math.max(1, Number(req.query.page || 1));
-		const limit = Math.max(1, Math.min(200, Number(req.query.limit || 50)));
+		const limit = Math.max(1, Math.min(2000, Number(req.query.limit || 50)));
 		const offset = (page - 1) * limit;
-		const [rows] = await pool.query(`SELECT a.id, a.ingredient_id, a.user_id, a.text, a.time, u.username as username, i.name as ingredient_name
+		const [rows] = await pool.query(`SELECT a.id, a.ingredient_id, a.user_id, a.action, a.text, a.time, u.username as username, i.name as ingredient_name
        FROM activity a
        LEFT JOIN users u ON u.id = a.user_id
        LEFT JOIN ingredients i ON i.id = a.ingredient_id
@@ -857,7 +924,8 @@ app.get('/api/activity', authMiddleware, async (req, res) => {
 			meta: {
 				total: (count && count[0] ? count[0].cnt : 0),
 				page,
-				limit
+				limit,
+				totalPages: Math.ceil((count && count[0] ? count[0].cnt : 0) / limit)
 			}
 		});
 	} catch (e) {
@@ -892,48 +960,6 @@ app.post('/api/activity', authMiddleware, async (req, res) => {
 		return res.status(500).json({
 			error: 'Server error'
 		});
-	}
-});
-
-app.get('/api/ingredients/export/csv', authMiddleware, async (req, res) => {
-	try {
-		const type = (req.query.type || 'all');
-		const filter = (req.query.filter || 'all');
-		const search = (req.query.search || '').trim();
-		const where = [];
-		const params = [];
-		if (type !== 'all') {
-			where.push('`type` = ?');
-			params.push(type);
-		}
-		if (search) {
-			where.push('(name LIKE ? OR supplier LIKE ?)');
-			params.push(`%${search}%`, `%${search}%`);
-		}
-		if (filter === 'low') {
-			where.push('qty <= COALESCE(min_qty, 0)');
-		} else if (filter === 'expiring') {
-			const days = process.env.REPORT_EXPIRY_DAYS ? Number(process.env.REPORT_EXPIRY_DAYS) :
-				7;
-			where.push('expiry IS NOT NULL AND DATEDIFF(expiry, CURDATE()) BETWEEN 0 AND ?');
-			params.push(days);
-		}
-		const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
-		const [rows] = await pool.query(
-			`SELECT id,name,type,supplier,qty,unit,min_qty,max_qty,expiry FROM ingredients ${whereSql} ORDER BY id ASC`,
-			params);
-		let csv = 'id,name,type,supplier,qty,unit,min_qty,max_qty,expiry\n';
-		for (const r of rows) {
-			csv +=
-				`${r.id},"${(r.name||'').replace(/"/g,'""')}",${r.type},"${(r.supplier||'').replace(/"/g,'""')}",${r.qty},${r.unit},${r.min_qty||0},${r.max_qty||''},${r.expiry||''}\n`;
-		}
-		res.setHeader('Content-Type', 'text/csv');
-		res.setHeader('Content-Disposition',
-			`attachment; filename="inventory_${new Date().toISOString().slice(0,10)}.csv"`);
-		res.send(csv);
-	} catch (e) {
-		console.error('export csv err', e);
-		res.status(500).send('Server error');
 	}
 });
 
@@ -1150,6 +1176,8 @@ app.post('/api/auth/change-password', authMiddleware, async (req, res) => {
 		const newHash = await bcrypt.hash(newPassword, 10);
 		await pool.query('UPDATE users SET password_hash = ? WHERE id = ?', [newHash, uid]);
 
+		setImmediate(() => logAuthEvent('password_changed', uid, req));
+
 		return res.json({
 			ok: true,
 			message: 'Password updated'
@@ -1198,28 +1226,10 @@ async function sendResetEmail(toEmail, code) {
       </div>
     </body></html>`;
 
-		if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-			const nodemailer = require('nodemailer');
-			const transporter = nodemailer.createTransport({
-				host: (process.env.SMTP_HOST || '').trim(),
-				port: Number((process.env.SMTP_PORT || '587').trim()),
-				secure: ((process.env.SMTP_PORT || '587').trim() === '465'),
-				auth: {
-					user: (process.env.SMTP_USER || '').trim(),
-					pass: (process.env.SMTP_PASS || '').trim()
-				}
-			});
-
-			try {
-				await transporter.verify();
-				console.info('[sendResetEmail] SMTP transporter verified');
-			} catch (verr) {
-				console.warn('[sendResetEmail] transporter verify failed (continuing):', verr && verr.message ? verr.message : verr);
-			}
-
+		if (mailTransporter) {
 			const fromAddress = (process.env.EMAIL_FROM && process.env.EMAIL_FROM.trim()) ? process.env.EMAIL_FROM.trim() : process.env.SMTP_USER;
 
-			const info = await transporter.sendMail({
+			const info = await mailTransporter.sendMail({
 				from: fromAddress,
 				to: toEmail,
 				subject,
@@ -1323,7 +1333,8 @@ app.get('/api/notifications/alerts', authMiddleware, async (req, res) => {
 
 		const lowStock = ingredients.filter(i => {
 			const min = Number(i.min_qty || 0);
-			return Number(i.qty || 0) <= min;
+			const qty = Number(i.qty || 0);
+			return min > 0 && qty <= min;
 		});
 
 		const expiringSoon = ingredients.filter(i => {
@@ -1423,6 +1434,327 @@ app.post('/api/notifications/send-email', authMiddleware, async (req, res) => {
 	}
 });
 
+// ── Schedules ─────────────────────────────────────────────────────────────────
+app.get('/api/schedules', authMiddleware, async (req, res) => {
+	try {
+		const date = (req.query.date || '').slice(0, 10);
+		let rows;
+		if (date) {
+			[rows] = await pool.query(
+				`SELECT id, user_id, date, title, time, note, notified, created_at FROM schedules WHERE date = ? ORDER BY time ASC, created_at ASC`,
+				[date]
+			);
+		} else {
+			[rows] = await pool.query(
+				`SELECT id, user_id, date, title, time, note, notified, created_at FROM schedules ORDER BY date ASC, time ASC, created_at ASC`
+			);
+		}
+		res.json({ items: rows });
+	} catch (e) {
+		console.error('GET /api/schedules err', e);
+		res.status(500).json({ error: 'Server error' });
+	}
+});
+
+app.post('/api/schedules', authMiddleware, async (req, res) => {
+	try {
+		const { date, title, time, note } = req.body || {};
+		if (!date || !title) return res.status(400).json({ error: 'date and title required' });
+		const dateStr = String(date).slice(0, 10);
+		const titleStr = String(title).slice(0, 200).trim();
+		const timeStr = time ? String(time).slice(0, 10).trim() : null;
+		const noteStr = note ? String(note).slice(0, 500).trim() : null;
+		const [result] = await pool.query(
+			`INSERT INTO schedules (user_id, date, title, time, note) VALUES (?, ?, ?, ?, ?)`,
+			[req.user.id, dateStr, titleStr, timeStr, noteStr]
+		);
+		res.json({ id: result.insertId, date: dateStr, title: titleStr, time: timeStr, note: noteStr });
+	} catch (e) {
+		console.error('POST /api/schedules err', e);
+		res.status(500).json({ error: 'Server error' });
+	}
+});
+
+app.patch('/api/schedules/:id/notified', authMiddleware, async (req, res) => {
+	try {
+		const id = Number(req.params.id);
+		if (!id) return res.status(400).json({ error: 'Invalid id' });
+		await pool.query(`UPDATE schedules SET notified = 1 WHERE id = ?`, [id]);
+		res.json({ ok: true });
+	} catch (e) {
+		console.error('PATCH /api/schedules/:id/notified err', e);
+		res.status(500).json({ error: 'Server error' });
+	}
+});
+
+app.delete('/api/schedules/:id', authMiddleware, async (req, res) => {
+	try {
+		const id = Number(req.params.id);
+		if (!id) return res.status(400).json({ error: 'Invalid id' });
+		await pool.query(`DELETE FROM schedules WHERE id = ?`, [id]);
+		res.json({ ok: true });
+	} catch (e) {
+		console.error('DELETE /api/schedules/:id err', e);
+		res.status(500).json({ error: 'Server error' });
+	}
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ── Magic Link / Passwordless Login ──────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MAGIC_EXPIRE_MIN = Number(process.env.MAGIC_LINK_EXPIRE_MIN || 15);
+const FRONTEND_ORIGIN  = process.env.FRONTEND_ORIGIN || 'http://localhost:3000';
+
+// POST /api/auth/magic-link/request  { email }
+app.post('/api/auth/magic-link/request', async (req, res) => {
+	try {
+		const email = (req.body?.email || '').trim().toLowerCase();
+		if (!email) return res.status(400).json({ error: 'email required' });
+
+		// Always respond ok — never reveal whether the email exists
+		const [rows] = await pool.query(
+			'SELECT id, username, name, role FROM users WHERE email = ? LIMIT 1', [email]);
+		const user = rows?.[0] || null;
+
+		if (user) {
+			// Invalidate any existing unused tokens for this user
+			await pool.query(
+				`UPDATE magic_links SET used = 1 WHERE user_id = ? AND used = 0`, [user.id]);
+
+			const rawToken  = crypto.randomBytes(32).toString('hex');
+			const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+			const expiresAt = new Date(Date.now() + MAGIC_EXPIRE_MIN * 60 * 1000);
+
+			await pool.query(
+				`INSERT INTO magic_links (user_id, token_hash, expires_at) VALUES (?, ?, ?)`,
+				[user.id, tokenHash, expiresAt]);
+
+			const magicUrl = `${FRONTEND_ORIGIN}/?magic=${encodeURIComponent(rawToken)}`;
+			const logoUrl  = process.env.RESET_EMAIL_LOGO_URL || 'https://i.ibb.co/9HshkkkB/logo.png';
+
+			const html = `<!doctype html><html><head><meta charset="utf-8"/><title>Sign in link</title>
+<style>body{background:#f3f6fb;margin:0;padding:24px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial;color:#12202f}.wrapper{max-width:600px;margin:20px auto}.card{background:#fff;border-radius:12px;padding:26px;text-align:center;border:1px solid rgba(0,0,0,.06);box-shadow:0 10px 30px rgba(16,24,40,.06)}.logo{width:84px;height:84px;border-radius:12px;margin:0 auto 14px;object-fit:cover}h1{margin:6px 0 8px;font-size:20px;color:#0f2b4b}.lead{color:#475569;font-size:14px;margin:0 0 18px}.btn{display:inline-block;background:#1b85ec;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:700;font-size:15px}.footer{margin-top:20px;font-size:12px;color:#555}</style>
+</head><body><div class="wrapper"><div class="card">
+<img src="${logoUrl}" alt="Eric's Bakery" class="logo"/>
+<h1>Sign in to Eric's Bakery</h1>
+<p class="lead">Click the button below to sign in instantly — no password needed. This link expires in ${MAGIC_EXPIRE_MIN} minutes.</p>
+<a href="${magicUrl}" class="btn">Sign me in</a>
+<p style="margin-top:16px;color:#888;font-size:12px">Or copy this link:<br/><span style="word-break:break-all;font-size:11px">${magicUrl}</span></p>
+<p style="color:#aaa;font-size:12px;margin-top:12px">If you did not request this, ignore this email.</p>
+<div class="footer">Sent to ${email}</div>
+</div></div></body></html>`;
+
+			const text = `Sign in to Eric's Bakery\n\nClick this link to sign in (expires in ${MAGIC_EXPIRE_MIN} min):\n${magicUrl}\n\nIf you did not request this, ignore this email.`;
+
+			sendMail({
+				to: email,
+				subject: `Eric's Bakery — your sign-in link`,
+				html,
+				text
+			}).catch(e => console.warn('[magic-link] email failed:', e?.message));
+
+			setImmediate(() => logAuthEvent('magic_link_requested', user.id, req, { email }));
+		}
+
+		// Always return ok — no user enumeration
+		return res.json({ ok: true, message: 'If that email is registered, a sign-in link has been sent.' });
+	} catch (err) {
+		console.error('POST /api/auth/magic-link/request err', err?.stack || err);
+		return res.status(500).json({ error: 'Server error' });
+	}
+});
+
+// GET /api/auth/magic-link/verify?token=xxx
+app.get('/api/auth/magic-link/verify', async (req, res) => {
+	try {
+		const rawToken = (req.query.token || '').trim();
+		if (!rawToken) return res.status(400).json({ error: 'token required' });
+
+		const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+		const [rows] = await pool.query(
+			`SELECT ml.id, ml.user_id, ml.expires_at, ml.used,
+			        u.username, u.role, u.name, u.email
+			 FROM magic_links ml
+			 JOIN users u ON u.id = ml.user_id
+			 WHERE ml.token_hash = ? LIMIT 1`,
+			[tokenHash]);
+
+		const link = rows?.[0];
+		if (!link)                           return res.status(400).json({ error: 'Invalid or expired link' });
+		if (link.used)                       return res.status(400).json({ error: 'This link has already been used' });
+		if (new Date(link.expires_at) < new Date()) {
+			await pool.query('UPDATE magic_links SET used = 1 WHERE id = ?', [link.id]);
+			return res.status(400).json({ error: 'Link has expired — please request a new one' });
+		}
+
+		// Consume the token
+		await pool.query('UPDATE magic_links SET used = 1, used_at = CURRENT_TIMESTAMP WHERE id = ?', [link.id]);
+
+		const user = { id: link.user_id, username: link.username, role: link.role, name: link.name };
+		const jwtToken = signToken(user);
+		res.cookie(TOKEN_NAME, jwtToken, buildCookieOptions());
+
+		// Log session
+		setImmediate(async () => {
+			try {
+				const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || null;
+				const ua = req.headers['user-agent']?.slice(0, 255) || null;
+				await pool.query('INSERT INTO user_sessions (user_id, ip_address, user_agent) VALUES (?, ?, ?)', [user.id, ip, ua]);
+			} catch (e) { console.warn('[sessions] magic-link insert failed', e?.message); }
+		});
+
+		setImmediate(() => logAuthEvent('magic_link_used', user.id, req, { username: user.username }));
+
+		return res.json({ ok: true, user });
+	} catch (err) {
+		console.error('GET /api/auth/magic-link/verify err', err?.stack || err);
+		return res.status(500).json({ error: 'Server error' });
+	}
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ── Admin: change user role (with email notification) ────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ALLOWED_ROLES = ['Owner', 'Admin', 'Baker'];
+
+app.patch('/api/admin/users/:id/role', authMiddleware, async (req, res) => {
+	if (!hasRole(req.user, ['Owner'])) {
+		return res.status(403).json({ error: 'Only Owners can change roles' });
+	}
+	const targetId = Number(req.params.id);
+	if (!targetId) return res.status(400).json({ error: 'Invalid user id' });
+	if (targetId === Number(req.user.id)) {
+		return res.status(400).json({ error: 'Cannot change your own role here' });
+	}
+
+	const newRole = (req.body?.role || '').trim();
+	if (!ALLOWED_ROLES.includes(newRole)) {
+		return res.status(400).json({ error: `Role must be one of: ${ALLOWED_ROLES.join(', ')}` });
+	}
+
+	try {
+		const [rows] = await pool.query(
+			'SELECT id, username, name, email, role FROM users WHERE id = ? LIMIT 1', [targetId]);
+		const target = rows?.[0];
+		if (!target) return res.status(404).json({ error: 'User not found' });
+
+		const oldRole = target.role;
+		if (oldRole === newRole) return res.json({ ok: true, message: 'Role unchanged', user: target });
+
+		await pool.query('UPDATE users SET role = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [newRole, targetId]);
+
+		// Audit log
+		setImmediate(() => logAuthEvent('role_changed', targetId, req, {
+			changed_by: req.user.username,
+			from_role: oldRole,
+			to_role: newRole,
+			target_username: target.username
+		}));
+
+		// Email notification to the affected user
+		if (target.email) {
+			const logoUrl = process.env.RESET_EMAIL_LOGO_URL || 'https://i.ibb.co/9HshkkkB/logo.png';
+			const changedByName = req.user.name || req.user.username;
+			const html = `<!doctype html><html><head><meta charset="utf-8"/><title>Role updated</title>
+<style>body{background:#f3f6fb;margin:0;padding:24px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial;color:#12202f}.wrapper{max-width:600px;margin:20px auto}.card{background:#fff;border-radius:12px;padding:26px;text-align:center;border:1px solid rgba(0,0,0,.06);box-shadow:0 10px 30px rgba(16,24,40,.06)}.logo{width:84px;height:84px;border-radius:12px;margin:0 auto 14px;object-fit:cover}h1{margin:6px 0 8px;font-size:20px;color:#0f2b4b}.badge{display:inline-block;padding:4px 12px;border-radius:20px;font-weight:700;font-size:13px}.old{background:#fef3c7;color:#92400e}.new{background:#d1fae5;color:#065f46}.footer{margin-top:20px;font-size:12px;color:#555}</style>
+</head><body><div class="wrapper"><div class="card">
+<img src="${logoUrl}" alt="Eric's Bakery" class="logo"/>
+<h1>Your role has been updated</h1>
+<p style="color:#475569;font-size:14px">Hi <strong>${target.name || target.username}</strong>, your account role in Eric's Bakery has been changed by <strong>${changedByName}</strong>.</p>
+<p style="font-size:15px">
+  <span class="badge old">${oldRole}</span>
+  &nbsp;→&nbsp;
+  <span class="badge new">${newRole}</span>
+</p>
+<p style="color:#888;font-size:13px">If you believe this was a mistake, please contact your administrator.</p>
+<div style="margin-top:18px"><a href="${FRONTEND_ORIGIN}" target="_blank" style="display:inline-block;background:#1b85ec;color:#fff;padding:10px 16px;border-radius:10px;text-decoration:none;font-weight:700">Open Eric's Bakery</a></div>
+<div class="footer">Sent to ${target.email}</div>
+</div></div></body></html>`;
+			const text = `Hi ${target.name || target.username},\n\nYour role in Eric's Bakery has been changed from "${oldRole}" to "${newRole}" by ${changedByName}.\n\nIf this was a mistake, please contact your administrator.`;
+			sendMail({
+				to: target.email,
+				subject: `Eric's Bakery — your role has been updated`,
+				html,
+				text
+			}).catch(e => console.warn('[role-change] email failed:', e?.message));
+		}
+
+		return res.json({ ok: true, user: { ...target, role: newRole } });
+	} catch (err) {
+		console.error('PATCH /api/admin/users/:id/role err', err?.stack || err);
+		return res.status(500).json({ error: 'Server error' });
+	}
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ── Auth Audit Log routes ─────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+
+// GET /api/auth/audit-log  (Owner/Admin — all users)
+app.get('/api/auth/audit-log', authMiddleware, async (req, res) => {
+	if (!hasRole(req.user, ['Owner', 'Admin'])) {
+		return res.status(403).json({ error: 'Forbidden' });
+	}
+	try {
+		const limit  = Math.min(500, Math.max(1, Number(req.query.limit  || 100)));
+		const offset = Math.max(0, Number(req.query.offset || 0));
+		const [rows] = await pool.query(
+			`SELECT al.id, al.event_type, al.user_id, al.ip_address, al.user_agent, al.meta, al.created_at,
+			        u.username, u.name
+			 FROM auth_audit_log al
+			 LEFT JOIN users u ON u.id = al.user_id
+			 ORDER BY al.created_at DESC
+			 LIMIT ? OFFSET ?`,
+			[limit, offset]);
+		const [cnt] = await pool.query('SELECT COUNT(*) AS c FROM auth_audit_log');
+		return res.json({ logs: rows, total: cnt?.[0]?.c || 0 });
+	} catch (err) {
+		console.error('GET /api/auth/audit-log err', err?.stack || err);
+		return res.status(500).json({ error: 'Server error' });
+	}
+});
+
+// GET /api/auth/audit-log/me  (any authenticated user — own events only)
+app.get('/api/auth/audit-log/me', authMiddleware, async (req, res) => {
+	try {
+		const limit = Math.min(100, Math.max(1, Number(req.query.limit || 50)));
+		const [rows] = await pool.query(
+			`SELECT id, event_type, ip_address, user_agent, meta, created_at
+			 FROM auth_audit_log
+			 WHERE user_id = ?
+			 ORDER BY created_at DESC
+			 LIMIT ?`,
+			[req.user.id, limit]);
+		return res.json({ logs: rows });
+	} catch (err) {
+		console.error('GET /api/auth/audit-log/me err', err?.stack || err);
+		return res.status(500).json({ error: 'Server error' });
+	}
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ── Own sessions (current user) ───────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+
+// GET /api/auth/sessions/me
+app.get('/api/auth/sessions/me', authMiddleware, async (req, res) => {
+	try {
+		const [rows] = await pool.query(
+			`SELECT id, logged_in_at, logged_out_at, last_active_at, ip_address, user_agent
+			 FROM user_sessions
+			 WHERE user_id = ?
+			 ORDER BY logged_in_at DESC
+			 LIMIT 20`,
+			[req.user.id]);
+		return res.json({ sessions: rows });
+	} catch (err) {
+		console.error('GET /api/auth/sessions/me err', err?.stack || err);
+		return res.status(500).json({ error: 'Server error' });
+	}
+});
+
 async function runStartupMigrations() {
 	const conn = await pool.getConnection();
 	try {
@@ -1456,6 +1788,57 @@ async function runStartupMigrations() {
 		} catch (e) {
 			if (e.code !== 'ER_DUP_FIELDNAME') console.warn('[startup] last_active_at:', e.message);
 		}
+
+		// 3. schedules table
+		await conn.query(`
+			CREATE TABLE IF NOT EXISTS schedules (
+				id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+				user_id    INT NOT NULL,
+				date       DATE NOT NULL,
+				title      VARCHAR(200) NOT NULL,
+				time       VARCHAR(10) DEFAULT NULL,
+				note       VARCHAR(500) DEFAULT NULL,
+				notified   TINYINT(1) NOT NULL DEFAULT 0,
+				created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				INDEX idx_schedules_date (date),
+				INDEX idx_schedules_user (user_id)
+			)
+		`);
+		console.log('[startup] schedules table ready');
+
+		// 4. magic_links table
+		await conn.query(`
+			CREATE TABLE IF NOT EXISTS magic_links (
+				id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+				user_id     INT NOT NULL,
+				token_hash  VARCHAR(64) NOT NULL,
+				expires_at  DATETIME NOT NULL,
+				used        TINYINT(1) NOT NULL DEFAULT 0,
+				used_at     DATETIME DEFAULT NULL,
+				created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				UNIQUE KEY uniq_token (token_hash),
+				INDEX idx_magic_user (user_id),
+				INDEX idx_magic_expires (expires_at)
+			)
+		`);
+		console.log('[startup] magic_links table ready');
+
+		// 5. auth_audit_log table
+		await conn.query(`
+			CREATE TABLE IF NOT EXISTS auth_audit_log (
+				id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+				event_type  VARCHAR(64) NOT NULL,
+				user_id     INT DEFAULT NULL,
+				ip_address  VARCHAR(64) DEFAULT NULL,
+				user_agent  VARCHAR(255) DEFAULT NULL,
+				meta        JSON DEFAULT NULL,
+				created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				INDEX idx_audit_user (user_id),
+				INDEX idx_audit_event (event_type),
+				INDEX idx_audit_created (created_at)
+			)
+		`);
+		console.log('[startup] auth_audit_log table ready');
 	} catch (err) {
 		console.error('[startup] migration error:', err && err.message ? err.message : err);
 	} finally {

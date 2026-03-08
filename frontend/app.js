@@ -44,7 +44,7 @@ const INVENTORY_PAGE_LIMIT = 10;
 		}
 	}
 	if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', hideProductOrderUI);
-	else setTimeout(hideProductOrderUI, 20);
+	else hideProductOrderUI();
 
 	function wrapApiFetchIfPresent() {
 		try {
@@ -851,7 +851,7 @@ function notify(msg, opts = {}) {
 		t.className = 'app-toast';
 		t.setAttribute('role', 'status');
 		t.setAttribute('aria-live', 'polite');
-		t.style.cssText = `background:var(--card,#fff);color:var(--text,#12202f);padding:10px 14px;border-radius:12px;box-shadow:0 12px 30px rgba(19,28,38,0.13);border-left:3px solid ${accent};font-weight:600;min-width:180px;max-width:340px;opacity:0;transform:translateY(8px);transition:all .25s ease;pointer-events:auto;display:flex;align-items:center;gap:10px`;
+		t.style.cssText = `background:var(--card,#fff);color:var(--text,#12202f);padding:10px 14px;border-radius:12px;box-shadow:0 12px 30px rgba(19,28,38,0.13);font-weight:600;min-width:180px;max-width:340px;opacity:0;transform:translateY(8px);transition:all .25s ease;pointer-events:auto;display:flex;align-items:center;gap:10px`;
 
 		const msgSpan = document.createElement('span');
 		msgSpan.style.flex = '1';
@@ -2362,7 +2362,6 @@ async function renderIngredientCards(page = 1, limit = INVENTORY_PAGE_LIMIT) {
         <td data-label="Out" style="padding:10px;vertical-align:middle"><input class="out-input" type="number" step="0.01" style="width:90px" /></td>
         <td data-label="Actions" style="padding:10px;vertical-align:middle">
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-            <input class="note-input" type="text" placeholder="note…" style="width:88px;height:28px;font-size:12px;padding:0 6px;border-radius:6px;border:1px solid rgba(0,0,0,.12);background:var(--bg,#fff);color:var(--text)" />
             <button class="btn small save-row" type="button">Save</button>
             <button class="btn small soft details-btn" data-id="${i.id}" type="button">Details</button>
             <button class="btn small soft edit-btn" type="button">Edit</button>
@@ -2393,8 +2392,6 @@ async function renderIngredientCards(page = 1, limit = INVENTORY_PAGE_LIMIT) {
 				const outVal = Number(tr.querySelector('.out-input')?.value || 0);
 				const minInput = tr.querySelector('.min-input');
 				const newMin = minInput ? Number(minInput.value || 0) : null;
-				// #14 — pick up note from the new note-input field
-				const noteVal = (tr.querySelector('.note-input')?.value || '').trim();
 
 				try {
 					if (newMin !== null && !Number.isNaN(newMin)) {
@@ -2407,10 +2404,10 @@ async function renderIngredientCards(page = 1, limit = INVENTORY_PAGE_LIMIT) {
 					}
 					if (inVal > 0) {
 						// Use applyStockChange so the undo bar appears
-						applyStockChange(id, 'in', Number(inVal), noteVal || 'Stock-in');
+						applyStockChange(id, 'in', Number(inVal), 'Stock-in');
 					} else if (outVal > 0) {
 						// Use applyStockChange so the undo bar appears
-							applyStockChange(id, 'out', Number(outVal), noteVal || 'Stock-out');
+							applyStockChange(id, 'out', Number(outVal), 'Stock-out');
 					} else {
 						// Only min threshold changed — no stock movement
 						notify('Min threshold updated');
@@ -3912,9 +3909,15 @@ async function addSchedule(sched) {
 	return sched;
 }
 async function deleteSchedule(id) {
-	saveAllSchedules(getAllSchedules().filter(s => s.id !== id));
-	try { await apiFetch('/api/schedules/' + id, { method: 'DELETE' }); } catch (e) {
-		console.warn('[schedules] server delete failed:', e.message);
+	const snapshot = getAllSchedules();
+	saveAllSchedules(snapshot.filter(s => s.id !== id));
+	try {
+		await apiFetch('/api/schedules/' + id, { method: 'DELETE' });
+	} catch (e) {
+		// Server delete failed — restore local state so ghost resurrection can't happen
+		saveAllSchedules(snapshot);
+		console.warn('[schedules] server delete failed (rolled back):', e.message);
+		throw e; // re-throw so the UI caller can show an error
 	}
 }
 // Pull schedules from server into localStorage on load
@@ -3922,11 +3925,12 @@ async function syncSchedulesFromServer() {
 	try {
 		const res = await apiFetch('/api/schedules');
 		if (res && Array.isArray(res.items)) {
-			// Merge server items into local cache (server wins for existing ids)
+			// Server is the source of truth — replace local cache entirely.
+			// Preserve any locally-added entries whose temp id hasn't synced yet
+			// (those have string ids like "1234567890_abc", not numeric).
 			const local = getAllSchedules();
-			const serverIds = new Set(res.items.map(s => String(s.id)));
-			const merged = local.filter(s => !serverIds.has(String(s.id))).concat(res.items);
-			saveAllSchedules(merged);
+			const pendingLocal = local.filter(s => isNaN(Number(s.id)));
+			saveAllSchedules(pendingLocal.concat(res.items));
 		}
 	} catch (e) { console.warn('[schedules] sync from server failed:', e.message); }
 }
@@ -3944,6 +3948,10 @@ function checkScheduleReminders() {
 		const diff     = target - now;            // ms until scheduled time
 		if (diff <= 0 && diff > -120000) {        // within 2-min window after
 			s.notified = true; changed = true;
+			// Persist notified flag to server so it survives across sessions/devices
+			if (!isNaN(Number(s.id))) {
+				apiFetch('/api/schedules/' + s.id + '/notified', { method: 'PATCH' }).catch(() => {});
+			}
 			pushInAppNotif({
 				type: 'reminder',
 				title: `🔔 Reminder: ${s.title}`,
@@ -4000,13 +4008,17 @@ function openScheduleModal(dateStr) {
 	}
 
 	document.querySelectorAll('.sched-delete-btn').forEach(btn => {
-		btn.addEventListener('click', e => {
+		btn.addEventListener('click', async e => {
 			e.stopPropagation();
 			if (!confirm('Remove this schedule?')) return;
-			deleteSchedule(btn.dataset.id);
+			try {
+				await deleteSchedule(btn.dataset.id);
 			pushInAppNotif({ type: 'info', title: 'Schedule removed', sub: displayDate, icon: 'fa-calendar-xmark' });
 			closeModal();
 			refreshCalendarCell(dateStr);
+			} catch (err) {
+				if (typeof notify === 'function') notify('Failed to remove schedule — please try again.');
+			}
 		});
 	});
 
@@ -4432,9 +4444,11 @@ function renderCalendar() {
 		header.textContent = `Calendar — ${new Date(currentCalendarYear, currentCalendarMonth).toLocaleString([], {month:'long', year:'numeric'})}`;
 	}
 	// #4 — Sync schedules from server, then re-render cells
-	syncSchedulesFromServer().then(() => {
+	syncSchedulesFromServer()
+		.then(() => {
 	renderCalendarForMonth(currentCalendarYear, currentCalendarMonth);
-	}).catch(() => {
+		})
+		.catch(() => {
 		renderCalendarForMonth(currentCalendarYear, currentCalendarMonth);
 	});
 }

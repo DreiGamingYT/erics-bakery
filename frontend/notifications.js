@@ -269,6 +269,7 @@
 			currentPrefs = prefs;
 			applyPrefsToUI(prefs);
 			restartPoll(prefs);
+			maybeSendDailyDigest(prefs);
 			initNotifSettings();
 		};
 		window.populateProfile._notifPatched = true;
