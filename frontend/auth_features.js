@@ -32,8 +32,8 @@
 	   1.  IDLE WARNING MODAL
 	   ═══════════════════════════════════════════════════════════════════════ */
 
-	var IDLE_WARN_MS   = 25 * 60 * 1000;
-	var IDLE_TOTAL_MS  = 30 * 60 * 1000;
+	var IDLE_WARN_MS   = 1 * 60 * 1000;
+	var IDLE_TOTAL_MS  = 2 * 60 * 1000;
 	var COUNTDOWN_SECS = Math.round((IDLE_TOTAL_MS - IDLE_WARN_MS) / 1000);
 
 	var _warnTimer    = null;
