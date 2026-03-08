@@ -136,6 +136,7 @@ function hasRole(user, roles) {
 	return roles.map(x => String(x).toLowerCase()).includes(r);
 }
 
+// ── Auth audit log helper ─────────────────────────────────────────────────
 async function logAuthEvent(eventType, userId, req, meta = {}) {
 	try {
 		const ip = req?.headers?.['x-forwarded-for']?.split(',')[0]?.trim()
@@ -1804,6 +1805,7 @@ async function runStartupMigrations() {
 			)
 		`);
 		console.log('[startup] schedules table ready');
+
 		// 4. magic_links table
 		await conn.query(`
 			CREATE TABLE IF NOT EXISTS magic_links (
@@ -1837,7 +1839,6 @@ async function runStartupMigrations() {
 			)
 		`);
 		console.log('[startup] auth_audit_log table ready');
-
 	} catch (err) {
 		console.error('[startup] migration error:', err && err.message ? err.message : err);
 	} finally {
