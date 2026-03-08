@@ -1387,11 +1387,19 @@ app.post('/api/auth/magic-link/request', async (req, res) => {
 	const email = ((req.body && req.body.email) || '').trim().toLowerCase();
 	if (!email) return res.status(400).json({ error: 'email required' });
 
-	// Always return the same message to avoid email enumeration
 	const SAFE_RESPONSE = { ok: true, message: 'If this email is registered, a sign-in link has been sent.' };
 
 	try {
-		// Ensure magic_links table exists — self-healing in case migration was skipped
+		// Step 1: look up the user — if not found return safe response immediately
+		const [rows] = await pool.query(
+			'SELECT id, username, name, email FROM users WHERE email = ? LIMIT 1',
+			[email]
+		);
+		const user = rows && rows[0];
+		if (!user) return res.json(SAFE_RESPONSE);
+
+		// Step 2: ensure magic_links table exists (self-healing for first deploy)
+		try {
 		await pool.query(`
 			CREATE TABLE IF NOT EXISTS magic_links (
 				id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -1405,28 +1413,32 @@ app.post('/api/auth/magic-link/request', async (req, res) => {
 				       INDEX idx_ml_user   (user_id),
 				       INDEX idx_ml_expire (expires_at)
 			)
-		`).catch(e => {
-			// Already exists is fine; anything else gets logged but we continue
-			if (e.code !== 'ER_TABLE_EXISTS_ERROR') console.warn('[magic-link] table ensure:', e.message);
-		});
+			`);
+		} catch (tableErr) {
+			// 'already exists' codes are fine; permission errors are logged but non-fatal
+			console.warn('[magic-link] CREATE TABLE:', tableErr && tableErr.message ? tableErr.message : tableErr);
+		}
 
-		const [rows] = await pool.query('SELECT id, username, name, email FROM users WHERE email = ? LIMIT 1', [email]);
-		const user = rows && rows[0];
-		if (!user) { return res.json(SAFE_RESPONSE); }
-
-		// Rate-limit: one email per 60 seconds per user
-		const [recent] = await pool.query(
-			'SELECT id FROM magic_links WHERE user_id = ? AND created_at > NOW() - INTERVAL 60 SECOND AND used = 0 LIMIT 1',
+		// Step 3: rate-limit — ignore if table still doesn't exist somehow
+		let recentCount = 0;
+		try {
+			const [rr] = await pool.query(
+				'SELECT COUNT(*) AS n FROM magic_links WHERE user_id = ? AND created_at > NOW() - INTERVAL 60 SECOND AND used = 0',
 			[user.id]
 		);
-		if (recent && recent[0]) {
+			recentCount = (rr && rr[0] && rr[0].n) ? Number(rr[0].n) : 0;
+		} catch (e) {
+			if (e.code !== 'ER_NO_SUCH_TABLE') throw e;
+		}
+		if (recentCount > 0) {
 			return res.status(429).json({ error: 'A sign-in link was sent recently. Please wait a minute before trying again.' });
 		}
 
-		// Invalidate any previous unused tokens for this user
-		await pool.query('UPDATE magic_links SET used = 1 WHERE user_id = ? AND used = 0', [user.id]);
+		// Step 4: invalidate previous tokens
+		await pool.query('UPDATE magic_links SET used = 1 WHERE user_id = ? AND used = 0', [user.id])
+			.catch(e => { if (e.code !== 'ER_NO_SUCH_TABLE') throw e; });
 
-		// Generate and store token
+		// Step 5: create new token
 		const rawToken  = crypto.randomBytes(32).toString('hex');
 		const tokenHash = sha256(rawToken);
 		const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
@@ -1435,19 +1447,17 @@ app.post('/api/auth/magic-link/request', async (req, res) => {
 			[user.id, email, tokenHash, expiresAt]
 		);
 
+		// Step 6: send email (non-blocking — SMTP failure never causes 500)
 		const frontendBase = (process.env.FRONTEND_ORIGIN || 'http://localhost:3000').replace(/\/$/, '');
 		const magicLink    = `${frontendBase}/?mltoken=${rawToken}`;
-
-		// Fire-and-forget — SMTP failure must never cause a 500 for the user
 		sendMagicLinkEmail(email, user.name || user.username, magicLink)
-			.catch(e => console.error('[magic-link] sendMagicLinkEmail failed (non-blocking):', e && e.message ? e.message : e));
+			.catch(e => console.error('[magic-link] email failed (non-blocking):', e && e.message ? e.message : e));
 
 		return res.json(SAFE_RESPONSE);
 	} catch (err) {
 		const detail = err && err.message ? err.message : String(err);
-		console.error('[magic-link/request] ERROR:', detail, err && err.stack ? '\n' + err.stack : '');
-		const isDev = process.env.NODE_ENV !== 'production';
-		return res.status(500).json({ error: isDev ? `Server error: ${detail}` : 'Server error' });
+		console.error('[magic-link/request] FATAL:', detail, err && err.stack ? '\n' + err.stack : '');
+		return res.status(500).json({ error: `Server error: ${detail}` });
 	}
 });
 
