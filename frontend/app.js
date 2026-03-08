@@ -2997,6 +2997,19 @@ async function renderInventoryActivity(limit = 30) {
 		});
 	}
 
+	// Wire refresh button (once)
+	const refreshBtn = q('invHistoryRefreshBtn');
+	if (refreshBtn && !refreshBtn._wired) {
+		refreshBtn._wired = true;
+		refreshBtn.addEventListener('click', async () => {
+			refreshBtn.disabled = true;
+			refreshBtn.innerHTML = '<i class="fa fa-rotate-right fa-spin"></i>';
+			await renderInventoryActivity(limit);
+			refreshBtn.disabled = false;
+			refreshBtn.innerHTML = '<i class="fa fa-rotate-right"></i>';
+		});
+	}
+
 	const dateLabel = q('invHistoryDateLabel');
 	if (dateLabel) dateLabel.textContent = new Date(selectedDate + 'T00:00:00').toLocaleDateString(undefined, {weekday:'short', month:'short', day:'numeric'});
 
@@ -3016,18 +3029,12 @@ async function renderInventoryActivity(limit = 30) {
 		const resp = await apiFetch(`/api/activity?limit=${limit}&start=${selectedDate}&end=${selectedDate}`);
 		const allItems = (resp && resp.items) ? resp.items : [];
 
-		// Backend already filters by date via ?start=&end=
-		// Client-side guard: compare the LOCAL date string of each item's time
-		// so timezone differences between the server (UTC) and browser never
-		// cause items to disappear.
+		const dayStart = new Date(selectedDate + 'T00:00:00');
+		const dayEnd   = new Date(selectedDate + 'T23:59:59.999');
 		const items = allItems.filter(it => {
 			if (!it.time) return false;
-			// Convert the timestamp to the browser's local YYYY-MM-DD for comparison
-			const d = (it.time instanceof Date) ? it.time : new Date(it.time);
-			const localDate = d.getFullYear() + '-' +
-				String(d.getMonth() + 1).padStart(2, '0') + '-' +
-				String(d.getDate()).padStart(2, '0');
-			return localDate === selectedDate;
+			const d = new Date(it.time);
+			return d >= dayStart && d <= dayEnd;
 		}).slice(0, limit);
 
 		if (!items.length) {
