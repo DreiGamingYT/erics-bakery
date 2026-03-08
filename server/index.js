@@ -281,6 +281,11 @@ app.put('/api/users/me', authMiddleware, async (req, res) => {
 		const fields = [];
 		const params = [];
 
+		// Fetch current state so we can detect role change for notification
+		const [currentRows] = await pool.query('SELECT role, email, name, username FROM users WHERE id = ? LIMIT 1', [uid]);
+		const currentUser   = currentRows && currentRows[0];
+		const oldRole       = currentUser ? currentUser.role : null;
+
 		if (typeof newEmail === 'string' && newEmail.length > 0) {
 			const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 			if (!emailRe.test(newEmail)) return res.status(400).json({
@@ -351,6 +356,12 @@ app.put('/api/users/me', authMiddleware, async (req, res) => {
 				console.warn('[activity] failed to log profile update (non-blocking):', actErr && actErr.message ? actErr.message : actErr);
 			}
 		})();
+
+		// Send role-change notification email if role was actually changed
+		if (requestedRole && oldRole && requestedRole !== oldRole && user.email) {
+			sendRoleChangeEmail(user.email, user.name || user.username, oldRole, requestedRole, user.name || user.username)
+				.catch(e => console.warn('[role-change] self-change email failed', e && e.message));
+		}
 
 		return res.json({
 			user
@@ -1293,6 +1304,233 @@ async function sendResetEmail(toEmail, code) {
 	}
 }
 
+// ── Shared email helper ────────────────────────────────────────────────────
+function sha256(str) {
+	return crypto.createHash('sha256').update(str).digest('hex');
+}
+
+function buildEmailWrapper(logoUrl, bodyHtml) {
+	return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<style>
+  body{background:#f3f6fb;margin:0;padding:24px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial;color:#12202f}
+  .wrapper{max-width:600px;margin:20px auto}
+  .card{background:#fff;border-radius:12px;padding:28px;text-align:center;border:1px solid rgba(0,0,0,0.06);box-shadow:0 10px 30px rgba(16,24,40,0.06)}
+  .logo{width:84px;height:84px;border-radius:12px;margin:0 auto 16px;object-fit:cover;display:block}
+  h1{margin:4px 0 10px;font-size:20px;color:#0f2b4b}
+  .lead{color:#475569;font-size:14px;margin:0 0 20px;line-height:1.6}
+  .cta{display:inline-block;background:#1b85ec;color:#fff;padding:13px 28px;border-radius:10px;text-decoration:none;font-weight:700;font-size:15px;letter-spacing:.01em;margin-bottom:4px}
+  .footer{margin-top:20px;font-size:12px;color:#888;text-align:center}
+  @media(max-width:420px){.card{padding:18px}}
+</style>
+</head><body>
+<div class="wrapper" role="article">
+  <div class="card">
+    <img src="${process.env.RESET_EMAIL_LOGO_URL || 'https://i.ibb.co/9HshkkkB/logo.png'}" alt="Eric's Bakery" class="logo"/>
+    ${bodyHtml}
+  </div>
+</div>
+</body></html>`;
+}
+
+async function sendMagicLinkEmail(toEmail, name, magicLink) {
+	const subject = `Eric's Bakery — Your sign-in link`;
+	const plain   = `Hi ${name},\n\nClick the link below to sign in (valid for 15 minutes, single-use):\n\n${magicLink}\n\nIf you did not request this, ignore this message.`;
+	const html    = buildEmailWrapper(
+		process.env.RESET_EMAIL_LOGO_URL || 'https://i.ibb.co/9HshkkkB/logo.png',
+		`<h1>Sign in to Eric's Bakery</h1>
+		 <p class="lead">Hi <strong>${name.replace(/</g,'&lt;')}</strong>, click the button below to sign in instantly.<br>
+		 This link expires in <strong>15 minutes</strong> and can only be used once.</p>
+		 <a href="${magicLink}" class="cta">Sign in now &rarr;</a>
+		 <p style="margin-top:16px;color:#888;font-size:12px">Or copy this link:<br>
+		 <span style="word-break:break-all;color:#475569;font-size:11px">${magicLink}</span></p>
+		 <p style="color:#94a3b8;font-size:12px;margin-top:16px">If you didn't request this, you can safely ignore this email.</p>
+		 <div class="footer">Sent to ${toEmail}</div>`
+	);
+	if (mailTransporter) {
+		await mailTransporter.sendMail({ from: EMAIL_FROM, to: toEmail, subject, text: plain, html });
+		console.info('[magic-link] email sent to', toEmail);
+	} else {
+		console.info('[magic-link] SMTP not configured. Magic link for', toEmail, ':', magicLink);
+	}
+}
+
+async function sendRoleChangeEmail(toEmail, userName, oldRole, newRole, changedByName) {
+	if (!toEmail) return;
+	const subject = `Eric's Bakery — Your role has been updated`;
+	const plain   = `Hi ${userName},\n\nYour role has been updated from "${oldRole}" to "${newRole}" by ${changedByName}.\n\nIf you believe this is an error, please contact the system owner.`;
+	const roleColor = { Owner: '#7c3aed', Admin: '#1b85ec', Baker: '#16a34a', Assistant: '#d97706' };
+	const badge = (r) => `<span style="background:${roleColor[r]||'#888'};color:#fff;padding:3px 10px;border-radius:20px;font-size:13px;font-weight:700">${r}</span>`;
+	const html  = buildEmailWrapper(
+		process.env.RESET_EMAIL_LOGO_URL || 'https://i.ibb.co/9HshkkkB/logo.png',
+		`<h1>Role Updated</h1>
+		 <p class="lead">Hi <strong>${userName.replace(/</g,'&lt;')}</strong>, your role in Eric's Bakery has been changed.</p>
+		 <div style="display:flex;align-items:center;justify-content:center;gap:14px;margin:18px 0;flex-wrap:wrap">
+		   <div style="text-align:center"><div style="color:#888;font-size:12px;margin-bottom:4px">Previous role</div>${badge(oldRole)}</div>
+		   <div style="font-size:22px;color:#94a3b8">→</div>
+		   <div style="text-align:center"><div style="color:#888;font-size:12px;margin-bottom:4px">New role</div>${badge(newRole)}</div>
+		 </div>
+		 <p style="color:#64748b;font-size:13px">Changed by: <strong>${changedByName.replace(/</g,'&lt;')}</strong></p>
+		 <p style="color:#94a3b8;font-size:12px;margin-top:16px">If you believe this is a mistake, please contact the system owner.</p>
+		 <div class="footer">Sent to ${toEmail}</div>`
+	);
+	if (mailTransporter) {
+		await mailTransporter.sendMail({ from: EMAIL_FROM, to: toEmail, subject, text: plain, html });
+		console.info('[role-change] email sent to', toEmail);
+	} else {
+		console.info('[role-change] SMTP not configured. Would have emailed', toEmail, '— role:', oldRole, '->', newRole);
+	}
+}
+
+// ── Magic link: request ────────────────────────────────────────────────────
+app.post('/api/auth/magic-link/request', async (req, res) => {
+	const email = ((req.body && req.body.email) || '').trim().toLowerCase();
+	if (!email) return res.status(400).json({ error: 'email required' });
+
+	// Always return the same message to avoid email enumeration
+	const SAFE_RESPONSE = { ok: true, message: 'If this email is registered, a sign-in link has been sent.' };
+
+	try {
+		const [rows] = await pool.query('SELECT id, username, name, email FROM users WHERE email = ? LIMIT 1', [email]);
+		const user = rows && rows[0];
+		if (!user) { return res.json(SAFE_RESPONSE); }
+
+		// Rate-limit: one email per 60 seconds per user
+		const [recent] = await pool.query(
+			'SELECT id FROM magic_links WHERE user_id = ? AND created_at > NOW() - INTERVAL 60 SECOND AND used = 0 LIMIT 1',
+			[user.id]
+		);
+		if (recent && recent[0]) {
+			return res.status(429).json({ error: 'A sign-in link was sent recently. Please wait a minute before trying again.' });
+		}
+
+		// Invalidate any previous unused tokens for this user
+		await pool.query('UPDATE magic_links SET used = 1 WHERE user_id = ? AND used = 0', [user.id]);
+
+		// Generate and store token
+		const rawToken  = crypto.randomBytes(32).toString('hex');
+		const tokenHash = sha256(rawToken);
+		const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+		await pool.query(
+			'INSERT INTO magic_links (user_id, email, token_hash, expires_at) VALUES (?, ?, ?, ?)',
+			[user.id, email, tokenHash, expiresAt]
+		);
+
+		const frontendBase = (process.env.FRONTEND_ORIGIN || 'http://localhost:3000').replace(/\/$/, '');
+		const magicLink    = `${frontendBase}/?mltoken=${rawToken}`;
+		await sendMagicLinkEmail(email, user.name || user.username, magicLink);
+
+		return res.json(SAFE_RESPONSE);
+	} catch (err) {
+		console.error('[magic-link/request]', err && err.stack ? err.stack : err);
+		return res.status(500).json({ error: 'Server error' });
+	}
+});
+
+// ── Magic link: verify (called by frontend when token is in URL) ───────────
+app.post('/api/auth/magic-link/verify', async (req, res) => {
+	const rawToken = ((req.body && req.body.token) || '').trim();
+	if (!rawToken || rawToken.length !== 64) {
+		return res.status(400).json({ error: 'Invalid token format.' });
+	}
+
+	const tokenHash = sha256(rawToken);
+
+	try {
+		const [rows] = await pool.query(
+			`SELECT ml.id, ml.expires_at, ml.used,
+			        u.id AS uid, u.username, u.role, u.name,
+			        COALESCE(u.token_version, 0) AS token_version
+			 FROM magic_links ml
+			 JOIN users u ON u.id = ml.user_id
+			 WHERE ml.token_hash = ?
+			 LIMIT 1`,
+			[tokenHash]
+		);
+		const ml = rows && rows[0];
+
+		if (!ml)             return res.status(400).json({ error: 'Invalid or expired sign-in link.' });
+		if (ml.used)         return res.status(400).json({ error: 'This sign-in link has already been used. Please request a new one.' });
+		if (new Date(ml.expires_at) < new Date()) {
+			return res.status(400).json({ error: 'This sign-in link has expired. Please request a new one.' });
+		}
+
+		// Consume the token
+		await pool.query('UPDATE magic_links SET used = 1 WHERE id = ?', [ml.id]);
+
+		// Issue JWT + record session
+		const token = signToken({ id: ml.uid, username: ml.username, role: ml.role, name: ml.name, token_version: ml.token_version });
+		res.cookie(TOKEN_NAME, token, buildCookieOptions());
+
+		setImmediate(async () => {
+			try {
+				const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || null;
+				const ua = req.headers['user-agent']?.slice(0, 255) || null;
+				await pool.query('INSERT INTO user_sessions (user_id, ip_address, user_agent) VALUES (?, ?, ?)', [ml.uid, ip, ua]);
+			} catch (e) { console.warn('[magic-link] session insert failed', e && e.message); }
+		});
+
+		return res.json({ ok: true, user: { id: ml.uid, username: ml.username, role: ml.role, name: ml.name } });
+	} catch (err) {
+		console.error('[magic-link/verify]', err && err.stack ? err.stack : err);
+		return res.status(500).json({ error: 'Server error' });
+	}
+});
+
+// ── Admin: change a user's role ────────────────────────────────────────────
+app.patch('/api/admin/users/:id/role', authMiddleware, async (req, res) => {
+	if (!hasRole(req.user, ['Owner', 'Admin'])) {
+		return res.status(403).json({ error: 'Forbidden' });
+	}
+	const targetId  = Number(req.params.id);
+	const newRole   = (req.body && req.body.role || '').trim();
+	const ALLOWED   = ['Owner', 'Admin', 'Baker', 'Assistant'];
+
+	if (!targetId)              return res.status(400).json({ error: 'Invalid user id' });
+	if (!ALLOWED.includes(newRole)) return res.status(400).json({ error: `Role must be one of: ${ALLOWED.join(', ')}` });
+
+	// Non-owners cannot elevate anyone to Owner
+	if (newRole === 'Owner' && req.user.role !== 'Owner') {
+		return res.status(403).json({ error: 'Only Owners can assign the Owner role.' });
+	}
+
+	try {
+		const [rows] = await pool.query(
+			'SELECT id, username, name, email, role FROM users WHERE id = ? LIMIT 1',
+			[targetId]
+		);
+		if (!rows || !rows[0]) return res.status(404).json({ error: 'User not found' });
+		const target  = rows[0];
+		const oldRole = target.role;
+
+		if (oldRole === newRole) return res.json({ ok: true, message: 'Role unchanged', user: target });
+
+		await pool.query('UPDATE users SET role = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [newRole, targetId]);
+
+		// Log to activity (non-blocking)
+		pool.query('INSERT INTO activity (user_id, action, text) VALUES (?, ?, ?)', [
+			req.user.id,
+			'role_change',
+			`Role changed for ${target.name || target.username}: ${oldRole} → ${newRole} (by ${req.user.name || req.user.username})`
+		]).catch(e => console.warn('[role-change] activity log failed', e && e.message));
+
+		// Send notification email to the affected user (non-blocking)
+		if (target.email) {
+			sendRoleChangeEmail(
+				target.email,
+				target.name || target.username,
+				oldRole,
+				newRole,
+				req.user.name || req.user.username
+			).catch(e => console.warn('[role-change] email failed', e && e.message));
+		}
+
+		return res.json({ ok: true, oldRole, newRole, user: { ...target, role: newRole } });
+	} catch (err) {
+		console.error('PATCH /api/admin/users/:id/role err', err && err.stack ? err.stack : err);
+		return res.status(500).json({ error: 'Server error' });
+	}
+});
+
 app.get('/api/events', authMiddleware, async (req, res) => {
 	const date = (req.query.date || '').slice(0, 10);
 	try {
@@ -1593,6 +1831,23 @@ async function runStartupMigrations() {
 			)
 		`);
 		console.log('[startup] schedules table ready');
+
+		// 4. magic_links table — passwordless sign-in
+		await conn.query(`
+			CREATE TABLE IF NOT EXISTS magic_links (
+				id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+				user_id    INT NOT NULL,
+				email      VARCHAR(255) NOT NULL,
+				token_hash CHAR(64)     NOT NULL,
+				expires_at DATETIME     NOT NULL,
+				used       TINYINT(1)   NOT NULL DEFAULT 0,
+				created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				UNIQUE INDEX idx_ml_token  (token_hash),
+				       INDEX idx_ml_user   (user_id),
+				       INDEX idx_ml_expire (expires_at)
+			)
+		`);
+		console.log('[startup] magic_links table ready');
 	} catch (err) {
 		console.error('[startup] migration error:', err && err.message ? err.message : err);
 	} finally {

@@ -603,7 +603,12 @@
 							<button class="uma2-action-btn uma2-hist-btn" title="Login history" data-uid="${user.id}">
 								<i class="fa fa-clock"></i>
 							</button>
-							${!isSelf ? `<button class="uma2-action-btn delete uma2-del-btn" title="Delete user" data-uid="${user.id}">
+							${!isSelf ? `
+							<button class="uma2-action-btn uma2-role-btn" title="Change role"
+								data-uid="${user.id}" data-role="${escHtml(user.role || '')}">
+								<i class="fa fa-user-pen"></i>
+							</button>
+							<button class="uma2-action-btn delete uma2-del-btn" title="Delete user" data-uid="${user.id}">
 								<i class="fa fa-trash"></i>
 							</button>` : ''}
 						</div>
@@ -832,6 +837,15 @@
 			});
 		});
 
+		// Role change buttons
+		wrap.querySelectorAll('.uma2-role-btn').forEach(btn => {
+			btn.addEventListener('click', () => {
+				const uid  = Number(btn.dataset.uid);
+				const user = allUsers.find(u => u.id === uid || Number(u.id) === uid);
+				if (user) openRoleModal(user);
+			});
+		});
+
 		// Export
 		const exportBtn = wrap.querySelector('#uma2ExportBtn');
 		if (exportBtn) exportBtn.addEventListener('click', exportCSV);
@@ -989,6 +1003,148 @@
 				freshBtn.textContent = 'Delete';
 			}
 		});
+	}
+
+	// ── Role change modal ─────────────────────────────────────────────────────
+
+	function openRoleModal(user) {
+		const ROLES = ['Owner', 'Admin', 'Baker', 'Assistant'];
+
+		// Create modal overlay
+		let modal = document.getElementById('uma2RoleModal');
+		if (!modal) {
+			modal = document.createElement('div');
+			modal.id = 'uma2RoleModal';
+			modal.style.cssText = [
+				'position:fixed;inset:0;z-index:9000',
+				'background:rgba(0,0,0,0.55)',
+				'display:flex;align-items:center;justify-content:center',
+				'backdrop-filter:blur(2px)',
+				'opacity:0;transition:opacity .18s ease'
+			].join(';');
+			modal.innerHTML = `
+				<div class="uma2-modal-card" style="max-width:420px;animation:none">
+					<div class="uma2-modal-head">
+						<h4><i class="fa fa-user-pen" style="margin-right:8px"></i>Change Role</h4>
+						<button class="uma2-modal-close" id="uma2RoleClose" aria-label="Close">&times;</button>
+					</div>
+					<div class="uma2-modal-body">
+						<div id="uma2RoleUserInfo" style="display:flex;align-items:center;gap:12px;margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid rgba(0,0,0,0.06)"></div>
+						<label style="display:block;font-weight:700;font-size:.875rem;margin-bottom:8px;color:var(--text,#111)">
+							New role
+						</label>
+						<div id="uma2RoleOptions" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:18px"></div>
+						<div style="display:flex;gap:8px;justify-content:flex-end">
+							<button class="btn ghost small" id="uma2RoleCancelBtn" type="button">Cancel</button>
+							<button class="btn primary small" id="uma2RoleSaveBtn" type="button">
+								<i class="fa fa-check" style="margin-right:6px"></i>Save change
+							</button>
+						</div>
+						<div id="uma2RoleStatus" style="margin-top:10px;min-height:18px;font-size:.8rem"></div>
+					</div>
+				</div>`;
+			document.body.appendChild(modal);
+
+			// Close on backdrop click
+			modal.addEventListener('click', e => { if (e.target === modal) closeRoleModal(); });
+		}
+
+		// Populate user info
+		const userInfo = document.getElementById('uma2RoleUserInfo');
+		const color    = typeof avatarColor === 'function' ? avatarColor(user.username || String(user.id)) : '#1b85ec';
+		const ini      = typeof initials   === 'function' ? initials(user) : (user.username || '?').slice(0, 2).toUpperCase();
+		userInfo.innerHTML = `
+			<div style="width:40px;height:40px;border-radius:50%;background:${color};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:.9rem;flex-shrink:0">${escHtml(ini)}</div>
+			<div>
+				<div style="font-weight:700">${escHtml(user.name || user.username)}</div>
+				<div style="font-size:.8rem;color:var(--muted,#888)">@${escHtml(user.username)} · Current: <strong>${escHtml(user.role || 'Unknown')}</strong></div>
+			</div>`;
+
+		// Build role option cards
+		const roleOpts = document.getElementById('uma2RoleOptions');
+		const roleColors = { Owner: '#7c3aed', Admin: '#1b85ec', Baker: '#16a34a', Assistant: '#d97706' };
+		const roleIcons  = { Owner: 'fa-crown', Admin: 'fa-shield-halved', Baker: 'fa-bread-slice', Assistant: 'fa-user-tie' };
+		let selectedRole = user.role || ROLES[0];
+
+		roleOpts.innerHTML = ROLES.map(r => `
+			<button type="button" class="uma2-role-opt${r === selectedRole ? ' selected' : ''}" data-role="${escHtml(r)}"
+				style="
+					border:2px solid ${r === selectedRole ? roleColors[r] || '#1b85ec' : 'rgba(0,0,0,0.1)'};
+					border-radius:10px;padding:10px 8px;background:${r === selectedRole ? (roleColors[r] || '#1b85ec') + '15' : 'transparent'};
+					cursor:pointer;text-align:center;transition:all .14s ease;font-family:inherit">
+				<i class="fa ${roleIcons[r] || 'fa-user'}" style="color:${roleColors[r] || '#888'};font-size:1.1rem;display:block;margin-bottom:5px"></i>
+				<span style="font-size:.8rem;font-weight:700;color:var(--text,#111)">${escHtml(r)}</span>
+			</button>`).join('');
+
+		roleOpts.querySelectorAll('.uma2-role-opt').forEach(opt => {
+			opt.addEventListener('click', () => {
+				selectedRole = opt.dataset.role;
+				roleOpts.querySelectorAll('.uma2-role-opt').forEach(o => {
+					const c = roleColors[o.dataset.role] || '#1b85ec';
+					const active = o.dataset.role === selectedRole;
+					o.style.borderColor  = active ? c : 'rgba(0,0,0,0.1)';
+					o.style.background   = active ? c + '15' : 'transparent';
+					o.classList.toggle('selected', active);
+				});
+			});
+		});
+
+		// Status helper
+		function setStatus(msg, type) {
+			const el = document.getElementById('uma2RoleStatus');
+			if (!el) return;
+			el.textContent = msg;
+			el.style.color = type === 'error' ? '#dc2626' : type === 'success' ? '#16a34a' : '#475569';
+		}
+
+		// Save button
+		const saveBtn = document.getElementById('uma2RoleSaveBtn');
+		// Replace to clear old listeners
+		const freshSave = saveBtn.cloneNode(true);
+		saveBtn.parentNode.replaceChild(freshSave, saveBtn);
+
+		freshSave.addEventListener('click', async () => {
+			if (selectedRole === user.role) {
+				setStatus('Role is unchanged — please select a different role.', 'error');
+				return;
+			}
+			freshSave.disabled  = true;
+			freshSave.innerHTML = '<i class="fa fa-spinner fa-spin" style="margin-right:6px"></i>Saving…';
+			setStatus('', '');
+
+			try {
+				const result = await changeUserRole(user.id, selectedRole);
+				// Update local cache
+				const idx = allUsers.findIndex(u => u.id === user.id || Number(u.id) === Number(user.id));
+				if (idx !== -1) allUsers[idx].role = selectedRole;
+				applyFilters();
+				render();
+
+				setStatus(`Role updated to ${selectedRole}${result.user?.email ? ' — notification email sent' : ''}.`, 'success');
+				freshSave.disabled  = false;
+				freshSave.innerHTML = '<i class="fa fa-check" style="margin-right:6px"></i>Save change';
+				if (typeof window.notify === 'function') {
+					window.notify(`${user.name || user.username}'s role changed to ${selectedRole}`);
+				}
+				setTimeout(closeRoleModal, 1200);
+			} catch (err) {
+				setStatus(`Failed: ${err.message}`, 'error');
+				freshSave.disabled  = false;
+				freshSave.innerHTML = '<i class="fa fa-check" style="margin-right:6px"></i>Save change';
+			}
+		});
+
+		// Close / cancel
+		function closeRoleModal() {
+			modal.style.opacity = '0';
+			setTimeout(() => { modal.style.display = 'none'; }, 200);
+		}
+		document.getElementById('uma2RoleClose')?.addEventListener('click', closeRoleModal);
+		document.getElementById('uma2RoleCancelBtn')?.addEventListener('click', closeRoleModal);
+
+		// Show
+		modal.style.display = 'flex';
+		setTimeout(() => { modal.style.opacity = '1'; }, 20);
 	}
 
 	// ── Main render entry ─────────────────────────────────────────────────────
