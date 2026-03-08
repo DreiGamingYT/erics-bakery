@@ -102,18 +102,19 @@ function signToken(user) {
 		id: user.id,
 		username: user.username,
 		role: user.role,
-		name: user.name
+		name: user.name,
+		tv: user.token_version != null ? Number(user.token_version) : 0  // token version for session invalidation
 	}, JWT_SECRET, {
 		expiresIn: '7d'
 	});
 }
 async function getUserByUsername(username) {
 	const [rows] = await pool.query(
-		'SELECT id, username, password_hash, role, name FROM users WHERE username = ?', [username]);
+		'SELECT id, username, password_hash, role, name, COALESCE(token_version, 0) AS token_version FROM users WHERE username = ?', [username]);
 	return rows[0];
 }
 
-function authMiddleware(req, res, next) {
+async function authMiddleware(req, res, next) {
 	try {
 		const token = req.cookies[TOKEN_NAME] || (req.headers.authorization && req.headers.authorization
 			.split(' ')[1]);
@@ -122,6 +123,31 @@ function authMiddleware(req, res, next) {
 		});
 		const data = jwt.verify(token, JWT_SECRET);
 		req.user = data;
+
+		// ── Token-version check: invalidate old tokens after password change ──
+		// Only run this check if the token carries a 'tv' claim (new tokens do).
+		if (typeof data.tv !== 'undefined' && data.id) {
+			try {
+				const [rows] = await pool.query(
+					'SELECT COALESCE(token_version, 0) AS token_version FROM users WHERE id = ? LIMIT 1',
+					[data.id]
+				);
+				if (!rows || !rows[0]) {
+					return res.status(401).json({ message: 'User not found', code: 'SESSION_INVALIDATED' });
+				}
+				if (Number(rows[0].token_version) !== Number(data.tv)) {
+					res.clearCookie(TOKEN_NAME, buildCookieOptions());
+					return res.status(401).json({
+						message: 'Your session has expired — please sign in again.',
+						code: 'SESSION_INVALIDATED'
+					});
+				}
+			} catch (dbErr) {
+				// Fail open on DB error so a DB hiccup doesn't lock everyone out
+				console.warn('[auth] token_version check failed (non-blocking):', dbErr && dbErr.message);
+			}
+		}
+
 		next();
 	} catch (e) {
 		return res.status(401).json({
@@ -134,35 +160,6 @@ function hasRole(user, roles) {
 	if (!user || !user.role) return false;
 	const r = String(user.role || '').toLowerCase();
 	return roles.map(x => String(x).toLowerCase()).includes(r);
-}
-
-// ── Auth audit log helper ─────────────────────────────────────────────────
-async function logAuthEvent(eventType, userId, req, meta = {}) {
-	try {
-		const ip = req?.headers?.['x-forwarded-for']?.split(',')[0]?.trim()
-			|| req?.socket?.remoteAddress || null;
-		const ua = req?.headers?.['user-agent']?.slice(0, 255) || null;
-		const metaJson = Object.keys(meta).length ? JSON.stringify(meta) : null;
-		await pool.query(
-			`INSERT INTO auth_audit_log (event_type, user_id, ip_address, user_agent, meta, created_at)
-			 VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-			[eventType, userId || null, ip, ua, metaJson]
-		);
-	} catch (e) {
-		console.warn('[audit] logAuthEvent failed (non-blocking):', e?.message);
-	}
-}
-
-// ── Email helper (generic) ────────────────────────────────────────────────
-async function sendMail({ to, subject, html, text }) {
-	if (!mailTransporter) {
-		console.warn('[mail] SMTP not configured — email not sent:', subject);
-		return;
-	}
-	const fromAddress = (process.env.EMAIL_FROM && process.env.EMAIL_FROM.trim())
-		? process.env.EMAIL_FROM.trim()
-		: process.env.SMTP_USER;
-	await mailTransporter.sendMail({ from: fromAddress, to, subject, text, html });
 }
 
 app.post('/api/auth/signup', async (req, res) => {
@@ -215,26 +212,21 @@ app.post('/api/auth/login', async (req, res) => {
 			password
 		} = req.body;
 		const user = await getUserByUsername(username);
-		if (!user) {
-			setImmediate(() => logAuthEvent('login_failed', null, req, { username: username || '' }));
-			return res.status(401).json({
+		if (!user) return res.status(401).json({
 			message: 'Invalid credentials'
 		});
-		}
 
 		const ok = await bcrypt.compare(password, user.password_hash);
-		if (!ok) {
-			setImmediate(() => logAuthEvent('login_failed', user.id, req, { username: user.username }));
-			return res.status(401).json({
+		if (!ok) return res.status(401).json({
 			message: 'Invalid credentials'
 		});
-		}
 
 		const token = signToken({
 			id: user.id,
 			username: user.username,
 			role: user.role,
-			name: user.name
+			name: user.name,
+			token_version: user.token_version || 0
 		});
 
 		res.cookie(TOKEN_NAME, token, buildCookieOptions());
@@ -250,8 +242,6 @@ app.post('/api/auth/login', async (req, res) => {
 				);
 			} catch (e) { console.warn('[sessions] login insert failed', e && e.message); }
 		});
-
-		setImmediate(() => logAuthEvent('login_success', user.id, req, { username: user.username }));
 
 		return res.json({
 			user: {
@@ -385,7 +375,6 @@ app.post('/api/auth/logout', async (req, res) => {
 					`UPDATE user_sessions SET logged_out_at = CURRENT_TIMESTAMP WHERE user_id = ? AND logged_out_at IS NULL ORDER BY logged_in_at DESC LIMIT 1`,
 					[data.id]
 				).catch(e => console.warn('[sessions] logout update failed', e && e.message));
-				setImmediate(() => logAuthEvent('logout', data.id, req, { username: data.username }));
 			}
 		}
 	} catch {} // expired / missing token — that's fine, just clear the cookie
@@ -474,6 +463,31 @@ app.get('/api/admin/users/:id/sessions', authMiddleware, async (req, res) => {
 		return res.json({ sessions: rows });
 	} catch (err) {
 		console.error('GET /api/admin/users/:id/sessions err', err && err.stack ? err.stack : err);
+		return res.status(500).json({ error: 'Server error' });
+	}
+});
+
+// ── Current user: own session history ─────────────────────────────────────
+app.get('/api/users/me/sessions', authMiddleware, async (req, res) => {
+	const uid = req.user && req.user.id;
+	if (!uid) return res.status(401).json({ error: 'Not authenticated' });
+	try {
+		const [rows] = await pool.query(
+			`SELECT id,
+			        logged_in_at    AS login,
+			        logged_out_at   AS logout,
+			        ip_address,
+			        user_agent,
+			        last_active_at
+			 FROM user_sessions
+			 WHERE user_id = ?
+			 ORDER BY logged_in_at DESC
+			 LIMIT 20`,
+			[uid]
+		);
+		return res.json({ sessions: rows });
+	} catch (err) {
+		console.error('GET /api/users/me/sessions err', err && err.stack ? err.stack : err);
 		return res.status(500).json({ error: 'Server error' });
 	}
 });
@@ -1174,9 +1188,31 @@ app.post('/api/auth/change-password', authMiddleware, async (req, res) => {
 		});
 
 		const newHash = await bcrypt.hash(newPassword, 10);
-		await pool.query('UPDATE users SET password_hash = ? WHERE id = ?', [newHash, uid]);
+		// Increment token_version — this invalidates ALL other active sessions immediately
+		await pool.query(
+			'UPDATE users SET password_hash = ?, token_version = COALESCE(token_version, 0) + 1 WHERE id = ?',
+			[newHash, uid]
+		);
 
-		setImmediate(() => logAuthEvent('password_changed', uid, req));
+		// Re-issue a fresh token for this device so the current session continues working
+		try {
+			const [updatedRows] = await pool.query(
+				'SELECT COALESCE(token_version, 0) AS token_version, username, role, name FROM users WHERE id = ? LIMIT 1',
+				[uid]
+			);
+			if (updatedRows && updatedRows[0]) {
+				const newToken = signToken({
+					id: uid,
+					username: updatedRows[0].username,
+					role:     updatedRows[0].role,
+					name:     updatedRows[0].name,
+					token_version: updatedRows[0].token_version
+				});
+				res.cookie(TOKEN_NAME, newToken, buildCookieOptions());
+			}
+		} catch (reissueErr) {
+			console.warn('[change-password] token reissue failed:', reissueErr && reissueErr.message);
+		}
 
 		return res.json({
 			ok: true,
@@ -1499,262 +1535,6 @@ app.delete('/api/schedules/:id', authMiddleware, async (req, res) => {
 	}
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ── Magic Link / Passwordless Login ──────────────────────────────────────────
-// ─────────────────────────────────────────────────────────────────────────────
-
-const MAGIC_EXPIRE_MIN = Number(process.env.MAGIC_LINK_EXPIRE_MIN || 15);
-const FRONTEND_ORIGIN  = process.env.FRONTEND_ORIGIN || 'http://localhost:3000';
-
-// POST /api/auth/magic-link/request  { email }
-app.post('/api/auth/magic-link/request', async (req, res) => {
-	try {
-		const email = (req.body?.email || '').trim().toLowerCase();
-		if (!email) return res.status(400).json({ error: 'email required' });
-
-		// Always respond ok — never reveal whether the email exists
-		const [rows] = await pool.query(
-			'SELECT id, username, name, role FROM users WHERE email = ? LIMIT 1', [email]);
-		const user = rows?.[0] || null;
-
-		if (user) {
-			// Invalidate any existing unused tokens for this user
-			await pool.query(
-				`UPDATE magic_links SET used = 1 WHERE user_id = ? AND used = 0`, [user.id]);
-
-			const rawToken  = crypto.randomBytes(32).toString('hex');
-			const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
-			const expiresAt = new Date(Date.now() + MAGIC_EXPIRE_MIN * 60 * 1000);
-
-			await pool.query(
-				`INSERT INTO magic_links (user_id, token_hash, expires_at) VALUES (?, ?, ?)`,
-				[user.id, tokenHash, expiresAt]);
-
-			const magicUrl = `${FRONTEND_ORIGIN}/?magic=${encodeURIComponent(rawToken)}`;
-			const logoUrl  = process.env.RESET_EMAIL_LOGO_URL || 'https://i.ibb.co/9HshkkkB/logo.png';
-
-			const html = `<!doctype html><html><head><meta charset="utf-8"/><title>Sign in link</title>
-<style>body{background:#f3f6fb;margin:0;padding:24px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial;color:#12202f}.wrapper{max-width:600px;margin:20px auto}.card{background:#fff;border-radius:12px;padding:26px;text-align:center;border:1px solid rgba(0,0,0,.06);box-shadow:0 10px 30px rgba(16,24,40,.06)}.logo{width:84px;height:84px;border-radius:12px;margin:0 auto 14px;object-fit:cover}h1{margin:6px 0 8px;font-size:20px;color:#0f2b4b}.lead{color:#475569;font-size:14px;margin:0 0 18px}.btn{display:inline-block;background:#1b85ec;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:700;font-size:15px}.footer{margin-top:20px;font-size:12px;color:#555}</style>
-</head><body><div class="wrapper"><div class="card">
-<img src="${logoUrl}" alt="Eric's Bakery" class="logo"/>
-<h1>Sign in to Eric's Bakery</h1>
-<p class="lead">Click the button below to sign in instantly — no password needed. This link expires in ${MAGIC_EXPIRE_MIN} minutes.</p>
-<a href="${magicUrl}" class="btn">Sign me in</a>
-<p style="margin-top:16px;color:#888;font-size:12px">Or copy this link:<br/><span style="word-break:break-all;font-size:11px">${magicUrl}</span></p>
-<p style="color:#aaa;font-size:12px;margin-top:12px">If you did not request this, ignore this email.</p>
-<div class="footer">Sent to ${email}</div>
-</div></div></body></html>`;
-
-			const text = `Sign in to Eric's Bakery\n\nClick this link to sign in (expires in ${MAGIC_EXPIRE_MIN} min):\n${magicUrl}\n\nIf you did not request this, ignore this email.`;
-
-			sendMail({
-				to: email,
-				subject: `Eric's Bakery — your sign-in link`,
-				html,
-				text
-			}).catch(e => console.warn('[magic-link] email failed:', e?.message));
-
-			setImmediate(() => logAuthEvent('magic_link_requested', user.id, req, { email }));
-		}
-
-		// Always return ok — no user enumeration
-		return res.json({ ok: true, message: 'If that email is registered, a sign-in link has been sent.' });
-	} catch (err) {
-		console.error('POST /api/auth/magic-link/request err', err?.stack || err);
-		return res.status(500).json({ error: 'Server error' });
-	}
-});
-
-// GET /api/auth/magic-link/verify?token=xxx
-app.get('/api/auth/magic-link/verify', async (req, res) => {
-	try {
-		const rawToken = (req.query.token || '').trim();
-		if (!rawToken) return res.status(400).json({ error: 'token required' });
-
-		const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
-		const [rows] = await pool.query(
-			`SELECT ml.id, ml.user_id, ml.expires_at, ml.used,
-			        u.username, u.role, u.name, u.email
-			 FROM magic_links ml
-			 JOIN users u ON u.id = ml.user_id
-			 WHERE ml.token_hash = ? LIMIT 1`,
-			[tokenHash]);
-
-		const link = rows?.[0];
-		if (!link)                           return res.status(400).json({ error: 'Invalid or expired link' });
-		if (link.used)                       return res.status(400).json({ error: 'This link has already been used' });
-		if (new Date(link.expires_at) < new Date()) {
-			await pool.query('UPDATE magic_links SET used = 1 WHERE id = ?', [link.id]);
-			return res.status(400).json({ error: 'Link has expired — please request a new one' });
-		}
-
-		// Consume the token
-		await pool.query('UPDATE magic_links SET used = 1, used_at = CURRENT_TIMESTAMP WHERE id = ?', [link.id]);
-
-		const user = { id: link.user_id, username: link.username, role: link.role, name: link.name };
-		const jwtToken = signToken(user);
-		res.cookie(TOKEN_NAME, jwtToken, buildCookieOptions());
-
-		// Log session
-		setImmediate(async () => {
-			try {
-				const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || null;
-				const ua = req.headers['user-agent']?.slice(0, 255) || null;
-				await pool.query('INSERT INTO user_sessions (user_id, ip_address, user_agent) VALUES (?, ?, ?)', [user.id, ip, ua]);
-			} catch (e) { console.warn('[sessions] magic-link insert failed', e?.message); }
-		});
-
-		setImmediate(() => logAuthEvent('magic_link_used', user.id, req, { username: user.username }));
-
-		return res.json({ ok: true, user });
-	} catch (err) {
-		console.error('GET /api/auth/magic-link/verify err', err?.stack || err);
-		return res.status(500).json({ error: 'Server error' });
-	}
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ── Admin: change user role (with email notification) ────────────────────────
-// ─────────────────────────────────────────────────────────────────────────────
-
-const ALLOWED_ROLES = ['Owner', 'Admin', 'Baker'];
-
-app.patch('/api/admin/users/:id/role', authMiddleware, async (req, res) => {
-	if (!hasRole(req.user, ['Owner'])) {
-		return res.status(403).json({ error: 'Only Owners can change roles' });
-	}
-	const targetId = Number(req.params.id);
-	if (!targetId) return res.status(400).json({ error: 'Invalid user id' });
-	if (targetId === Number(req.user.id)) {
-		return res.status(400).json({ error: 'Cannot change your own role here' });
-	}
-
-	const newRole = (req.body?.role || '').trim();
-	if (!ALLOWED_ROLES.includes(newRole)) {
-		return res.status(400).json({ error: `Role must be one of: ${ALLOWED_ROLES.join(', ')}` });
-	}
-
-	try {
-		const [rows] = await pool.query(
-			'SELECT id, username, name, email, role FROM users WHERE id = ? LIMIT 1', [targetId]);
-		const target = rows?.[0];
-		if (!target) return res.status(404).json({ error: 'User not found' });
-
-		const oldRole = target.role;
-		if (oldRole === newRole) return res.json({ ok: true, message: 'Role unchanged', user: target });
-
-		await pool.query('UPDATE users SET role = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [newRole, targetId]);
-
-		// Audit log
-		setImmediate(() => logAuthEvent('role_changed', targetId, req, {
-			changed_by: req.user.username,
-			from_role: oldRole,
-			to_role: newRole,
-			target_username: target.username
-		}));
-
-		// Email notification to the affected user
-		if (target.email) {
-			const logoUrl = process.env.RESET_EMAIL_LOGO_URL || 'https://i.ibb.co/9HshkkkB/logo.png';
-			const changedByName = req.user.name || req.user.username;
-			const html = `<!doctype html><html><head><meta charset="utf-8"/><title>Role updated</title>
-<style>body{background:#f3f6fb;margin:0;padding:24px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial;color:#12202f}.wrapper{max-width:600px;margin:20px auto}.card{background:#fff;border-radius:12px;padding:26px;text-align:center;border:1px solid rgba(0,0,0,.06);box-shadow:0 10px 30px rgba(16,24,40,.06)}.logo{width:84px;height:84px;border-radius:12px;margin:0 auto 14px;object-fit:cover}h1{margin:6px 0 8px;font-size:20px;color:#0f2b4b}.badge{display:inline-block;padding:4px 12px;border-radius:20px;font-weight:700;font-size:13px}.old{background:#fef3c7;color:#92400e}.new{background:#d1fae5;color:#065f46}.footer{margin-top:20px;font-size:12px;color:#555}</style>
-</head><body><div class="wrapper"><div class="card">
-<img src="${logoUrl}" alt="Eric's Bakery" class="logo"/>
-<h1>Your role has been updated</h1>
-<p style="color:#475569;font-size:14px">Hi <strong>${target.name || target.username}</strong>, your account role in Eric's Bakery has been changed by <strong>${changedByName}</strong>.</p>
-<p style="font-size:15px">
-  <span class="badge old">${oldRole}</span>
-  &nbsp;→&nbsp;
-  <span class="badge new">${newRole}</span>
-</p>
-<p style="color:#888;font-size:13px">If you believe this was a mistake, please contact your administrator.</p>
-<div style="margin-top:18px"><a href="${FRONTEND_ORIGIN}" target="_blank" style="display:inline-block;background:#1b85ec;color:#fff;padding:10px 16px;border-radius:10px;text-decoration:none;font-weight:700">Open Eric's Bakery</a></div>
-<div class="footer">Sent to ${target.email}</div>
-</div></div></body></html>`;
-			const text = `Hi ${target.name || target.username},\n\nYour role in Eric's Bakery has been changed from "${oldRole}" to "${newRole}" by ${changedByName}.\n\nIf this was a mistake, please contact your administrator.`;
-			sendMail({
-				to: target.email,
-				subject: `Eric's Bakery — your role has been updated`,
-				html,
-				text
-			}).catch(e => console.warn('[role-change] email failed:', e?.message));
-		}
-
-		return res.json({ ok: true, user: { ...target, role: newRole } });
-	} catch (err) {
-		console.error('PATCH /api/admin/users/:id/role err', err?.stack || err);
-		return res.status(500).json({ error: 'Server error' });
-	}
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ── Auth Audit Log routes ─────────────────────────────────────────────────────
-// ─────────────────────────────────────────────────────────────────────────────
-
-// GET /api/auth/audit-log  (Owner/Admin — all users)
-app.get('/api/auth/audit-log', authMiddleware, async (req, res) => {
-	if (!hasRole(req.user, ['Owner', 'Admin'])) {
-		return res.status(403).json({ error: 'Forbidden' });
-	}
-	try {
-		const limit  = Math.min(500, Math.max(1, Number(req.query.limit  || 100)));
-		const offset = Math.max(0, Number(req.query.offset || 0));
-		const [rows] = await pool.query(
-			`SELECT al.id, al.event_type, al.user_id, al.ip_address, al.user_agent, al.meta, al.created_at,
-			        u.username, u.name
-			 FROM auth_audit_log al
-			 LEFT JOIN users u ON u.id = al.user_id
-			 ORDER BY al.created_at DESC
-			 LIMIT ? OFFSET ?`,
-			[limit, offset]);
-		const [cnt] = await pool.query('SELECT COUNT(*) AS c FROM auth_audit_log');
-		return res.json({ logs: rows, total: cnt?.[0]?.c || 0 });
-	} catch (err) {
-		console.error('GET /api/auth/audit-log err', err?.stack || err);
-		return res.status(500).json({ error: 'Server error' });
-	}
-});
-
-// GET /api/auth/audit-log/me  (any authenticated user — own events only)
-app.get('/api/auth/audit-log/me', authMiddleware, async (req, res) => {
-	try {
-		const limit = Math.min(100, Math.max(1, Number(req.query.limit || 50)));
-		const [rows] = await pool.query(
-			`SELECT id, event_type, ip_address, user_agent, meta, created_at
-			 FROM auth_audit_log
-			 WHERE user_id = ?
-			 ORDER BY created_at DESC
-			 LIMIT ?`,
-			[req.user.id, limit]);
-		return res.json({ logs: rows });
-	} catch (err) {
-		console.error('GET /api/auth/audit-log/me err', err?.stack || err);
-		return res.status(500).json({ error: 'Server error' });
-	}
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ── Own sessions (current user) ───────────────────────────────────────────────
-// ─────────────────────────────────────────────────────────────────────────────
-
-// GET /api/auth/sessions/me
-app.get('/api/auth/sessions/me', authMiddleware, async (req, res) => {
-	try {
-		const [rows] = await pool.query(
-			`SELECT id, logged_in_at, logged_out_at, last_active_at, ip_address, user_agent
-			 FROM user_sessions
-			 WHERE user_id = ?
-			 ORDER BY logged_in_at DESC
-			 LIMIT 20`,
-			[req.user.id]);
-		return res.json({ sessions: rows });
-	} catch (err) {
-		console.error('GET /api/auth/sessions/me err', err?.stack || err);
-		return res.status(500).json({ error: 'Server error' });
-	}
-});
-
 async function runStartupMigrations() {
 	const conn = await pool.getConnection();
 	try {
@@ -1781,6 +1561,14 @@ async function runStartupMigrations() {
 			if (e.code !== 'ER_DUP_FIELDNAME') console.warn('[startup] notif_prefs:', e.message);
 		}
 
+		// 2b. token_version — used to invalidate all other sessions on password change
+		try {
+			await conn.query(`ALTER TABLE users ADD COLUMN token_version INT NOT NULL DEFAULT 0`);
+			console.log('[startup] token_version column added to users');
+		} catch (e) {
+			if (e.code !== 'ER_DUP_FIELDNAME') console.warn('[startup] token_version:', e.message);
+		}
+
 		try {
 			await conn.query(`ALTER TABLE user_sessions ADD COLUMN last_active_at DATETIME DEFAULT NULL`);
 			await conn.query(`ALTER TABLE user_sessions ADD INDEX idx_user_sessions_active (last_active_at)`);
@@ -1805,40 +1593,6 @@ async function runStartupMigrations() {
 			)
 		`);
 		console.log('[startup] schedules table ready');
-
-		// 4. magic_links table
-		await conn.query(`
-			CREATE TABLE IF NOT EXISTS magic_links (
-				id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-				user_id     INT NOT NULL,
-				token_hash  VARCHAR(64) NOT NULL,
-				expires_at  DATETIME NOT NULL,
-				used        TINYINT(1) NOT NULL DEFAULT 0,
-				used_at     DATETIME DEFAULT NULL,
-				created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-				UNIQUE KEY uniq_token (token_hash),
-				INDEX idx_magic_user (user_id),
-				INDEX idx_magic_expires (expires_at)
-			)
-		`);
-		console.log('[startup] magic_links table ready');
-
-		// 5. auth_audit_log table
-		await conn.query(`
-			CREATE TABLE IF NOT EXISTS auth_audit_log (
-				id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-				event_type  VARCHAR(64) NOT NULL,
-				user_id     INT DEFAULT NULL,
-				ip_address  VARCHAR(64) DEFAULT NULL,
-				user_agent  VARCHAR(255) DEFAULT NULL,
-				meta        JSON DEFAULT NULL,
-				created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-				INDEX idx_audit_user (user_id),
-				INDEX idx_audit_event (event_type),
-				INDEX idx_audit_created (created_at)
-			)
-		`);
-		console.log('[startup] auth_audit_log table ready');
 	} catch (err) {
 		console.error('[startup] migration error:', err && err.message ? err.message : err);
 	} finally {
