@@ -23,8 +23,6 @@ const INVENTORY_PAGE_LIMIT = 5;
 		console.warn(DISABLED, 'stub install failed', e);
 	}
 
-	if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', hideProductOrderUI);
-	else hideProductOrderUI();
 
 	function wrapApiFetchIfPresent() {
 		try {
