@@ -1981,7 +1981,7 @@ async function renderDashboard() {
 
 	try {
 		const [totalResp, lowResp, expResp, equipResp, lowItemsResp, expItemsResp] = await Promise.all([
-			apiFetch('/api/ingredients?type=ingredient&limit=1&page=1'),
+			apiFetch('/api/ingredients?limit=1&page=1'),  // no type filter — count ALL items
 			apiFetch('/api/ingredients?filter=low&limit=1&page=1'),
 			apiFetch('/api/ingredients?filter=expiring&limit=1&page=1'),
 			apiFetch('/api/ingredients?type=equipment&limit=1&page=1'),
