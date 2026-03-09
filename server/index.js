@@ -1658,9 +1658,16 @@ const PORT = process.env.PORT || 3000;
 app.get('/api/notifications/prefs', authMiddleware, async (req, res) => {
 	try {
 		const [rows] = await pool.query('SELECT notif_prefs FROM users WHERE id = ? LIMIT 1', [req.user.id]);
-		const raw = rows[0]?.notif_prefs || null;
+		const raw = rows[0]?.notif_prefs ?? null;
 		let prefs = {};
-		try { prefs = raw ? JSON.parse(raw) : {}; } catch {}
+		if (raw !== null && raw !== undefined) {
+			// mysql2 auto-parses JSON columns into JS objects — handle both cases
+			if (typeof raw === 'object') {
+				prefs = raw;
+			} else {
+				try { prefs = JSON.parse(String(raw)); } catch {}
+			}
+		}
 		return res.json({ prefs });
 	} catch (err) {
 		console.error('GET /api/notifications/prefs err', err && err.message);

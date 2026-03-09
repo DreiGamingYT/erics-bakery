@@ -13,42 +13,17 @@
 		return data;
 	}
 
-	// ── localStorage cache — keyed per user, written on save, read instantly ──
-
-	function getCacheKey() {
-		try {
-			// bakery_session is set by app.js before startApp() is called
-			const s = JSON.parse(localStorage.getItem('bakery_session') || 'null');
-			return s && s.username ? `notif_prefs_cache_${s.username}` : null;
-		} catch (e) { return null; }
-	}
-
-	function readCachedPrefs() {
-		const key = getCacheKey();
-		if (!key) return null;
-		try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { return null; }
-	}
-
-	function writeCachedPrefs(prefs) {
-		const key = getCacheKey();
-		if (!key) return;
-		try { localStorage.setItem(key, JSON.stringify(prefs)); } catch (e) {}
-	}
-
 	async function loadPrefs() {
 		try {
 			const d = await apiFetch('/api/notifications/prefs');
-			const prefs = d.prefs || {};
-			writeCachedPrefs(prefs);
-			return prefs;
+			return d.prefs || {};
 		} catch (e) {
 			console.warn('[notif] loadPrefs failed:', e.message);
-			return readCachedPrefs() || {};
+			return {};
 		}
 	}
 
 	async function savePrefs(prefs) {
-		writeCachedPrefs(prefs); // instant cache write so next render is correct
 		return apiFetch('/api/notifications/prefs', { method: 'PUT', body: JSON.stringify(prefs) });
 	}
 
@@ -272,25 +247,19 @@
 		};
 	}
 
-	// ── Core: apply cached prefs instantly, then refresh from server ──────────
+	// ── Load prefs from server and apply to UI ────────────────────────────────
 
-	function applyPrefsNow() {
-		// Instant restore from localStorage (synchronous — no flicker)
-		const cached = readCachedPrefs();
-		if (cached) {
-			currentPrefs = cached;
-			applyPrefsToUI(cached);
-			restartPoll(cached);
-			initNotifSettings();
-		}
-		// Then refresh from server in background and update cache
-		loadPrefs().then(prefs => {
+	async function applyServerPrefs() {
+		try {
+			const prefs = await loadPrefs();
 			currentPrefs = prefs;
 			applyPrefsToUI(prefs);
 			restartPoll(prefs);
 			maybeSendDailyDigest(prefs);
 			initNotifSettings();
-		}).catch(() => {});
+		} catch (e) {
+			console.warn('[notif] applyServerPrefs failed:', e.message);
+		}
 	}
 
 	// ── Daily digest ──────────────────────────────────────────────────────────
@@ -305,24 +274,9 @@
 		try { await sendEmail('digest'); localStorage.setItem(key, '1'); } catch {}
 	}
 
-	// ── Patch startApp — the guaranteed entry point after login AND refresh ───
-	// app.js calls startApp() after the splash (on refresh with saved session)
-	// and after login. By this point setSession() has already run, so
-	// getCacheKey() will return the correct per-user key.
-
-	function patchStartApp() {
-		if (window.startApp?._notifPatched) return;
-		const orig = window.startApp;
-		if (typeof orig !== 'function') return;
-		window.startApp = function () {
-			orig.apply(this, arguments);
-			// Session is now set — apply cached prefs immediately
-			applyPrefsNow();
-		};
-		window.startApp._notifPatched = true;
-	}
-
-	// ── Also patch populateSettings so prefs reload every settings tab open ───
+	// ── Patch populateSettings — called every time Settings tab is opened ─────
+	// This is the ONLY place we need to hook: when the user opens Settings,
+	// fetch fresh prefs from server (which now correctly reads the DB) and apply.
 
 	function patchPopulateSettings() {
 		if (window.populateSettings?._notifPatched) return;
@@ -330,19 +284,33 @@
 		if (typeof orig !== 'function') return;
 		window.populateSettings = function () {
 			orig.apply(this, arguments);
-			applyPrefsNow();
+			applyServerPrefs();
 		};
 		window.populateSettings._notifPatched = true;
+	}
+
+	// ── Also patch populateProfile ────────────────────────────────────────────
+
+	function patchPopulateProfile() {
+		if (window.populateProfile?._notifPatched) return;
+		const orig = window.populateProfile;
+		if (typeof orig !== 'function') return;
+		window.populateProfile = async function () {
+			await orig.apply(this, arguments);
+			applyServerPrefs();
+		};
+		window.populateProfile._notifPatched = true;
 	}
 
 	// ── Init ──────────────────────────────────────────────────────────────────
 
 	function init() {
+		// app.js loads AFTER notifications.js, so poll until functions exist
 			let attempts = 0;
 			const tryPatch = setInterval(() => {
-			if (window.startApp          && !window.startApp._notifPatched)          patchStartApp();
-			if (window.populateSettings  && !window.populateSettings._notifPatched)  patchPopulateSettings();
-			const done = window.startApp?._notifPatched && window.populateSettings?._notifPatched;
+			if (window.populateSettings && !window.populateSettings._notifPatched) patchPopulateSettings();
+			if (window.populateProfile  && !window.populateProfile._notifPatched)  patchPopulateProfile();
+			const done = window.populateSettings?._notifPatched && window.populateProfile?._notifPatched;
 			if (done || ++attempts > 200) clearInterval(tryPatch);
 			}, 50);
 		}
