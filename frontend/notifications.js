@@ -13,17 +13,37 @@
 		return data;
 	}
 
+	// ── localStorage cache so checkboxes restore instantly (no async delay) ───
+
+	function getCacheKey() {
+		try {
+			const s = JSON.parse(localStorage.getItem('bakery_session') || 'null');
+			return s && s.username ? `notif_prefs_cache_${s.username}` : 'notif_prefs_cache';
+		} catch (e) { return 'notif_prefs_cache'; }
+	}
+
+	function readCachedPrefs() {
+		try { return JSON.parse(localStorage.getItem(getCacheKey()) || 'null'); } catch (e) { return null; }
+	}
+
+	function writeCachedPrefs(prefs) {
+		try { localStorage.setItem(getCacheKey(), JSON.stringify(prefs)); } catch (e) {}
+	}
+
 	async function loadPrefs() {
 		try {
 			const d = await apiFetch('/api/notifications/prefs');
-			return d.prefs || {};
+			const prefs = d.prefs || {};
+			writeCachedPrefs(prefs); // keep cache fresh after every server fetch
+			return prefs;
 		} catch (e) {
 			console.warn('[notif] loadPrefs failed:', e.message);
-			return {};
+			return readCachedPrefs() || {}; // fall back to cache if offline/error
 		}
 	}
 
 	async function savePrefs(prefs) {
+		writeCachedPrefs(prefs); // write cache immediately so next render is instant
 		return apiFetch('/api/notifications/prefs', { method: 'PUT', body: JSON.stringify(prefs) });
 	}
 
@@ -231,7 +251,7 @@
 						setBanner('Browser permission denied — push notifications disabled.', 'error');
 					}
 				}
-				await savePrefs(prefs);
+				await savePrefs(prefs); // also writes to localStorage cache
 				currentPrefs = prefs;
 				syncSubOptions(prefs);
 				lastAlertKey = '';
@@ -247,7 +267,56 @@
 		};
 	}
 
-	// ── Patch populateSettings and populateProfile — see init() below ─────────
+	// ── Apply prefs from cache immediately (sync), then refresh from server ───
+	// This is called every time the settings panel becomes visible.
+	// 1. Cache hit  → checkboxes are correct instantly, no flicker
+	// 2. Server fetch completes → overwrites with latest values & updates cache
+
+	function applyPrefsNow() {
+		// Step 1: instant restore from localStorage cache (no flicker)
+		const cached = readCachedPrefs();
+		if (cached) {
+			currentPrefs = cached;
+			applyPrefsToUI(cached);
+			restartPoll(cached);
+			initNotifSettings();
+		}
+
+		// Step 2: refresh from server in background
+		loadPrefs().then(prefs => {
+			currentPrefs = prefs;
+			applyPrefsToUI(prefs);
+			restartPoll(prefs);
+			maybeSendDailyDigest(prefs);
+			initNotifSettings();
+		}).catch(() => {});
+	}
+
+	// ── Patch populateSettings so prefs are applied every time settings opens ─
+
+	function patchPopulateSettings() {
+		if (window.populateSettings?._notifPatched) return;
+		const orig = window.populateSettings;
+		if (typeof orig !== 'function') return;
+		window.populateSettings = function () {
+			orig.apply(this, arguments); // run synchronously as before
+			applyPrefsNow();             // then instantly apply cached prefs + refresh
+		};
+		window.populateSettings._notifPatched = true;
+	}
+
+	// ── Also patch populateProfile for the profile tab ────────────────────────
+
+	function patchPopulateProfile() {
+		if (window.populateProfile?._notifPatched) return;
+		const orig = window.populateProfile;
+		if (typeof orig !== 'function') return;
+		window.populateProfile = async function () {
+			await orig.apply(this, arguments);
+			applyPrefsNow();
+		};
+		window.populateProfile._notifPatched = true;
+	}
 
 	// ── Daily digest ──────────────────────────────────────────────────────────
 
@@ -261,91 +330,24 @@
 		try { await sendEmail('digest'); localStorage.setItem(key, '1'); } catch {}
 	}
 
-	// ── Patch populateSettings (the REAL trigger for the settings tab) ────────
-	// app.js calls populateSettings() every time the settings nav is clicked.
-	// We wrap it so that after it runs, we always reload prefs from the server
-	// and overwrite the checkboxes — preventing them from staying unchecked.
-
-	function patchPopulateSettings() {
-		if (window.populateSettings?._notifPatched) return;
-		const orig = window.populateSettings;
-		if (typeof orig !== 'function') return;
-
-		window.populateSettings = async function () {
-			orig.apply(this, arguments);
-			// Load prefs from server and apply to UI after settings panel renders
-			try {
-				const prefs = await loadPrefs();
-				currentPrefs = prefs;
-				applyPrefsToUI(prefs);
-				restartPoll(prefs);
-				initNotifSettings();
-			} catch (e) {
-				console.warn('[notif] populateSettings prefs load failed:', e.message);
-			}
-		};
-		window.populateSettings._notifPatched = true;
-	}
-
-	// ── Also patch populateProfile for the profile tab ────────────────────────
-
-	function patchPopulateProfile() {
-		if (window.populateProfile?._notifPatched) return;
-		const orig = window.populateProfile;
-		if (typeof orig !== 'function') return;
-
-		window.populateProfile = async function () {
-			const [, prefs] = await Promise.all([
-				orig.apply(this, arguments),
-				loadPrefs()
-			]);
-			currentPrefs = prefs;
-			applyPrefsToUI(prefs);
-			restartPoll(prefs);
-			maybeSendDailyDigest(prefs);
-			initNotifSettings();
-		};
-		window.populateProfile._notifPatched = true;
-	}
-
 	// ── Init ──────────────────────────────────────────────────────────────────
 
 	function init() {
-		// Poll until both functions are defined by app.js, then patch them
+		// Poll until app.js defines populateSettings and populateProfile, then patch
 			let attempts = 0;
 			const tryPatch = setInterval(() => {
-			if (window.populateSettings && !window.populateSettings._notifPatched) {
-				patchPopulateSettings();
-			}
-				if (window.populateProfile && !window.populateProfile._notifPatched) {
-					patchPopulateProfile();
-				}
-			const allDone = window.populateSettings?._notifPatched && window.populateProfile?._notifPatched;
-			if (allDone || ++attempts > 100) clearInterval(tryPatch);
+			if (window.populateSettings && !window.populateSettings._notifPatched) patchPopulateSettings();
+			if (window.populateProfile  && !window.populateProfile._notifPatched)  patchPopulateProfile();
+			const done = window.populateSettings?._notifPatched && window.populateProfile?._notifPatched;
+			if (done || ++attempts > 100) clearInterval(tryPatch);
 			}, 50);
 
-		// Also load prefs immediately once DOM + session are ready,
-		// so if the user lands directly on the settings tab the toggles are correct
-		const applyOnReady = async () => {
-			// Wait briefly for app.js to establish a session
-						setTimeout(async () => {
-							try {
-								const prefs = await loadPrefs();
-								currentPrefs = prefs;
-								applyPrefsToUI(prefs);
-								restartPoll(prefs);
-					maybeSendDailyDigest(prefs);
-								initNotifSettings();
-							} catch (e) {
-					// Not logged in yet — that's fine
-				}
-			}, 800);
-		};
-
+		// Also apply on DOMContentLoaded in case user is already on settings tab
+		const onReady = () => applyPrefsNow();
 		if (document.readyState === 'loading') {
-			document.addEventListener('DOMContentLoaded', applyOnReady);
+			document.addEventListener('DOMContentLoaded', onReady);
 		} else {
-			applyOnReady();
+			onReady();
 		}
 	}
 
