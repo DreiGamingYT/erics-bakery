@@ -247,33 +247,7 @@
 		};
 	}
 
-	// ── THE REAL FIX: patch populateProfile ───────────────────────────────────
-	// app.js's populateProfile() is async. After awaiting /api/auth/me it reads
-	// localStorage and sets prefEmailNotif + prefPushNotif to false (because
-	// our DB prefs were never stored there). We wrap populateProfile so that
-	// after it completes, we run our own loadPrefs() and overwrite the toggles.
-	// Running both in parallel via Promise.all means zero extra latency.
-
-	function patchPopulateProfile() {
-		if (window.populateProfile?._notifPatched) return;
-		const orig = window.populateProfile;
-		if (typeof orig !== 'function') return;
-
-		window.populateProfile = async function () {
-			// Run app.js's version AND our prefs fetch simultaneously
-			const [, prefs] = await Promise.all([
-				orig.apply(this, arguments),
-				loadPrefs()
-			]);
-			// orig just set checkboxes to false from localStorage — overwrite now
-			currentPrefs = prefs;
-			applyPrefsToUI(prefs);
-			restartPoll(prefs);
-			maybeSendDailyDigest(prefs);
-			initNotifSettings();
-		};
-		window.populateProfile._notifPatched = true;
-	}
+	// ── Patch populateSettings and populateProfile — see init() below ─────────
 
 	// ── Daily digest ──────────────────────────────────────────────────────────
 
@@ -287,68 +261,94 @@
 		try { await sendEmail('digest'); localStorage.setItem(key, '1'); } catch {}
 	}
 
+	// ── Patch populateSettings (the REAL trigger for the settings tab) ────────
+	// app.js calls populateSettings() every time the settings nav is clicked.
+	// We wrap it so that after it runs, we always reload prefs from the server
+	// and overwrite the checkboxes — preventing them from staying unchecked.
+
+	function patchPopulateSettings() {
+		if (window.populateSettings?._notifPatched) return;
+		const orig = window.populateSettings;
+		if (typeof orig !== 'function') return;
+
+		window.populateSettings = async function () {
+			orig.apply(this, arguments);
+			// Load prefs from server and apply to UI after settings panel renders
+			try {
+				const prefs = await loadPrefs();
+				currentPrefs = prefs;
+				applyPrefsToUI(prefs);
+				restartPoll(prefs);
+				initNotifSettings();
+			} catch (e) {
+				console.warn('[notif] populateSettings prefs load failed:', e.message);
+			}
+		};
+		window.populateSettings._notifPatched = true;
+	}
+
+	// ── Also patch populateProfile for the profile tab ────────────────────────
+
+	function patchPopulateProfile() {
+		if (window.populateProfile?._notifPatched) return;
+		const orig = window.populateProfile;
+		if (typeof orig !== 'function') return;
+
+		window.populateProfile = async function () {
+			const [, prefs] = await Promise.all([
+				orig.apply(this, arguments),
+				loadPrefs()
+			]);
+			currentPrefs = prefs;
+			applyPrefsToUI(prefs);
+			restartPoll(prefs);
+			maybeSendDailyDigest(prefs);
+			initNotifSettings();
+		};
+		window.populateProfile._notifPatched = true;
+	}
+
 	// ── Init ──────────────────────────────────────────────────────────────────
 
 	function init() {
-		// Patch as early as possible — before app.js calls populateProfile
-		if (typeof window.populateProfile === 'function') {
-			patchPopulateProfile();
-		} else {
-			// If not defined yet, wait and retry once DOM is ready
-			document.addEventListener('DOMContentLoaded', () => {
-				patchPopulateProfile();
-			});
-			// Also poll briefly in case app.js defines it after our script runs
+		// Poll until both functions are defined by app.js, then patch them
 			let attempts = 0;
 			const tryPatch = setInterval(() => {
+			if (window.populateSettings && !window.populateSettings._notifPatched) {
+				patchPopulateSettings();
+			}
 				if (window.populateProfile && !window.populateProfile._notifPatched) {
 					patchPopulateProfile();
 				}
-				if (++attempts > 20 || window.populateProfile?._notifPatched) clearInterval(tryPatch);
+			const allDone = window.populateSettings?._notifPatched && window.populateProfile?._notifPatched;
+			if (allDone || ++attempts > 100) clearInterval(tryPatch);
 			}, 50);
-		}
-	}
 
-	// ── Hook into settings nav clicks to reload prefs every time ─────────────
-	// This ensures toggles reflect the saved server state after any refresh,
-	// regardless of whether populateProfile has already run.
-
-	function hookSettingsNav() {
-		const attachToNav = () => {
-			document.querySelectorAll('.nav-item, .nav-btn').forEach(btn => {
-				if (btn.dataset && btn.dataset.view === 'settings' && !btn._notifHooked) {
-					btn._notifHooked = true;
-					btn.addEventListener('click', async () => {
-						// Small delay so the settings panel is rendered first
+		// Also load prefs immediately once DOM + session are ready,
+		// so if the user lands directly on the settings tab the toggles are correct
+		const applyOnReady = async () => {
+			// Wait briefly for app.js to establish a session
 						setTimeout(async () => {
 							try {
 								const prefs = await loadPrefs();
 								currentPrefs = prefs;
 								applyPrefsToUI(prefs);
 								restartPoll(prefs);
+					maybeSendDailyDigest(prefs);
 								initNotifSettings();
 							} catch (e) {
-								console.warn('[notif] settings nav reload prefs failed:', e.message);
-							}
-						}, 120);
-					});
+					// Not logged in yet — that's fine
 				}
-			});
+			}, 800);
 		};
 
 		if (document.readyState === 'loading') {
-			document.addEventListener('DOMContentLoaded', attachToNav);
+			document.addEventListener('DOMContentLoaded', applyOnReady);
 		} else {
-			attachToNav();
+			applyOnReady();
 		}
-
-		// Also retry after DOMContentLoaded in case nav renders late
-		document.addEventListener('DOMContentLoaded', attachToNav);
 	}
 
-	hookSettingsNav();
-
-	// Run synchronously so the patch is in place before app.js calls populateProfile
 	init();
 
 })();
