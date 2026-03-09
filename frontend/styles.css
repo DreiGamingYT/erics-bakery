@@ -4473,7 +4473,7 @@ html {
   z-index: 2 !important;
 }
 .landing-overlay.signup-mode .landing-visual {
-  transform: translateX(var(--swap-shift, 340px)) !important;
+  transform: translateX(var(--swap-shift, 598px)) !important;
   opacity: .95 !important;
 }
 .landing-overlay.signup-mode .landing-forms {
