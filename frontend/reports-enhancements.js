@@ -28,13 +28,48 @@
 	const selectedNameEl = document.getElementById('selectedIngredientName');
 	const stockCtx = document.getElementById('inventoryStockChart');
 	let inventoryChart = null;
+	let currentChartType = 'bar'; // 'bar' or 'line'
 	let ingredientsCache = [];
 	let selectedIngredient = null;
 	let activityCache = [];
+	// ── Chart type toggle ────────────────────────────────────────────────────
+	function injectChartToggle() {
+		if (document.getElementById('chartTypeToggle')) return;
+		const chartContainer = stockCtx && stockCtx.closest('.chart-container');
+		if (!chartContainer) return;
+
+		const wrap = document.createElement('div');
+		wrap.id = 'chartTypeToggle';
+		wrap.style.cssText = 'display:flex;gap:6px;margin-bottom:8px;justify-content:flex-end;';
+
+		['bar', 'line'].forEach(type => {
+			const btn = document.createElement('button');
+			btn.type = 'button';
+			btn.dataset.chartType = type;
+			btn.className = 'btn small' + (type === currentChartType ? '' : ' ghost');
+			btn.innerHTML = type === 'bar'
+				? '<i class="fa fa-chart-bar" style="margin-right:4px"></i>Bar'
+				: '<i class="fa fa-chart-line" style="margin-right:4px"></i>Line';
+			btn.addEventListener('click', () => {
+				if (currentChartType === type) return;
+				currentChartType = type;
+				wrap.querySelectorAll('button').forEach(b => {
+					b.className = 'btn small' + (b.dataset.chartType === type ? '' : ' ghost');
+				});
+				if (inventoryChart) { inventoryChart.destroy(); inventoryChart = null; }
+				ensureChart();
+				renderStockForSelected();
+			});
+			wrap.appendChild(btn);
+		});
+
+		chartContainer.parentElement.insertBefore(wrap, chartContainer);
+	}
 
 	async function initInventoryReport() {
 		if (!listWrap) return;
 		attachUIEvents();
+		injectChartToggle();
 		await loadIngredients();
 
 		await loadActivity();
@@ -235,7 +270,7 @@
 			inventoryChart = null;
 		}
 		inventoryChart = new Chart(stockCtx.getContext('2d'), {
-			type: 'bar',
+			type: currentChartType,
 			data: {
 				labels: [],
 				datasets: [
