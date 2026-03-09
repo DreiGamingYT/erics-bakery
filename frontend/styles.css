@@ -1461,7 +1461,7 @@ body {
   width: 100%;
   height: 280px;
   position: relative;
-  overflow: hidden;
+  overflow: visible;
 }
 .chart-container canvas {
   display: block;
@@ -3306,13 +3306,28 @@ html {
   }
 }
 
+/* inventory-layout: stack on mobile, side-by-side on desktop */
+@media (max-width: 1023px) {
 .inventory-layout {
-  display: block;
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 16px;
+  }
+  #itemGraph {
+    width: 100%;
+    min-width: 0;
+  }
+  #itemGraph .chart-container {
+    position: relative !important;
+    height: 260px !important;
+    overflow: visible !important;
+    z-index: 1;
+  }
 }
 
 @media (min-width: 1024px) {
   .inventory-layout {
-    display: grid;
+    display: grid !important;
     grid-template-columns: 1fr 500px;
     gap: 12px;
     align-items: start;
