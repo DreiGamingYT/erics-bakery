@@ -236,7 +236,7 @@
 				<p class="muted small" style="margin:0 0 16px;line-height:1.5">
 					Enter your registered email address. We'll send you a one-click sign-in link valid for 15 minutes.
 				</p>
-				<div id="mlRequestForm">
+				<div id="mlRequestForm" class="form">
 					<label class="field">
 						<span class="field-label">Email address</span>
 						<input id="mlEmailInput" type="email" placeholder="you@example.com"
