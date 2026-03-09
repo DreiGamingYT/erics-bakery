@@ -309,6 +309,45 @@
 		}
 	}
 
+	// ── Hook into settings nav clicks to reload prefs every time ─────────────
+	// This ensures toggles reflect the saved server state after any refresh,
+	// regardless of whether populateProfile has already run.
+
+	function hookSettingsNav() {
+		const attachToNav = () => {
+			document.querySelectorAll('.nav-item, .nav-btn').forEach(btn => {
+				if (btn.dataset && btn.dataset.view === 'settings' && !btn._notifHooked) {
+					btn._notifHooked = true;
+					btn.addEventListener('click', async () => {
+						// Small delay so the settings panel is rendered first
+						setTimeout(async () => {
+							try {
+								const prefs = await loadPrefs();
+								currentPrefs = prefs;
+								applyPrefsToUI(prefs);
+								restartPoll(prefs);
+								initNotifSettings();
+							} catch (e) {
+								console.warn('[notif] settings nav reload prefs failed:', e.message);
+							}
+						}, 120);
+					});
+				}
+			});
+		};
+
+		if (document.readyState === 'loading') {
+			document.addEventListener('DOMContentLoaded', attachToNav);
+		} else {
+			attachToNav();
+		}
+
+		// Also retry after DOMContentLoaded in case nav renders late
+		document.addEventListener('DOMContentLoaded', attachToNav);
+	}
+
+	hookSettingsNav();
+
 	// Run synchronously so the patch is in place before app.js calls populateProfile
 	init();
 
