@@ -9,7 +9,7 @@ const INVENTORY_PAGE_LIMIT = 5;
 	const noops = [
 		'applySearch', 'attachTopSearchHandlers', 'ensureOrdersView', 'highlightSearchResultInProducts',
 		'initSearchFeature', 'injectSearchHighlightStyle', 'loadSearchHistory', 'nextOrderId', 'nextProductId',
-		'openAddProduct', 'openNewOrderModal', 'openOrderDetailModal', 'pushSearchQuery', 'renderProductGrid', 'saveSearchHistory'
+		'pushSearchQuery', 'saveSearchHistory'
 	];
 	try {
 		noops.forEach(fn => {
@@ -23,26 +23,6 @@ const INVENTORY_PAGE_LIMIT = 5;
 		console.warn(DISABLED, 'stub install failed', e);
 	}
 
-	function hideProductOrderUI() {
-		try {
-			const sel = [
-				'#view-products', '#view-orders', '#productsView', '#ordersView',
-				'[data-section="products"]', '[data-section="orders"]',
-				'.product-grid', '.orders-panel', '#productsList', '#ordersList',
-				'[data-nav="products"]', '[data-nav="orders"]', '.nav-item[data-view="products"]', '.nav-item[data-view="orders"]'
-			];
-			sel.forEach(s => document.querySelectorAll(s).forEach(el => {
-				if (!el) return;
-				try {
-					el.remove();
-				} catch (_) {
-					el.style.display = 'none';
-				}
-			}));
-		} catch (e) {
-			console.warn(DISABLED, 'hide UI failed', e);
-		}
-	}
 	if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', hideProductOrderUI);
 	else hideProductOrderUI();
 
@@ -709,20 +689,14 @@ const sampleIngredients = [{
 	},
 ];
 
-const sampleProducts = [];
-
 let DB = {
 	ingredients: structuredClone(sampleIngredients),
-	products: structuredClone(sampleProducts),
 	activity: []
 };
 
-const sampleOrders = [];
 
 let chartStock = null;
 let chartBestSeller = null;
-let chartSalesTimeline = null;
-let chartIngredientUsage = null;
 
 const ACCOUNTS_KEY = 'bakery_accounts';
 const SESSION_KEY = 'bakery_session';
@@ -970,20 +944,10 @@ function enforcePermissionsUI() {
 		if (q('createOrderBtn')) q('createOrderBtn').style.display = '';
 	}
 
-	const quickBakeBtn = q('quickBake');
-	if (quickBakeBtn) quickBakeBtn.style.display = hasPermission('bake') ? '' : 'none';
-
-	const addProd = q('addProductBtn');
-	if (addProd) addProd.style.display = hasPermission('addProduct') ? '' : 'none';
 }
 
 function nextIngredientId() {
 	const arr = DB.ingredients.map(i => i.id || 0);
-	return (arr.length ? Math.max(...arr) : 0) + 1;
-}
-
-function nextProductId() {
-	const arr = DB.products.map(p => p.id || 0);
 	return (arr.length ? Math.max(...arr) : 0) + 1;
 }
 
@@ -1524,10 +1488,7 @@ function showSuggestions(filter = '') {
 	const hist = loadSearchHistory();
 	const qf = (filter || '').trim().toLowerCase();
 	const historyMatches = hist.filter(h => h.toLowerCase().includes(qf));
-	const prodMatches = DB.products.filter(p => p.name.toLowerCase().includes(qf)).slice(0, 6).map(p => ({
-		label: p.name,
-		type: 'Product'
-	}));
+	const prodMatches = [];
 	const ingMatches = DB.ingredients.filter(i => i.name.toLowerCase().includes(qf)).slice(0, 6).map(i => ({
 		label: i.name,
 		type: 'Ingredient'
@@ -1588,14 +1549,13 @@ function applySearch(query) {
 	if (!query) return;
 	pushSearchQuery(query);
 	const ql = query.toLowerCase();
-	const prodMatches = DB.products.filter(p => p.name.toLowerCase().includes(ql));
+	const prodMatches = [];
 	const ingMatches = DB.ingredients.filter(i => i.name.toLowerCase().includes(ql));
 	const orderMatches = (DB.orders || []).filter(o => (o.id && String(o.id).includes(ql)) || (o.customer && o.customer.toLowerCase().includes(ql)));
 
 	if (prodMatches.length) {
 		showView('products');
 		if (q('searchProd')) q('searchProd').value = query;
-		renderProductGrid();
 		highlightSearchResultInProducts(query);
 		return;
 	}
@@ -1615,21 +1575,6 @@ function applySearch(query) {
 	showView('activity');
 	if (q('activityFilter')) q('activityFilter').value = 'all';
 	filterActivityByQuery(query);
-}
-
-function highlightSearchResultInProducts(query) {
-	const ql = query.toLowerCase();
-	setTimeout(() => {
-		const matches = Array.from(document.querySelectorAll('#productGrid .product-card')).filter(card => card.innerText.toLowerCase().includes(ql));
-		if (matches.length) {
-			matches[0].scrollIntoView({
-				behavior: 'smooth',
-				block: 'center'
-			});
-			matches[0].classList.add('search-highlight');
-			setTimeout(() => matches[0].classList.remove('search-highlight'), 2200);
-		}
-	}, 120);
 }
 
 (function injectSearchHighlightStyle() {
@@ -2300,7 +2245,9 @@ async function renderIngredientCards(page = 1, limit = INVENTORY_PAGE_LIMIT) {
 
 	// Responsive table styles are in styles.css — no JS injection needed
 
-	container.innerHTML = `<div class="card muted">Loading inventory…</div>`;
+	// Keep existing content visible while fetching — avoids blank flash
+	container.style.opacity = '0.45';
+	container.style.pointerEvents = 'none';
 
 	try {
 		const params = new URLSearchParams();
@@ -2439,6 +2386,8 @@ async function renderIngredientCards(page = 1, limit = INVENTORY_PAGE_LIMIT) {
 		const paginationWrap = `<div id="invPagination" style="margin-top:12px;display:flex;justify-content:center"></div>`;
 
 		container.innerHTML = header + tableHead + rowsHtml + tableFooter + paginationWrap;
+		container.style.opacity = '';
+		container.style.pointerEvents = '';
 
 		// #18 — Debounce invType radio so rapid switching doesn't hammer the API
 		const _debouncedRender = debounce(() => renderIngredientCards(1, limit), 200);
@@ -2643,6 +2592,8 @@ async function renderIngredientCards(page = 1, limit = INVENTORY_PAGE_LIMIT) {
 
 	} catch (err) {
 		console.error('renderIngredientCards error', err);
+		container.style.opacity = '';
+		container.style.pointerEvents = '';
 		container.innerHTML = `<div class="card muted">Failed to load inventory</div>`;
 	}
 }
@@ -2651,91 +2602,6 @@ function initSearchFeature() {
 	const wrap = ensureSuggestionContainer();
 	attachTopSearchHandlers();
 	if (q('view-orders')) ensureOrdersView();
-}
-
-function openOrderDetailModal(order) {
-	const date = new Date(order.date).toLocaleString();
-	const itemsHtml = order.items.map(i => {
-		const p = DB.products.find(pp => pp.id === i.product_id) || {
-			name: 'Unknown'
-		};
-		return `<li>${p.name} — ${i.qty}pcs</li>`;
-	}).join('');
-	openModalHTML(`<h3>Order #${order.id}</h3><div class="muted small">${order.customer} • ${date}</div><div style="margin-top:10px"><h4>Items</h4><ul>${itemsHtml}</ul></div><div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end"><button class="btn primary" id="fulfillOrderBtn" type="button">Mark fulfilled</button><button class="btn ghost" id="cancelOrderView" type="button">Close</button></div>`);
-	q('cancelOrderView')?.addEventListener('click', closeModal);
-	q('fulfillOrderBtn')?.addEventListener('click', () => {
-		DB.activity.push({
-			text: `Order #${order.id} fulfilled`,
-			time: new Date().toLocaleString()
-		});
-		order.items.forEach(it => {
-			const p = DB.products.find(pp => pp.id === it.product_id);
-			if (p) p.stock = Math.max(0, (p.stock || 0) - it.qty);
-			const prod = DB.products.find(pp => pp.id === it.product_id);
-			if (prod && prod.recipe) {
-				prod.recipe.forEach(r => {
-					const ing = DB.ingredients.find(ii => ii.id === r.ingredient_id);
-					if (ing) {
-						const used = +(r.qty_per_unit * it.qty);
-						ing.qty = +(Math.max(0, ing.qty - used)).toFixed(3);
-						DB.activity.push({
-							text: `Used ${used} ${ing.unit} — ${ing.name}`,
-							time: new Date().toLocaleString(),
-							ingredient_id: ing.id
-						});
-					}
-				});
-			}
-		});
-		closeModal();
-		renderIngredientCards();
-		renderProductGrid();
-		renderOrders();
-		notify('Order fulfilled');
-		renderStockChart();
-		renderBestSellerChart();
-		renderReports();
-	});
-}
-
-function openNewOrderModal() {
-	const prodOptions = DB.products.map(p => `<option value="${p.id}">${p.name} (₱${p.price})</option>`).join('');
-	openModalHTML(`<h3>New Order</h3>
-    <form id="newOrderForm" class="form">
-      <label class="field"><span class="field-label">Customer</span><input id="orderCustomer" type="text" placeholder="Customer name" /></label>
-      <label class="field"><span class="field-label">Product</span><div style="display:flex;gap:8px"><select id="orderProd">${prodOptions}</select><input id="orderQty" type="number" value="1" min="1" style="width:90px" /></div></label>
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px"><button class="btn primary" type="submit">Create</button><button class="btn ghost" id="cancelNewOrder" type="button">Cancel</button></div>
-    </form>`);
-	q('cancelNewOrder')?.addEventListener('click', closeModal);
-	q('newOrderForm')?.addEventListener('submit', (e) => {
-		e.preventDefault();
-		const cust = q('orderCustomer')?.value || 'Walk-in';
-		const pid = Number(q('orderProd')?.value);
-		const qty = Number(q('orderQty')?.value) || 1;
-		const prod = DB.products.find(p => p.id === pid);
-		const total = (prod?.price || 0) * qty;
-		const newOrder = {
-			id: nextOrderId(),
-			date: new Date().toISOString(),
-			items: [{
-				product_id: pid,
-				qty
-			}],
-			customer: cust,
-			total
-		};
-		sampleOrders.push(newOrder);
-		DB.activity.push({
-			text: `Order #${newOrder.id} created (${cust})`,
-			time: new Date().toLocaleString()
-		});
-		closeModal();
-		renderOrders();
-		notify('Order created');
-		renderReports();
-		renderStockChart();
-		renderBestSellerChart();
-	});
 }
 
 function aggregateSalesRange(startISO, endISO) {
@@ -2994,19 +2860,6 @@ async function renderInventoryActivity(limit = 30) {
 		q('invHistoryTodayBtn')?.addEventListener('click', () => {
 			picker.value = today;
 			renderInventoryActivity(limit);
-		});
-	}
-
-	// Wire refresh button (once)
-	const refreshBtn = q('invHistoryRefreshBtn');
-	if (refreshBtn && !refreshBtn._wired) {
-		refreshBtn._wired = true;
-		refreshBtn.addEventListener('click', async () => {
-			refreshBtn.disabled = true;
-			refreshBtn.innerHTML = '<i class="fa fa-rotate-right fa-spin"></i>';
-			await renderInventoryActivity(limit);
-			refreshBtn.disabled = false;
-			refreshBtn.innerHTML = '<i class="fa fa-rotate-right"></i>';
 		});
 	}
 
@@ -3669,59 +3522,6 @@ async function exportReportsCSVReport(rangeStartISO, rangeEndISO, filter) {
 	URL.revokeObjectURL(url);
 }
 
-function computeBestSelling() {
-	const map = {};
-	DB.products.forEach(p => map[p.id] = 0);
-	sampleOrders.forEach(o => o.items.forEach(it => {
-		map[it.product_id] = (map[it.product_id] || 0) + (it.qty || 0);
-	}));
-	let bestId = null;
-	let bestQty = 0;
-	Object.keys(map).forEach(k => {
-		if (map[k] > bestQty) {
-			bestQty = map[k];
-			bestId = Number(k);
-		}
-	});
-	const p = DB.products.find(pp => pp.id === bestId) || {
-		name: '—'
-	};
-	return {
-		id: bestId,
-		name: p.name,
-		qty: bestQty
-	};
-}
-
-function computeBestSellingInRange(start, end) {
-	const map = {};
-	DB.products.forEach(p => map[p.id] = 0);
-	sampleOrders.forEach(o => {
-		const od = new Date(o.date);
-		od.setHours(0, 0, 0, 0);
-		if (od < start || od > end) return;
-		o.items.forEach(it => {
-			map[it.product_id] = (map[it.product_id] || 0) + (it.qty || 0);
-		});
-	});
-	let bestId = null,
-		bestQty = 0;
-	Object.keys(map).forEach(k => {
-		if (map[k] > bestQty) {
-			bestQty = map[k];
-			bestId = Number(k);
-		}
-	});
-	const p = DB.products.find(pp => pp.id === bestId) || {
-		name: '—'
-	};
-	return {
-		id: bestId,
-		name: p.name,
-		qty: bestQty
-	};
-}
-
 function generateColors(n) {
 	const base = ['#1b85ec', '#3ea9f5', '#ffb366', '#8B5E3C', '#47C278', '#C07A3A', '#9b59b6', '#e74c3c', '#2ecc71'];
 	const out = [];
@@ -3729,6 +3529,43 @@ function generateColors(n) {
 	return out;
 }
 
+
+// ── Export activity log to CSV ────────────────────────────────────────────────
+async function exportActivityCSV() {
+	const btn = q('exportActivityCsvBtn');
+	if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Exporting…'; }
+	try {
+		// Fetch up to 5000 rows — enough for any real usage
+		const resp = await apiFetch('/api/activity?limit=5000&page=1');
+		const items = (resp && resp.items) ? resp.items : [];
+		if (!items.length) { notify('No activity to export', { type: 'info' }); return; }
+
+		const headers = ['Date', 'Time', 'Action', 'Description', 'Ingredient', 'User'];
+		const rows = items.map(a => {
+			const d = a.time ? new Date(a.time) : null;
+			const date = d ? d.toLocaleDateString('en-PH') : '';
+			const time = d ? d.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' }) : '';
+			const esc = v => `"${String(v || '').replace(/"/g, '""')}"`;
+			return [esc(date), esc(time), esc(a.action || ''), esc(a.text || ''), esc(a.ingredient_name || ''), esc(a.username || '')].join(',');
+		});
+
+		const csv = [headers.join(','), ...rows].join('\r\n');
+		const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement('a');
+		const dateStr = new Date().toISOString().slice(0, 10);
+		link.href = url;
+		link.download = `bakery-activity-${dateStr}.csv`;
+		link.click();
+		URL.revokeObjectURL(url);
+		notify(`Exported ${items.length} records`, { type: 'success' });
+	} catch (e) {
+		console.error('exportActivityCSV err', e);
+		notify('Export failed: ' + (e.message || 'unknown error'), { type: 'error' });
+	} finally {
+		if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa fa-download"></i> Export CSV'; }
+	}
+}
 function exportInventoryCSV() {
 	const activeChip = document.querySelector('.filter-chips .chip.active')?.dataset.filter || 'all';
 	const invType = document.querySelector('input[name="invType"]:checked')?.value || 'all';
@@ -4529,6 +4366,11 @@ function setCurrentUser(user) {
 }
 
 window.renderActivity = renderActivity;
+
+// Wire activity CSV export button
+document.addEventListener('click', e => {
+	if (e.target.closest('#exportActivityCsvBtn')) exportActivityCSV();
+});
 window.openEventModal = openEventModal;
 window.setCurrentUser = setCurrentUser;
 window.buildCsvWithBom = buildCsvWithBom;
@@ -4878,15 +4720,6 @@ function destroyAllCharts() {
 			c && c.destroy();
 		} catch (e) {}
 	});
-}
-
-function renderProductGrid() {
-	const qv = (q('searchProd')?.value || '').trim().toLowerCase();
-	const grid = q('productGrid');
-	if (!grid) return;
-	const items = DB.products.filter(p => !qv || p.name.toLowerCase().includes(qv));
-	grid.innerHTML = items.map(p => `<div class="product-card card"><div class="img" style="background:var(--card);display:flex;align-items:center;justify-content:center">${p.image||'<i class="fa fa-bread-slice fa-2x"></i>'}</div><div class="pbody"><div style="display:flex;justify-content:space-between;align-items:center"><div><strong>${p.name}</strong><div class="muted small">${p.category}</div></div><div style="text-align:right"><div><strong>₱${p.price}</strong></div><div class="muted small">${p.stock || 0} in stock</div></div></div><div style="margin-top:8px;display:flex;gap:8px"><button class="btn small p-bake" data-id="${p.id}" type="button"><i class="fa fa-fire"></i> Bake</button></div></div></div>`).join('') || '<div class="card muted">No products</div>';
-	grid.querySelectorAll('.p-bake').forEach(btn => btn.addEventListener('click', () => openBakeModal(Number(btn.dataset.id))));
 }
 
 function openModalHTML(html) {
@@ -5639,171 +5472,6 @@ function openAddIngredient() {
 	tryAutoSuggestMin();
 }
 
-function openAddProduct() {
-	const ingOptions = DB.ingredients.map(i => `<option value="${i.id}">${i.name}</option>`).join('');
-	openModalHTML(`
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <h3 style="margin:0">Add Product</h3>
-    </div>
-
-    <form id="addProdForm" class="form" style="margin-top:10px">
-      <label class="field"><span class="field-label">Product name</span><input id="prodName" type="text" required/></label>
-
-      <label class="field"><span class="field-label">Category</span><input id="prodCategory" type="text"/></label>
-
-      <label class="field"><span class="field-label">Price (₱)</span><input id="prodPrice" type="number" step="0.01" required/></label>
-
-      <label class="field"><span class="field-label">Starting stock</span><input id="prodStock" type="number" value="0" required/></label>
-
-      <label class="field">
-        <span class="field-label">Recipe</span>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <select id="recipeIng">${ingOptions}</select>
-          <input id="recipeQty" type="number" placeholder="qty per unit" step="0.001" style="width:110px"/>
-          <button class="btn" type="button" id="addRecipeLine">Add</button>
-        </div>
-        <div id="recipeList" style="margin-top:8px"></div>
-      </label>
-
-      <div class="modal-actions" style="margin-top:12px">
-        <button class="btn primary" type="submit">Save Product</button>
-        <button class="btn ghost" id="cancelAddProd" type="button">Cancel</button>
-      </div>
-    </form>
-  `);
-
-	const mc = document.querySelector('.modal-card');
-	if (mc) mc.classList.add('modal-small');
-
-	q('cancelAddProd')?.addEventListener('click', closeModal);
-
-	const recipe = [];
-
-	function renderRecipeList() {
-		const list = q('recipeList');
-		if (!list) return;
-		list.innerHTML = recipe.map((r, idx) => {
-			const n = DB.ingredients.find(i => i.id === r.ingredient_id)?.name || 'Unknown';
-			return `<div data-idx="${idx}" style="display:flex;justify-content:space-between;align-items:center;padding:6px;border-radius:6px;background:var(--card);border:1px solid rgba(0,0,0,0.04);margin-bottom:6px">
-                <div style="flex:1">${n} — <strong>${r.qty_per_unit}</strong></div>
-                <div><button class="btn small remove-recipe" data-idx="${idx}" type="button">Remove</button></div>
-              </div>`;
-		}).join('');
-		list.querySelectorAll('button.remove-recipe').forEach(btn => btn.addEventListener('click', () => {
-			const idx = Number(btn.dataset.idx);
-			if (!Number.isFinite(idx)) return;
-			recipe.splice(idx, 1);
-			renderRecipeList();
-		}));
-	}
-
-	q('addRecipeLine')?.addEventListener('click', () => {
-		const iid = Number(q('recipeIng')?.value || 0);
-		const qty = Number(q('recipeQty')?.value || 0);
-		if (!iid || qty <= 0) {
-			notify('Pick ingredient and qty');
-			return;
-		}
-		recipe.push({
-			ingredient_id: iid,
-			qty_per_unit: qty
-		});
-		renderRecipeList();
-		if (q('recipeQty')) q('recipeQty').value = '';
-	});
-
-	q('addProdForm')?.addEventListener('submit', (e) => {
-		e.preventDefault();
-		const name = q('prodName')?.value.trim();
-		if (!name) {
-			notify('Product name required');
-			return;
-		}
-		const category = q('prodCategory')?.value || '';
-		const price = Number(q('prodPrice')?.value) || 0;
-		const stock = Number(q('prodStock')?.value) || 0;
-		const normalizedRecipe = (recipe || []).map(r => ({
-			ingredient_id: Number(r.ingredient_id),
-			qty_per_unit: Number(r.qty_per_unit) || 0
-		}));
-		const newP = {
-			id: nextProductId(),
-			name,
-			category,
-			price,
-			stock,
-			recipe: normalizedRecipe
-		};
-		DB.products.push(newP);
-		DB.activity.push({
-			text: `Added product ${name}`,
-			time: new Date().toLocaleString()
-		});
-		closeModal();
-		renderProductGrid();
-		renderDashboard();
-		notify('Product added');
-	});
-}
-
-function openBakeModal(productId) {
-	const product = DB.products.find(p => p.id === productId) || DB.products[0];
-	if (!product) return;
-	const recipeLines = (product.recipe || []).map(r => {
-		const ing = DB.ingredients.find(i => i.id === r.ingredient_id) || {
-			name: 'Unknown',
-			qty: 0,
-			unit: 'u',
-			id: null
-		};
-		return `<tr><td>${ing.name}</td><td class="req" data-ingredient="${ing.id}">${r.qty_per_unit}</td><td class="avail">${ing.qty}</td></tr>`;
-	}).join('');
-	openModalHTML(`<h3>Bake — ${product.name}</h3><div class="muted small">Recipe summary</div><table style="width:100%;margin-top:8px;border-collapse:collapse"><thead><tr style="text-align:left"><th>Ingredient</th><th>Per unit</th><th>Available</th></tr></thead><tbody>${recipeLines}</tbody></table><form id="bakeForm" style="margin-top:12px"><label class="field"><span class="field-label">Quantity to bake</span><input id="bakeQty" type="number" value="1" min="1" required/></label><div style="display:flex;gap:8px;margin-top:8px"><button class="btn primary" type="submit">Confirm Bake</button><button class="btn ghost" id="cancelBake" type="button">Cancel</button></div></form>`);
-	q('cancelBake')?.addEventListener('click', closeModal);
-	q('bakeForm')?.addEventListener('submit', (e) => {
-		e.preventDefault();
-		const qty = Number(q('bakeQty')?.value) || 1;
-		const shortages = [];
-		(product.recipe || []).forEach(r => {
-			const ing = DB.ingredients.find(i => i.id === r.ingredient_id);
-			const required = +(r.qty_per_unit * qty);
-			if (!ing || ing.qty < required) shortages.push({
-				ingredient: ing ? ing.name : 'Unknown',
-				required,
-				available: ing ? ing.qty : 0
-			});
-		});
-		if (shortages.length) {
-			notify('Shortage:\n' + shortages.map(s => `${s.ingredient}: need ${s.required}, have ${s.available}`).join('\n'));
-			return;
-		}
-		(product.recipe || []).forEach(r => {
-			const ing = DB.ingredients.find(i => i.id === r.ingredient_id);
-			if (!ing) return;
-			const required = +(r.qty_per_unit * qty);
-			ing.qty = +(Math.max(0, ing.qty - required)).toFixed(3);
-			DB.activity.push({
-				text: `Used ${required} ${ing.unit} for ${product.name}`,
-				time: new Date().toLocaleString(),
-				ingredient_id: ing.id
-			});
-		});
-		product.stock = (product.stock || 0) + qty;
-		DB.activity.push({
-			text: `Baked ${qty} x ${product.name}`,
-			time: new Date().toLocaleString()
-		});
-		closeModal();
-		renderIngredientCards();
-		renderProductGrid();
-		renderDashboard();
-		renderStockChart();
-		renderBestSellerChart();
-		renderReports();
-		notify('Bake successful — inventory updated (simulated)');
-	});
-}
-
 function populateSettings() {
 
 	const list = q('usersList');
@@ -6063,7 +5731,6 @@ function startApp() {
 
 	renderDashboard();
 	renderIngredientCards();
-	renderProductGrid();
 	renderActivity();
 	initSearchFeature();
 	buildTopNav();
@@ -6090,18 +5757,15 @@ function startApp() {
 		};
 	});
 
-	on('addProductBtn', 'click', openAddProduct);
 	on('addIngredientBtn', 'click', openAddIngredient);
 	on('quickAddIng', 'click', openAddIngredient);
 	on('searchIng', 'input', renderIngredientCards);
-	on('searchProd', 'input', renderProductGrid);
 	document.querySelectorAll('.chip').forEach(c => c.addEventListener('click', (e) => {
 		document.querySelectorAll('.chip').forEach(x => x.classList.remove('active'));
 		e.currentTarget.classList.add('active');
 		renderIngredientCards();
 	}));
 
-	on('createOrderBtn', 'click', openNewOrderModal);
 	on('refreshReports', 'click', () => renderReports());
 	on('batchStockBtn', 'click', () => openBatchStockModal());
 	on('reportPeriod', 'change', () => renderReports());
@@ -6214,7 +5878,6 @@ function startApp() {
 
 	// themeToggle is now hidden; color palette swatches handle theme switching.
 	if (q('addIngredientBtn')) q('addIngredientBtn').addEventListener('click', openAddIngredient);
-	if (q('addProductBtn')) q('addProductBtn').addEventListener('click', openAddProduct);
 
 	enforcePermissionsUI();
 
@@ -6666,7 +6329,7 @@ document.addEventListener('DOMContentLoaded', () => {
 				if (data.db) DB = data.db;
 				if (data.accounts) localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(data.accounts));
 				renderIngredientCards();
-				renderProductGrid();
+	
 				renderDashboard();
 				notify('Import successful');
 			} catch (e) {

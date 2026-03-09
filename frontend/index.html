@@ -134,7 +134,7 @@
             <div id="dashGreeting" class="dash-greeting"></div>
             <div class="page-header">
               <h2>Dashboard</h2>
-              <div class="page-actions"><button id="quickAddIng" class="btn small primary" type="button"><i class="fa fa-plus"></i> Add Ingredient</button><button id="quickBake" class="btn small" type="button"><i class="fa fa-fire"></i> Bake</button></div>
+              <div class="page-actions"><button id="quickAddIng" class="btn small primary" type="button"><i class="fa fa-plus"></i> Add Ingredient</button></div>
             </div>
             <!-- KPI row — each card has icon + value + title + trend -->
             <div class="kpi-row">
@@ -221,10 +221,7 @@
                 <div class="card">
                   <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px">
                     <h3 style="margin:0">Recent Inventory History</h3>
-                    <div style="display:flex;align-items:center;gap:6px">
                     <span id="invHistoryDateLabel" class="muted small" style="white-space:nowrap"></span>
-                      <button id="invHistoryRefreshBtn" type="button" class="btn ghost small" title="Refresh history" style="padding:4px 8px;font-size:12px"><i class="fa fa-rotate-right"></i></button>
-                    </div>
                   </div>
                   <div class="muted small" style="margin-bottom:8px">Today's stock changes only — resets each new day.</div>
                   <ul id="inventoryRecentActivity" class="timeline" aria-live="polite" aria-atomic="true" style="margin-top:8px;max-height:56vh;overflow:auto;padding-right:6px"></ul>
@@ -271,8 +268,7 @@
               <div class="page-actions"><select id="activityFilter">
                   <option value="all">All</option>
                   <option value="stock">Stock</option>
-                  <option value="production">Production</option>
-                </select></div>
+                </select><button id="exportActivityCsvBtn" class="btn small ghost" type="button" style="margin-left:8px"><i class="fa fa-download"></i> Export CSV</button></div>
             </div>
             <div class="card">
               <ul id="activityList" class="timeline"></ul>
