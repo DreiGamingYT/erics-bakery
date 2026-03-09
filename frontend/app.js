@@ -1695,38 +1695,26 @@ function setupSidebarToggle() {
 	const hb = q('hamburger'),
 		sb = q('sidebar');
 	if (!hb || !sb) return;
-	function closeSidebar() {
+	hb.onclick = () => {
+		if (sb.classList.contains('open')) {
 			sb.classList.remove('open');
 			const overlay = document.getElementById('drawerOverlay');
 			if (overlay) overlay.remove();
+			return;
 		}
-
-	function openSidebar() {
-		if (sb.classList.contains('open')) return;
 		const o = document.createElement('div');
 		o.id = 'drawerOverlay';
-		o.style.cssText = 'position:fixed;inset:0;z-index:9998;';
-		o.addEventListener('click', closeSidebar);
+		o.style.position = 'fixed';
+		o.style.inset = '0';
+		o.style.zIndex = '9998';
+		o.style.background = 'rgba(0,0,0,0.18)';
+		o.addEventListener('click', () => {
+			sb.classList.remove('open');
+			o.remove();
+		});
 		document.body.appendChild(o);
 		sb.classList.add('open');
-	}
-
-	hb.onclick = () => sb.classList.contains('open') ? closeSidebar() : openSidebar();
-
-	// Swipe left on sidebar to close
-	let _swipeStartX = 0;
-	sb.addEventListener('touchstart', e => { _swipeStartX = e.touches[0].clientX; }, { passive: true });
-	sb.addEventListener('touchend', e => {
-		const dx = e.changedTouches[0].clientX - _swipeStartX;
-		if (dx < -50) closeSidebar();
-	}, { passive: true });
-
-	// Swipe right from left edge of screen to open
-	document.addEventListener('touchstart', e => { _swipeStartX = e.touches[0].clientX; }, { passive: true });
-	document.addEventListener('touchend', e => {
-		const dx = e.changedTouches[0].clientX - _swipeStartX;
-		if (_swipeStartX < 24 && dx > 60 && !sb.classList.contains('open')) openSidebar();
-	}, { passive: true });
+	};
 }
 
 function buildTopNav() {
@@ -3138,7 +3126,7 @@ async function renderReports(rangeStart, rangeEnd, reportFilter) {
             <label style="font-size:11px;font-weight:700;color:var(--muted,#888);white-space:nowrap">To</label>
             <input id="reportEnd" type="date" value="${endISO}" style="height:30px;padding:0 6px;border-radius:6px;border:1px solid rgba(0,0,0,0.12);font-size:12px;background:var(--bg,#fff);color:var(--text);" />
             <select id="reportPreset" style="height:30px;padding:0 6px;border-radius:6px;border:1px solid rgba(0,0,0,0.12);font-size:12px;background:var(--bg,#fff);color:var(--text);">
-			  <option value="1">Last 1 day</option>
+              <option value="1">Last 1 day</option>
               <option value="7">Last 7 days</option>
               <option value="30">Last 30 days</option>
               <option value="90">Last 90 days</option>
