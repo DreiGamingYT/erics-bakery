@@ -1576,7 +1576,7 @@ body {
 #ingredientList .inv-table input[type="text"] {
   padding: 6px 8px;
   border-radius: 8px;
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  border: 1px solid var(--text);
   background: var(--card);
   color: var(--text);
   min-width: 68px;
