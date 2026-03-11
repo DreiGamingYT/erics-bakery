@@ -6107,6 +6107,13 @@ document.addEventListener('DOMContentLoaded', () => {
 		openForgotPasswordModal();
 	});
 
+	// ── Enter key: login form ─────────────────────────────────────────────────
+	['overlay-username', 'overlay-email', 'overlay-password'].forEach(id => {
+		on(id, 'keydown', (e) => {
+			if (e.key === 'Enter') { e.preventDefault(); q('overlaySignInBtn')?.click(); }
+		});
+	});
+
 	on('overlaySignInBtn', 'click', async (e) => {
 		e.preventDefault();
 		const btn = q('overlaySignInBtn');
@@ -6204,6 +6211,13 @@ document.addEventListener('DOMContentLoaded', () => {
 			setButtonLoadingWithMin(btn, false, 600);
 			showGlobalLoader(false);
 		}
+	});
+
+	// ── Enter key: signup form ────────────────────────────────────────────────
+	['overlay-su-username', 'overlay-su-email', 'overlay-su-password'].forEach(id => {
+		on(id, 'keydown', (e) => {
+			if (e.key === 'Enter') { e.preventDefault(); q('overlaySignUpBtn')?.click(); }
+		});
 	});
 
 	on('overlaySignUpBtn', 'click', async (e) => {
@@ -6836,10 +6850,16 @@ function bindProfileControls() {
 	}
 
 	const cpb = q('changePassBtn');
-	if (cpb) cpb.onclick = (e) => {
-		e.preventDefault();
-		changePassword();
-	};
+	if (cpb) {
+		cpb.onclick = (e) => { e.preventDefault(); changePassword(); };
+		// ── Enter key: change password fields ─────────────────────────────────
+		['curPassword', 'newPassword', 'confirmPassword'].forEach(id => {
+			const el = q(id);
+			if (el) el.addEventListener('keydown', (e) => {
+				if (e.key === 'Enter') { e.preventDefault(); cpb.click(); }
+			});
+		});
+	}
 
 	const outBtn = q('signOutBtn');
 	if (outBtn) outBtn.onclick = (e) => {
