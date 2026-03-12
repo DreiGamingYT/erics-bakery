@@ -72,6 +72,7 @@ const SMTP_PASS = (process.env.SMTP_PASS || '').trim();
 const _rawFrom = (process.env.EMAIL_FROM || '').trim();
 const _fromHasPlaceholder = _rawFrom.includes('archlinux@google.com') || !_rawFrom;
 const EMAIL_FROM = (!_fromHasPlaceholder ? _rawFrom : `"Eric's Bakery" <${SMTP_USER}>`);
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || SMTP_USER || '').trim();
 
 
 
@@ -110,7 +111,7 @@ function signToken(user) {
 }
 async function getUserByUsername(username) {
 	const [rows] = await pool.query(
-		'SELECT id, username, password_hash, role, name, COALESCE(token_version, 0) AS token_version, COALESCE(status, \'active\') AS status FROM users WHERE username = ?', [username]);
+		"SELECT id, username, password_hash, role, name, COALESCE(token_version, 0) AS token_version, COALESCE(status, 'active') AS status FROM users WHERE username = ?", [username]);
 	return rows[0];
 }
 
@@ -183,17 +184,17 @@ app.post('/api/auth/signup', async (req, res) => {
 		});
 		const hash = await bcrypt.hash(password, 10);
 		const [r] = await pool.query(
-			"INSERT INTO users (username, password_hash, role, name, email, status) VALUES (?, ?, ?, ?, ?, 'pending')",
-			[username, hash, role, name || username, email]
-		);
+			"INSERT INTO users (username, password_hash, role, name, email, status) VALUES (?, ?, ?, ?, ?, 'pending')", [
+				username, hash, role, name || username, email
+			]);
 
-		activationHelpers.sendActivationRequestEmail(
-			ADMIN_EMAIL, name || username, email, role
-		).catch(e => console.warn('[activation] admin notify failed:', e && e.message));
+		// Notify admin that a new account is waiting for approval (non-blocking)
+		sendActivationRequestEmail(ADMIN_EMAIL, name || username, email, role)
+			.catch(e => console.warn('[activation] admin notify failed:', e && e.message));
 
 		return res.json({
 			pending: true,
-			message: 'Your account has been created and is awaiting admin approval. You\'ll receive an email once your account is activated.'
+			message: "Your account has been created and is awaiting admin approval. You'll receive an email once your account is activated."
 		});
 	} catch (err) {
 		console.error(err);
@@ -222,7 +223,7 @@ app.post('/api/auth/login', async (req, res) => {
 		// Block pending or rejected accounts
 		if (user.status === 'pending') {
 			return res.status(403).json({
-				message: 'Your account is awaiting admin approval. You\'ll be notified by email once it\'s activated.',
+				message: "Your account is awaiting admin approval. You'll be notified by email once it's activated.",
 				code: 'ACCOUNT_PENDING'
 			});
 		}
@@ -1380,8 +1381,6 @@ function buildEmailWrapper(logoUrl, bodyHtml) {
 </body></html>`;
 }
 
-const registerActivationRoutes = require('./account-activation-backend');
-
 async function sendMagicLinkEmail(toEmail, name, magicLink) {
 	name = (name || toEmail || 'there');
 	const subject = `Eric's Bakery — Your sign-in link`;
@@ -1431,17 +1430,6 @@ async function sendRoleChangeEmail(toEmail, userName, oldRole, newRole, changedB
 		console.info('[role-change] SMTP not configured. Would have emailed', toEmail, '— role:', oldRole, '->', newRole);
 	}
 }
-
-const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || SMTP_USER || '').trim();
-
-const activationHelpers = registerActivationRoutes(app, pool, {
-  authMiddleware,
-  mailTransporter,
-  EMAIL_FROM,
-  buildEmailWrapper,
-  ADMIN_EMAIL,
-  FRONTEND_ORIGIN: process.env.FRONTEND_ORIGIN || 'https://erics-bakery.vercel.app'
-});
 
 // ── Magic link: request ────────────────────────────────────────────────────
 app.post('/api/auth/magic-link/request', async (req, res) => {
@@ -2009,6 +1997,7 @@ async function runStartupMigrations() {
 	}
 }
 
+// ── Global Express error handler — ensures every crash returns JSON, never HTML ──
 app.use((err, req, res, next) => {
 	const detail = err && err.message ? err.message : String(err);
 	console.error('[express] unhandled error:', detail, err && err.stack ? '\n' + err.stack : '');
@@ -2016,6 +2005,139 @@ app.use((err, req, res, next) => {
 	res.status(err.status || 500).json({ error: `Server error: ${detail}` });
 });
 
+// ── Account Activation — email helpers ────────────────────────────────────
+
+async function sendActivationRequestEmail(adminEmail, newName, newEmail, newRole) {
+	if (!adminEmail) {
+		console.warn('[activation] ADMIN_EMAIL not set — skipping admin notification.');
+		return;
+	}
+	const loginUrl = process.env.FRONTEND_ORIGIN || 'https://erics-bakery.vercel.app';
+	const subject  = `Eric's Bakery — New account pending approval`;
+	const plain    = `A new user has signed up and is awaiting your approval.\n\nName:  ${newName}\nEmail: ${newEmail}\nRole:  ${newRole}\n\nLog in to the admin panel to approve or reject:\n${loginUrl}`;
+	const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+	const html = buildEmailWrapper(
+		process.env.RESET_EMAIL_LOGO_URL || 'https://i.ibb.co/9HshkkkB/logo.png',
+		`<h1>New Account Request</h1>
+		 <p class="lead">A new user has registered and is waiting for your approval.</p>
+		 <table style="width:100%;border-collapse:collapse;margin:16px 0;text-align:left">
+		   <tr><td style="padding:7px 0;color:#888;font-size:13px;width:70px">Name</td><td style="font-weight:700;font-size:14px">${esc(newName)}</td></tr>
+		   <tr><td style="padding:7px 0;color:#888;font-size:13px">Email</td><td style="font-size:14px">${esc(newEmail)}</td></tr>
+		   <tr><td style="padding:7px 0;color:#888;font-size:13px">Role</td><td><span style="background:#e0e7ff;color:#3730a3;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:700">${esc(newRole)}</span></td></tr>
+		 </table>
+		 <a href="${loginUrl}" class="cta">Review in Admin Panel &rarr;</a>
+		 <p style="color:#94a3b8;font-size:12px;margin-top:18px">Go to the <strong>Users</strong> section to approve or reject this account.</p>
+		 <div class="footer">Sent to ${esc(adminEmail)}</div>`
+	);
+	if (mailTransporter) {
+		await mailTransporter.sendMail({ from: EMAIL_FROM, to: adminEmail, subject, text: plain, html });
+		console.info('[activation] admin notification sent to', adminEmail);
+	} else {
+		console.warn('[activation] SMTP not configured — new pending user:', newName, newEmail);
+	}
+}
+
+async function sendAccountApprovedEmail(toEmail, userName) {
+	if (!toEmail) return;
+	const loginUrl = process.env.FRONTEND_ORIGIN || 'https://erics-bakery.vercel.app';
+	const subject  = `Eric's Bakery — Your account has been approved! 🎉`;
+	const plain    = `Hi ${userName},\n\nYour Eric's Bakery account has been approved.\nSign in at: ${loginUrl}\n\nWelcome aboard!`;
+	const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+	const html = buildEmailWrapper(
+		process.env.RESET_EMAIL_LOGO_URL || 'https://i.ibb.co/9HshkkkB/logo.png',
+		`<h1>Account Approved! 🎉</h1>
+		 <p class="lead">Hi <strong>${esc(userName)}</strong>, your account has been approved. You can now sign in.</p>
+		 <a href="${loginUrl}" class="cta">Sign in now &rarr;</a>
+		 <p style="color:#94a3b8;font-size:12px;margin-top:18px">Welcome to the team!</p>
+		 <div class="footer">Sent to ${esc(toEmail)}</div>`
+	);
+	if (mailTransporter) {
+		await mailTransporter.sendMail({ from: EMAIL_FROM, to: toEmail, subject, text: plain, html });
+		console.info('[activation] approval email sent to', toEmail);
+	} else {
+		console.info('[activation] SMTP not configured — would have emailed approval to', toEmail);
+	}
+}
+
+async function sendAccountRejectedEmail(toEmail, userName, reason) {
+	if (!toEmail) return;
+	const subject = `Eric's Bakery — Account registration update`;
+	const plain   = `Hi ${userName},\n\nUnfortunately your account registration could not be approved.${reason ? '\nReason: '+reason : ''}\n\nContact the bakery admin if you think this is a mistake.`;
+	const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+	const html = buildEmailWrapper(
+		process.env.RESET_EMAIL_LOGO_URL || 'https://i.ibb.co/9HshkkkB/logo.png',
+		`<h1>Account Update</h1>
+		 <p class="lead">Hi <strong>${esc(userName)}</strong>, unfortunately your registration could not be approved at this time.</p>
+		 ${reason ? `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:12px 16px;margin:14px 0;text-align:left"><span style="color:#991b1b;font-size:13px"><strong>Reason:</strong> ${esc(reason)}</span></div>` : ''}
+		 <p style="color:#94a3b8;font-size:13px;margin-top:16px">If this is a mistake, please contact the bakery directly.</p>
+		 <div class="footer">Sent to ${esc(toEmail)}</div>`
+	);
+	if (mailTransporter) {
+		await mailTransporter.sendMail({ from: EMAIL_FROM, to: toEmail, subject, text: plain, html });
+		console.info('[activation] rejection email sent to', toEmail);
+	} else {
+		console.info('[activation] SMTP not configured — would have emailed rejection to', toEmail);
+	}
+}
+
+// ── Account Activation — admin routes ─────────────────────────────────────
+
+app.get('/api/admin/pending-users', authMiddleware, async (req, res) => {
+	try {
+		const role = String((req.user && req.user.role) || '').toLowerCase();
+		if (role !== 'admin' && role !== 'owner') return res.status(403).json({ error: 'Forbidden' });
+		const [rows] = await pool.query(
+			"SELECT id, username, name, email, role, created_at FROM users WHERE status = 'pending' ORDER BY created_at ASC"
+		);
+		return res.json({ users: rows });
+	} catch (e) {
+		console.error('[activation] GET pending-users error', e);
+		return res.status(500).json({ error: 'Server error' });
+	}
+});
+
+app.post('/api/admin/users/:id/approve', authMiddleware, async (req, res) => {
+	try {
+		const actorRole = String((req.user && req.user.role) || '').toLowerCase();
+		if (actorRole !== 'admin' && actorRole !== 'owner') return res.status(403).json({ error: 'Forbidden' });
+		const targetId = Number(req.params.id);
+		if (!targetId) return res.status(400).json({ error: 'Invalid user id' });
+		const [rows] = await pool.query('SELECT id, name, username, email, status FROM users WHERE id = ? LIMIT 1', [targetId]);
+		if (!rows || !rows[0]) return res.status(404).json({ error: 'User not found' });
+		const user = rows[0];
+		if (user.status !== 'pending') return res.status(400).json({ error: 'User is not pending approval' });
+		await pool.query("UPDATE users SET status = 'active' WHERE id = ?", [targetId]);
+		sendAccountApprovedEmail(user.email, user.name || user.username)
+			.catch(e => console.warn('[activation] approval email failed:', e && e.message));
+		return res.json({ ok: true, message: `${user.name || user.username}'s account has been approved.` });
+	} catch (e) {
+		console.error('[activation] approve error', e);
+		return res.status(500).json({ error: 'Server error' });
+	}
+});
+
+app.post('/api/admin/users/:id/reject', authMiddleware, async (req, res) => {
+	try {
+		const actorRole = String((req.user && req.user.role) || '').toLowerCase();
+		if (actorRole !== 'admin' && actorRole !== 'owner') return res.status(403).json({ error: 'Forbidden' });
+		const targetId = Number(req.params.id);
+		if (!targetId) return res.status(400).json({ error: 'Invalid user id' });
+		const reason = ((req.body && req.body.reason) || '').toString().trim().slice(0, 500);
+		const [rows] = await pool.query('SELECT id, name, username, email, status FROM users WHERE id = ? LIMIT 1', [targetId]);
+		if (!rows || !rows[0]) return res.status(404).json({ error: 'User not found' });
+		const user = rows[0];
+		if (user.status !== 'pending') return res.status(400).json({ error: 'User is not pending approval' });
+		await pool.query("UPDATE users SET status = 'rejected' WHERE id = ?", [targetId]);
+		sendAccountRejectedEmail(user.email, user.name || user.username, reason)
+			.catch(e => console.warn('[activation] rejection email failed:', e && e.message));
+		return res.json({ ok: true, message: `${user.name || user.username}'s account has been rejected.` });
+	} catch (e) {
+		console.error('[activation] reject error', e);
+		return res.status(500).json({ error: 'Server error' });
+	}
+});
+
+// Safety net: log unhandled promise rejections (don't crash on Vercel serverless)
 process.on('unhandledRejection', (reason) => {
 	console.error('[unhandledRejection]', reason && reason.message ? reason.message : reason);
 });
