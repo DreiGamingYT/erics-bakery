@@ -59,7 +59,7 @@
 					const data   = await cloned.json();
 					if (data && data.code === 'ACCOUNT_PENDING') {
 						setTimeout(() => notify(
-							data.message || 'Your account is awaiting admin approval. You\'ll be notified by email once activated.',
+							data.message || "Your account is awaiting admin approval. You'll be notified by email once activated.",
 							{ type: 'info', duration: 7000 }
 						), 60);
 					} else if (data && data.code === 'ACCOUNT_REJECTED') {
@@ -661,6 +661,18 @@
 			init();
 		}
 	}, 50);
+
+	// Stop the poll timer on logout
+	const _origLogout = window.performLogout;
+	if (typeof _origLogout === 'function' && !_origLogout._actPatched) {
+		window.performLogout = function () {
+			if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+			// Remove nav badge
+			document.querySelectorAll('.act-badge-nav').forEach(el => el.remove());
+			return _origLogout.apply(this, arguments);
+		};
+		window.performLogout._actPatched = true;
+	}
 
 	// Also re-init if session changes (e.g. user logs in as admin)
 	const _origStartApp = window.startApp;

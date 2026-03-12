@@ -5907,19 +5907,17 @@ function startApp() {
 	renderBestSellerChart();
 	initSearchFeature();
 }
-async function performLogout() {
-	try {
-		await fetch('/api/auth/logout', {
-			method: 'POST',
-			credentials: 'include'
-		});
-	} catch (e) {}
+function performLogout() {
+	// Show the login screen immediately — don't wait for the network
 	clearSession();
 	destroyAllCharts();
 	showApp(false);
 	showOverlay(true, true);
 	if (q('overlay-username')) q('overlay-username').value = '';
 	if (q('overlay-password')) q('overlay-password').value = '';
+
+	// Fire the server-side logout in the background (clears the cookie)
+	fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
 }
 
 const RECENT_LOGINS_KEY = 'bakery_recent_logins_v1';
@@ -6172,10 +6170,38 @@ document.addEventListener('DOMContentLoaded', () => {
 				applyTheme(localStorage.getItem(THEME_KEY) || 'light');
 				return;
 			} catch (innerErr) {
-				console.error('[login] unexpected error:', innerErr);
-				notify('Could not reach the server. Please check your connection and try again.', { type: 'error' });
+				const acc = loadAccounts();
+				try {
+					if (!acc[username]) {
+						if (confirm('Account not found. Would you like to sign up?')) q('overlayToSignup')?.click();
 						setButtonLoadingWithMin(btn, false, 600);
 						showGlobalLoader(false);
+						return;
+					}
+					if (acc[username].password !== password) {
+						notify('Incorrect password');
+						setButtonLoadingWithMin(btn, false, 600);
+						showGlobalLoader(false);
+						return;
+					}
+					const userObj = {
+						username,
+						role: acc[username].role,
+						name: acc[username].name || username
+					};
+					setSession(userObj, remember);
+					if (typeof saveRecentProfileLocally === 'function') saveRecentProfileLocally(username);
+					setButtonLoadingWithMin(btn, false, 600);
+					showGlobalLoader(false);
+					startApp();
+					applyTheme(localStorage.getItem(THEME_KEY) || 'light');
+					return;
+				} catch (fallbackErr) {
+					notify('Login error');
+					console.error(fallbackErr);
+					setButtonLoadingWithMin(btn, false, 600);
+					return;
+				}
 			}
 		} catch (err) {
 			console.error('signin handler error', err);
