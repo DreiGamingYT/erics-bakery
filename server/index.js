@@ -110,8 +110,59 @@ function signToken(user) {
 }
 async function getUserByUsername(username) {
 	const [rows] = await pool.query(
-		'SELECT id, username, password_hash, role, name, COALESCE(token_version, 0) AS token_version FROM users WHERE username = ?', [username]);
+		'SELECT id, username, password_hash, role, name, email, COALESCE(token_version, 0) AS token_version, COALESCE(status, "active") AS status FROM users WHERE username = ?', [username]);
 	return rows[0];
+}
+
+// ── System admin config ────────────────────────────────────────────────────────
+const SYSADMIN_USERNAME = (process.env.SYSADMIN_USERNAME || 'sysadmin').trim();
+const SYSADMIN_PASSWORD = (process.env.SYSADMIN_PASSWORD || 'SysAdmin@2024!').trim();
+const ADMIN_NOTIFY_EMAIL = (process.env.ADMIN_NOTIFY_EMAIL || SMTP_USER || '').trim();
+
+async function sendActivationRequestEmail(adminEmail, newUser, appUrl) {
+	if (!adminEmail) {
+		console.info('[activation] ADMIN_NOTIFY_EMAIL not set — logging request instead:', newUser.username);
+		return;
+	}
+	const approveUrl = `${appUrl}/api/admin/users/${newUser.id}/approve-direct`;
+	const subject = `Eric's Bakery — New account pending approval: ${newUser.username}`;
+	const plain   = `A new user has registered and is awaiting approval.\n\nUsername: ${newUser.username}\nName: ${newUser.name}\nEmail: ${newUser.email || '(none)'}\nRole requested: ${newUser.role}\n\nApprove or reject in the Admin panel, or open this link to approve directly:\n${approveUrl}`;
+	const html    = buildEmailWrapper(
+		process.env.RESET_EMAIL_LOGO_URL || 'https://i.ibb.co/9HshkkkB/logo.png',
+		`<h1>New Account Pending Approval</h1>
+		 <p class="lead">A new user has registered on <strong>Eric's Bakery</strong> and is waiting for your approval before they can sign in.</p>
+		 <table style="width:100%;border-collapse:collapse;text-align:left;margin:0 0 20px;font-size:14px">
+		   <tr><td style="padding:7px 10px;color:#888;border-bottom:1px solid #f0f0f0">Username</td><td style="padding:7px 10px;font-weight:700;border-bottom:1px solid #f0f0f0">${newUser.username.replace(/</g,'&lt;')}</td></tr>
+		   <tr><td style="padding:7px 10px;color:#888;border-bottom:1px solid #f0f0f0">Name</td><td style="padding:7px 10px;border-bottom:1px solid #f0f0f0">${(newUser.name||'—').replace(/</g,'&lt;')}</td></tr>
+		   <tr><td style="padding:7px 10px;color:#888;border-bottom:1px solid #f0f0f0">Email</td><td style="padding:7px 10px;border-bottom:1px solid #f0f0f0">${(newUser.email||'—').replace(/</g,'&lt;')}</td></tr>
+		   <tr><td style="padding:7px 10px;color:#888">Role</td><td style="padding:7px 10px">${(newUser.role||'Baker').replace(/</g,'&lt;')}</td></tr>
+		 </table>
+		 <a href="${approveUrl}" class="cta">✓ Approve Account</a>
+		 <p style="color:#94a3b8;font-size:12px;margin-top:16px">You can also approve or reject this account from the <strong>User Management</strong> panel in the app.</p>
+		 <div class="footer">Sent to ${adminEmail}</div>`
+	);
+	if (mailTransporter) {
+		await mailTransporter.sendMail({ from: EMAIL_FROM, to: adminEmail, subject, text: plain, html });
+		console.info('[activation] admin notification sent to', adminEmail);
+	} else {
+		console.info('[activation] SMTP not configured. Pending approval for:', newUser.username);
+	}
+}
+
+async function sendActivationApprovedEmail(userEmail, userName) {
+	if (!userEmail || !mailTransporter) return;
+	const subject = `Eric's Bakery — Your account has been approved!`;
+	const plain   = `Hi ${userName},\n\nGreat news! Your account has been approved by the administrator.\n\nYou can now sign in to Eric's Bakery with your username and password.\n\nWelcome aboard!`;
+	const html    = buildEmailWrapper(
+		process.env.RESET_EMAIL_LOGO_URL || 'https://i.ibb.co/9HshkkkB/logo.png',
+		`<h1>Account Approved! 🎉</h1>
+		 <p class="lead">Hi <strong>${userName.replace(/</g,'&lt;')}</strong>, your account has been approved by the administrator.</p>
+		 <p style="color:#475569;font-size:14px">You can now sign in to <strong>Eric's Bakery</strong> with your username and password.</p>
+		 <p style="color:#16a34a;font-weight:700;font-size:15px;margin:16px 0">✓ Welcome to the team!</p>
+		 <div class="footer">Sent to ${userEmail}</div>`
+	);
+	await mailTransporter.sendMail({ from: EMAIL_FROM, to: userEmail, subject, text: plain, html });
+	console.info('[activation] approval confirmation sent to', userEmail);
 }
 
 async function authMiddleware(req, res, next) {
@@ -164,44 +215,30 @@ function hasRole(user, roles) {
 
 app.post('/api/auth/signup', async (req, res) => {
 	try {
-		const {
-			username,
-			password,
-			role = 'Baker',
-			name = null,
-			email = ''
-		} = req.body;
-		if (!email) return res.status(400).json({
-			message: 'Email required'
-		});
-		if (!username || !password) return res.status(400).json({
-			message: 'username & password required'
-		});
+		const { username, password, role = 'Baker', name = null, email = '' } = req.body;
+		if (!email) return res.status(400).json({ message: 'Email required' });
+		if (!username || !password) return res.status(400).json({ message: 'Username & password required' });
 		const existing = await getUserByUsername(username);
-		if (existing) return res.status(409).json({
-			message: 'Username exists'
-		});
+		if (existing) return res.status(409).json({ message: 'Username already exists' });
 		const hash = await bcrypt.hash(password, 10);
 		const [r] = await pool.query(
-			'INSERT INTO users (username, password_hash, role, name, email) VALUES (?, ?, ?, ?, ?)', [
-				username, hash, role, name || username, email
-			]);
-		const user = {
-			id: r.insertId,
-			username,
-			role,
-			name: name || username
-		};
-		const token = signToken(user);
-		res.cookie(TOKEN_NAME, token, buildCookieOptions());
-		res.json({
-			user
+			'INSERT INTO users (username, password_hash, role, name, email, status) VALUES (?, ?, ?, ?, ?, ?)',
+			[username, hash, role, name || username, email, 'pending']
+		);
+		const newUser = { id: r.insertId, username, role, name: name || username, email };
+		// Notify admin asynchronously — don't block the response
+		const appUrl = process.env.APP_URL || (req.protocol + '://' + req.get('host'));
+		setImmediate(async () => {
+			try { await sendActivationRequestEmail(ADMIN_NOTIFY_EMAIL, newUser, appUrl); }
+			catch (e) { console.error('[activation] admin email error:', e.message); }
+		});
+		return res.status(202).json({
+			pending: true,
+			message: 'Account created and is pending admin approval. You will be notified by email once approved.'
 		});
 	} catch (err) {
-		console.error(err);
-		res.status(500).json({
-			message: 'Signup failed'
-		});
+		console.error('[signup]', err);
+		res.status(500).json({ message: 'Signup failed' });
 	}
 });
 
@@ -212,14 +249,18 @@ app.post('/api/auth/login', async (req, res) => {
 			password
 		} = req.body;
 		const user = await getUserByUsername(username);
-		if (!user) return res.status(401).json({
-			message: 'Invalid credentials'
-		});
+		if (!user) return res.status(401).json({ message: 'Invalid credentials' });
+
+		// Block pending accounts from signing in
+		if (user.status === 'pending') {
+			return res.status(403).json({
+				message: 'Your account is pending approval by the administrator. You will receive an email once approved.',
+				code: 'ACCOUNT_PENDING'
+			});
+		}
 
 		const ok = await bcrypt.compare(password, user.password_hash);
-		if (!ok) return res.status(401).json({
-			message: 'Invalid credentials'
-		});
+		if (!ok) return res.status(401).json({ message: 'Invalid credentials' });
 
 		const token = signToken({
 			id: user.id,
@@ -1567,6 +1608,83 @@ app.post('/api/auth/magic-link/verify', async (req, res) => {
 	}
 });
 
+// ── Admin: list pending accounts ─────────────────────────────────────────────
+app.get('/api/admin/pending-users', authMiddleware, async (req, res) => {
+	if (!hasRole(req.user, ['Owner', 'Admin', 'sysadmin'])) return res.status(403).json({ error: 'Forbidden' });
+	try {
+		const [rows] = await pool.query(
+			`SELECT id, username, name, email, role, created_at FROM users WHERE status = 'pending' ORDER BY created_at DESC`
+		);
+		res.json({ users: rows });
+	} catch (err) {
+		console.error('[pending-users]', err);
+		res.status(500).json({ error: 'Failed to fetch pending users' });
+	}
+});
+
+// ── Admin: approve a pending account ─────────────────────────────────────────
+app.post('/api/admin/users/:id/approve', authMiddleware, async (req, res) => {
+	if (!hasRole(req.user, ['Owner', 'Admin', 'sysadmin'])) return res.status(403).json({ error: 'Forbidden' });
+	try {
+		const userId = Number(req.params.id);
+		const [rows] = await pool.query('SELECT id, username, name, email, status FROM users WHERE id = ?', [userId]);
+		const user = rows[0];
+		if (!user) return res.status(404).json({ error: 'User not found' });
+		if (user.status !== 'pending') return res.status(400).json({ error: 'Account is not pending' });
+		await pool.query('UPDATE users SET status = ? WHERE id = ?', ['active', userId]);
+		// Email user that they're approved
+		setImmediate(async () => {
+			try { await sendActivationApprovedEmail(user.email, user.name || user.username); }
+			catch (e) { console.error('[activation] approval email error:', e.message); }
+		});
+		res.json({ ok: true, message: `Account "${user.username}" has been approved.` });
+	} catch (err) {
+		console.error('[approve-user]', err);
+		res.status(500).json({ error: 'Approval failed' });
+	}
+});
+
+// ── Admin: direct approve link (from email) ───────────────────────────────────
+app.get('/api/admin/users/:id/approve-direct', async (req, res) => {
+	// Require a signed token or sysadmin session — simple token check via query param
+	try {
+		const token = req.cookies[TOKEN_NAME] || (req.headers.authorization || '').split(' ')[1];
+		if (!token) return res.redirect('/?error=auth_required');
+		const data = jwt.verify(token, JWT_SECRET);
+		if (!hasRole(data, ['Owner', 'Admin', 'sysadmin'])) return res.redirect('/?error=forbidden');
+		const userId = Number(req.params.id);
+		const [rows] = await pool.query('SELECT id, username, name, email, status FROM users WHERE id = ?', [userId]);
+		const user = rows[0];
+		if (!user) return res.redirect('/?error=user_not_found');
+		if (user.status !== 'pending') return res.redirect('/?notice=already_processed');
+		await pool.query('UPDATE users SET status = ? WHERE id = ?', ['active', userId]);
+		setImmediate(async () => {
+			try { await sendActivationApprovedEmail(user.email, user.name || user.username); }
+			catch (e) { console.error('[activation] approval email error:', e.message); }
+		});
+		res.redirect('/?notice=user_approved&username=' + encodeURIComponent(user.username));
+	} catch (err) {
+		console.error('[approve-direct]', err);
+		res.redirect('/?error=server_error');
+	}
+});
+
+// ── Admin: reject / delete a pending account ──────────────────────────────────
+app.post('/api/admin/users/:id/reject', authMiddleware, async (req, res) => {
+	if (!hasRole(req.user, ['Owner', 'Admin', 'sysadmin'])) return res.status(403).json({ error: 'Forbidden' });
+	try {
+		const userId = Number(req.params.id);
+		const [rows] = await pool.query('SELECT id, username, status FROM users WHERE id = ?', [userId]);
+		if (!rows[0]) return res.status(404).json({ error: 'User not found' });
+		if (rows[0].status !== 'pending') return res.status(400).json({ error: 'Account is not pending' });
+		await pool.query('DELETE FROM users WHERE id = ? AND status = ?', [userId, 'pending']);
+		res.json({ ok: true, message: `Account "${rows[0].username}" has been rejected and removed.` });
+	} catch (err) {
+		console.error('[reject-user]', err);
+		res.status(500).json({ error: 'Rejection failed' });
+	}
+});
+
 // ── Admin: change a user's role ────────────────────────────────────────────
 app.patch('/api/admin/users/:id/role', authMiddleware, async (req, res) => {
 	if (!hasRole(req.user, ['Owner', 'Admin'])) {
@@ -1913,6 +2031,32 @@ async function runStartupMigrations() {
 			console.log('[startup] users.notif_prefs column added');
 		} catch (e) {
 			if (e.code !== 'ER_DUP_FIELDNAME') console.warn('[startup] users.notif_prefs:', e.message);
+		}
+
+		// 2b-extra. status column — 'active' (default) or 'pending' for account activation
+		try {
+			await conn.query(`ALTER TABLE users ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'active'`);
+			console.log('[startup] users.status column added');
+		} catch (e) {
+			if (e.code !== 'ER_DUP_FIELDNAME') console.warn('[startup] users.status:', e.message);
+		}
+		// Ensure sysadmin account exists and is always active (bypass activation)
+		try {
+			const [saRows] = await conn.query('SELECT id FROM users WHERE username = ? LIMIT 1', [SYSADMIN_USERNAME]);
+			if (saRows.length === 0) {
+				const bcryptLib = require('bcryptjs');
+				const saHash = await bcryptLib.hash(SYSADMIN_PASSWORD, 10);
+				await conn.query(
+					"INSERT INTO users (username, password_hash, role, name, email, status) VALUES (?, ?, 'Owner', 'System Admin', '', 'active')",
+					[SYSADMIN_USERNAME, saHash]
+				);
+				console.log('[startup] sysadmin account created:', SYSADMIN_USERNAME);
+			} else {
+				// Always force sysadmin to active status
+				await conn.query("UPDATE users SET status = 'active', role = 'Owner' WHERE username = ?", [SYSADMIN_USERNAME]);
+			}
+		} catch (e) {
+			console.warn('[startup] sysadmin seed:', e.message);
 		}
 
 		// 2b. token_version — used to invalidate all other sessions on password change
