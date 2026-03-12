@@ -9480,12 +9480,13 @@ async function populateUserMenu() {
 	// Wire buttons (use the real function names that exist in this file)
 	const btnProfile = q('userMenuProfile');
 	if (btnProfile) btnProfile.onclick = () => {
-		showProfileModal(); // your existing profile modal function
+		populateProfile();
+		showView('profile');
 	};
 
 	const btnLogout = q('userMenuLogout');
 	if (btnLogout) btnLogout.onclick = () => {
-		logoutUser(); // your existing logout function
+		performLogout();
 	};
 }
 
