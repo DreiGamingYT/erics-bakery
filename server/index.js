@@ -243,12 +243,15 @@ app.post('/api/auth/signup', async (req, res) => {
 			[username, hash, role, name || username, email, 'pending']
 		);
 		const newUser = { id: r.insertId, username, role, name: name || username, email };
-		// Notify admin asynchronously — don't block the response
 		const appUrl = process.env.APP_URL || (req.protocol + '://' + req.get('host'));
-		setImmediate(async () => {
-			try { await sendActivationRequestEmail(ADMIN_NOTIFY_EMAIL, newUser, appUrl); }
-			catch (e) { console.error('[activation] admin email error:', e.message); }
-		});
+		// Await email before responding — required on serverless (Vercel/Render) where
+		// execution stops immediately after res.json(), killing any async background work.
+		try {
+			await sendActivationRequestEmail(ADMIN_NOTIFY_EMAIL, newUser, appUrl);
+		} catch (e) {
+			console.error('[activation] admin email error:', e.message);
+			// Don't fail the signup if email fails — account is already created
+		}
 		return res.status(202).json({
 			pending: true,
 			message: 'Account created and is pending admin approval. You will be notified by email once approved.'
@@ -1649,11 +1652,8 @@ app.post('/api/admin/users/:id/approve', authMiddleware, async (req, res) => {
 		if (!user) return res.status(404).json({ error: 'User not found' });
 		if (user.status !== 'pending') return res.status(400).json({ error: 'Account is not pending' });
 		await pool.query('UPDATE users SET status = ? WHERE id = ?', ['active', userId]);
-		// Email user that they're approved
-		setImmediate(async () => {
 			try { await sendActivationApprovedEmail(user.email, user.name || user.username); }
 			catch (e) { console.error('[activation] approval email error:', e.message); }
-		});
 		res.json({ ok: true, message: `Account "${user.username}" has been approved.` });
 	} catch (err) {
 		console.error('[approve-user]', err);
@@ -1675,10 +1675,8 @@ app.get('/api/admin/users/:id/approve-direct', async (req, res) => {
 		if (!user) return res.redirect('/?error=user_not_found');
 		if (user.status !== 'pending') return res.redirect('/?notice=already_processed');
 		await pool.query('UPDATE users SET status = ? WHERE id = ?', ['active', userId]);
-		setImmediate(async () => {
 			try { await sendActivationApprovedEmail(user.email, user.name || user.username); }
 			catch (e) { console.error('[activation] approval email error:', e.message); }
-		});
 		res.redirect('/?notice=user_approved&username=' + encodeURIComponent(user.username));
 	} catch (err) {
 		console.error('[approve-direct]', err);
