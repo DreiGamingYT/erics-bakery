@@ -110,7 +110,7 @@ function signToken(user) {
 }
 async function getUserByUsername(username) {
 	const [rows] = await pool.query(
-		'SELECT id, username, password_hash, role, name, COALESCE(token_version, 0) AS token_version FROM users WHERE username = ?', [username]);
+		'SELECT id, username, password_hash, role, name, COALESCE(token_version, 0) AS token_version, COALESCE(status, \'active\') AS status FROM users WHERE username = ?', [username]);
 	return rows[0];
 }
 
@@ -183,19 +183,17 @@ app.post('/api/auth/signup', async (req, res) => {
 		});
 		const hash = await bcrypt.hash(password, 10);
 		const [r] = await pool.query(
-			'INSERT INTO users (username, password_hash, role, name, email) VALUES (?, ?, ?, ?, ?)', [
-				username, hash, role, name || username, email
-			]);
-		const user = {
-			id: r.insertId,
-			username,
-			role,
-			name: name || username
-		};
-		const token = signToken(user);
-		res.cookie(TOKEN_NAME, token, buildCookieOptions());
-		res.json({
-			user
+			"INSERT INTO users (username, password_hash, role, name, email, status) VALUES (?, ?, ?, ?, ?, 'pending')",
+			[username, hash, role, name || username, email]
+		);
+
+		activationHelpers.sendActivationRequestEmail(
+			ADMIN_EMAIL, name || username, email, role
+		).catch(e => console.warn('[activation] admin notify failed:', e && e.message));
+
+		return res.json({
+			pending: true,
+			message: 'Your account has been created and is awaiting admin approval. You\'ll receive an email once your account is activated.'
 		});
 	} catch (err) {
 		console.error(err);
@@ -220,6 +218,20 @@ app.post('/api/auth/login', async (req, res) => {
 		if (!ok) return res.status(401).json({
 			message: 'Invalid credentials'
 		});
+
+		// Block pending or rejected accounts
+		if (user.status === 'pending') {
+			return res.status(403).json({
+				message: 'Your account is awaiting admin approval. You\'ll be notified by email once it\'s activated.',
+				code: 'ACCOUNT_PENDING'
+			});
+		}
+		if (user.status === 'rejected') {
+			return res.status(403).json({
+				message: 'Your account registration was not approved. Please contact the bakery admin.',
+				code: 'ACCOUNT_REJECTED'
+			});
+		}
 
 		const token = signToken({
 			id: user.id,
@@ -1368,6 +1380,8 @@ function buildEmailWrapper(logoUrl, bodyHtml) {
 </body></html>`;
 }
 
+const registerActivationRoutes = require('./account-activation-backend');
+
 async function sendMagicLinkEmail(toEmail, name, magicLink) {
 	name = (name || toEmail || 'there');
 	const subject = `Eric's Bakery — Your sign-in link`;
@@ -1417,6 +1431,17 @@ async function sendRoleChangeEmail(toEmail, userName, oldRole, newRole, changedB
 		console.info('[role-change] SMTP not configured. Would have emailed', toEmail, '— role:', oldRole, '->', newRole);
 	}
 }
+
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || SMTP_USER || '').trim();
+
+const activationHelpers = registerActivationRoutes(app, pool, {
+  authMiddleware,
+  mailTransporter,
+  EMAIL_FROM,
+  buildEmailWrapper,
+  ADMIN_EMAIL,
+  FRONTEND_ORIGIN: process.env.FRONTEND_ORIGIN || 'https://erics-bakery.vercel.app'
+});
 
 // ── Magic link: request ────────────────────────────────────────────────────
 app.post('/api/auth/magic-link/request', async (req, res) => {
@@ -1984,7 +2009,6 @@ async function runStartupMigrations() {
 	}
 }
 
-// ── Global Express error handler — ensures every crash returns JSON, never HTML ──
 app.use((err, req, res, next) => {
 	const detail = err && err.message ? err.message : String(err);
 	console.error('[express] unhandled error:', detail, err && err.stack ? '\n' + err.stack : '');
@@ -1992,7 +2016,6 @@ app.use((err, req, res, next) => {
 	res.status(err.status || 500).json({ error: `Server error: ${detail}` });
 });
 
-// Safety net: log unhandled promise rejections (don't crash on Vercel serverless)
 process.on('unhandledRejection', (reason) => {
 	console.error('[unhandledRejection]', reason && reason.message ? reason.message : reason);
 });

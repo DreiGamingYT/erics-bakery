@@ -130,13 +130,13 @@
         </aside>
         <main class="main">
           <section id="view-dashboard" class="view">
-            <!-- Greeting bar -->
+
             <div id="dashGreeting" class="dash-greeting"></div>
             <div class="page-header">
               <h2>Dashboard</h2>
               <div class="page-actions"><button id="quickAddIng" class="btn small primary" type="button"><i class="fa fa-plus"></i> Add Ingredient</button></div>
             </div>
-            <!-- KPI row — each card has icon + value + title + trend -->
+
             <div class="kpi-row">
               <div class="kpi-card" id="kpicard-total">
                 <div class="kpi-icon kpi-icon-blue"><i class="fa fa-boxes-stacked"></i></div>
@@ -171,10 +171,10 @@
                 </div>
               </div>
             </div>
-            <!-- Alert strips -->
+
             <div id="dash-alert-low" class="dash-alert dash-alert-orange" style="display:none"></div>
             <div id="dash-alert-exp" class="dash-alert dash-alert-red" style="display:none"></div>
-            <!-- Charts -->
+
             <div class="grid-2">
               <div class="card">
                 <div class="dash-card-header">
@@ -199,7 +199,7 @@
                 <div class="chart-container"><canvas id="bestSellerChart" width="400" height="220"></canvas></div>
               </div>
             </div>
-            <!-- Recent activity with view-all -->
+
             <div class="card">
               <div class="dash-card-header">
                 <h3>Recent Activity</h3>
@@ -233,7 +233,7 @@
             <div class="page-header">
               <h2>Reports</h2>
               <div class="page-actions report-controls">
-                
+
               </div>
             </div>
             <div class="grid-3">
@@ -430,7 +430,7 @@
                   <h3 style="margin:0 0 4px 0">Appearance</h3>
                   <div class="muted small" style="margin-bottom:12px">Pick a color scheme for the UI.</div>
                   <div id="colorPaletteGrid" class="color-palette-grid"></div>
-                  <!-- hidden checkbox kept for backward-compat JS that reads #themeToggle -->
+
                   <input id="themeToggle" type="checkbox" style="display:none" aria-hidden="true" />
                 </div>
                 <div class="card small-card" id="inventorySettingsCard" style="margin-top:12px">
@@ -458,7 +458,7 @@
             </div>
 
             <div class="card">
-              <!-- this is the panel container where the admin UI will render -->
+
               <div id="usersPanel"></div>
             </div>
           </section>
@@ -478,9 +478,9 @@
     <script src="auth-enhancements.js"></script>
     <script src="magic-link.js"></script>
     <script>
-      // Wire offline banner to service worker events
       window.addEventListener('offline', () => { document.getElementById('offlineBanner').style.display = 'block'; });
       window.addEventListener('online',  () => { document.getElementById('offlineBanner').style.display = 'none'; });
     </script>
     <script src="bread-bg.js"></script>
+    <script src="account-activation.js"></script>
 </html>
