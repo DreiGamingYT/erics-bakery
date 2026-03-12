@@ -6172,38 +6172,10 @@ document.addEventListener('DOMContentLoaded', () => {
 				applyTheme(localStorage.getItem(THEME_KEY) || 'light');
 				return;
 			} catch (innerErr) {
-				const acc = loadAccounts();
-				try {
-					if (!acc[username]) {
-						if (confirm('Account not found. Would you like to sign up?')) q('overlayToSignup')?.click();
+				console.error('[login] unexpected error:', innerErr);
+				notify('Could not reach the server. Please check your connection and try again.', { type: 'error' });
 						setButtonLoadingWithMin(btn, false, 600);
 						showGlobalLoader(false);
-						return;
-					}
-					if (acc[username].password !== password) {
-						notify('Incorrect password');
-						setButtonLoadingWithMin(btn, false, 600);
-						showGlobalLoader(false);
-						return;
-					}
-					const userObj = {
-						username,
-						role: acc[username].role,
-						name: acc[username].name || username
-					};
-					setSession(userObj, remember);
-					if (typeof saveRecentProfileLocally === 'function') saveRecentProfileLocally(username);
-					setButtonLoadingWithMin(btn, false, 600);
-					showGlobalLoader(false);
-					startApp();
-					applyTheme(localStorage.getItem(THEME_KEY) || 'light');
-					return;
-				} catch (fallbackErr) {
-					notify('Login error');
-					console.error(fallbackErr);
-					setButtonLoadingWithMin(btn, false, 600);
-					return;
-				}
 			}
 		} catch (err) {
 			console.error('signin handler error', err);

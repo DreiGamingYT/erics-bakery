@@ -112,8 +112,21 @@ function signToken(user) {
 	});
 }
 async function getUserByUsername(username) {
+	// Use IF() so the query never fails even if the column was just added
 	const [rows] = await pool.query(
-		"SELECT id, username, password_hash, role, name, is_superadmin, COALESCE(token_version, 0) AS token_version, COALESCE(status, 'active') AS status FROM users WHERE username = ?", [username]);
+		`SELECT id, username, password_hash, role, name,
+		        COALESCE(token_version, 0)  AS token_version,
+		        IF(
+		            (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+		             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'status') > 0,
+		            status, 'active'
+		        )                           AS status,
+		        IF(
+		            (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+		             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'is_superadmin') > 0,
+		            is_superadmin, 0
+		        )                           AS is_superadmin
+		 FROM users WHERE username = ?`, [username]);
 	return rows[0];
 }
 
