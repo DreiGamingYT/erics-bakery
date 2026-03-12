@@ -5908,15 +5908,65 @@ function startApp() {
 	initSearchFeature();
 }
 function performLogout() {
-	// Show the login screen immediately — don't wait for the network
+	// Show a confirmation modal before logging out
+	if (!document.getElementById('logoutConfirmOverlay')) {
+		const ov = document.createElement('div');
+		ov.id = 'logoutConfirmOverlay';
+		ov.setAttribute('role', 'dialog');
+		ov.setAttribute('aria-modal', 'true');
+		ov.style.cssText = [
+			'position:fixed;inset:0;z-index:99700',
+			'background:rgba(0,0,0,0.55)',
+			'display:flex;align-items:center;justify-content:center',
+			'backdrop-filter:blur(4px)',
+			'animation:idleFadeIn .18s ease'
+		].join(';');
+		ov.innerHTML = `
+			<div style="
+				background:var(--card,#fff);
+				border-radius:18px;
+				padding:32px 28px 24px;
+				max-width:340px;
+				width:90%;
+				box-shadow:0 28px 70px rgba(0,0,0,.22);
+				text-align:center;
+				border:1px solid rgba(0,0,0,.06)">
+				<div style="font-size:2.4rem;margin-bottom:12px">👋</div>
+				<h3 style="margin:0 0 8px;font-size:1.1rem;color:var(--text,#111)">Sign out?</h3>
+				<p style="color:var(--muted,#666);font-size:.875rem;margin:0 0 22px;line-height:1.55">
+					You'll be returned to the login screen.
+				</p>
+				<div style="display:flex;gap:10px;justify-content:center">
+					<button id="logoutConfirmCancel" class="btn ghost" type="button"
+						style="flex:1;padding:11px">Cancel</button>
+					<button id="logoutConfirmOk" class="btn primary" type="button"
+						style="flex:1;padding:11px;background:#ef4444;border-color:#ef4444">
+						Sign out
+					</button>
+				</div>
+			</div>`;
+		document.body.appendChild(ov);
+
+		const dismiss = () => { try { ov.remove(); } catch(_) {} };
+
+		document.getElementById('logoutConfirmCancel').onclick = dismiss;
+		ov.addEventListener('click', (e) => { if (e.target === ov) dismiss(); });
+
+		document.getElementById('logoutConfirmOk').onclick = () => {
+			dismiss();
+			_doLogout();
+		};
+	}
+}
+
+function _doLogout() {
 	clearSession();
 	destroyAllCharts();
 	showApp(false);
 	showOverlay(true, true);
 	if (q('overlay-username')) q('overlay-username').value = '';
 	if (q('overlay-password')) q('overlay-password').value = '';
-
-	// Fire the server-side logout in the background (clears the cookie)
+	// Fire server-side logout in the background to clear the cookie
 	fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
 }
 
@@ -9115,18 +9165,55 @@ document.addEventListener('DOMContentLoaded', () => {
 				}
 			}
 
+			// Count expiring within 7 days
+			const expiringCount = ingredients.filter(i => {
+				if (!i.expiry) return false;
+				const d = new Date(i.expiry);
+				if (isNaN(d)) return false;
+				const diffDays = Math.ceil((d - new Date()) / (1000 * 60 * 60 * 24));
+				return diffDays >= 0 && diffDays <= 7;
+			}).length;
+
 			const niceStart = new Date(start).toLocaleDateString();
-			const niceEnd = new Date(end).toLocaleDateString();
-			const netSign = netChange >= 0 ? '+' : '';
-			reportSummaryEl.textContent =
-				`Range: ${niceStart} — ${niceEnd} · Ingredients: ${totalIngredients} · Low stock: ${lowStockCount} · Stock in: ${stockInCount} · Stock out: ${stockOutCount} · Net change: ${netSign}${Number(netChange).toFixed(3)}`;
+			const niceEnd   = new Date(end).toLocaleDateString();
+			const netSign   = netChange >= 0 ? '+' : '';
+
+			// Build summary as a styled table instead of a plain text string
+			const cells = [
+				{ label: 'Date range',   value: `${niceStart} — ${niceEnd}`,                   icon: '📅', color: '' },
+				{ label: 'Ingredients',  value: totalIngredients,                               icon: '📦', color: '' },
+				{ label: 'Low stock',    value: lowStockCount,                                  icon: '⚠️',  color: lowStockCount  > 0 ? '#dc2626' : '#16a34a' },
+				{ label: 'Expiring ≤7d', value: expiringCount,                                 icon: '🕐', color: expiringCount  > 0 ? '#d97706' : '#16a34a' },
+				{ label: 'Stock in',     value: stockInCount,                                   icon: '↑',  color: '#16a34a' },
+				{ label: 'Stock out',    value: stockOutCount,                                  icon: '↓',  color: '#dc2626' },
+				{ label: 'Net change',   value: `${netSign}${Number(netChange).toFixed(2)}`,    icon: '±',  color: netChange >= 0 ? '#16a34a' : '#dc2626' },
+			];
+
+			reportSummaryEl.innerHTML = `
+				<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-top:4px">
+					${cells.map(c => `
+						<div style="
+							background:var(--bg,#f8f8f8);
+							border:1px solid rgba(0,0,0,.07);
+							border-radius:10px;
+							padding:10px 12px;
+							display:flex;
+							flex-direction:column;
+							gap:3px">
+							<span style="font-size:.72rem;color:var(--muted,#888);font-weight:600;text-transform:uppercase;letter-spacing:.04em">
+								${c.icon} ${c.label}
+							</span>
+							<span style="font-size:1.1rem;font-weight:800;color:${c.color || 'var(--text,#111)'};line-height:1.2">
+								${c.value}
+							</span>
+						</div>`).join('')}
+				</div>`;
 		} catch (err) {
 			console.error('updateReportSummary err', err);
-			if (err && err.status === 401) {
-				reportSummaryEl.textContent = 'Not authenticated — please sign in to view the report summary.';
-			} else {
-				reportSummaryEl.textContent = 'Could not load summary (server error).';
-			}
+			const msg = (err && err.status === 401)
+				? 'Not authenticated — please sign in to view the report summary.'
+				: 'Could not load summary (server error).';
+			reportSummaryEl.innerHTML = `<span style="color:var(--muted,#888);font-size:.875rem">${msg}</span>`;
 		}
 	}
 
