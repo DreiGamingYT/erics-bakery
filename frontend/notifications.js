@@ -115,21 +115,12 @@
 		pollTimer = setInterval(() => checkAndFireAlerts(prefs), 5 * 60 * 1000);
 	}
 
-	// ── Fetch interceptor — instant check after any stock change ─────────────
-
-	const _origFetch = window.fetch.bind(window);
-	const STOCK_RE   = /\/api\/ingredients\/\d+\/stock/;
-
-	window.fetch = async function (input, init) {
-		const url = typeof input === 'string' ? input : (input?.url || '');
-		const res = await _origFetch(input, init);
-		if (STOCK_RE.test(url) && res.ok) {
-			res.clone().json().then(() => {
+	// ── Stock-change alert recheck ───────────────────────────────────────────
+	// Exposed on window so fetch-interceptor.js can call it without wrapping fetch.
+	window._notifLastAlertKey = lastAlertKey;
+	window._checkAlertsNow = () => {
 				lastAlertKey = '';
 				checkAndFireAlerts(currentPrefs, { forceRecheck: true });
-			}).catch(() => {});
-		}
-		return res;
 	};
 
 	// ── UI helpers ────────────────────────────────────────────────────────────

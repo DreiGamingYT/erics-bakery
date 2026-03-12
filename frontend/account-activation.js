@@ -20,60 +20,11 @@
 	const LOGO_URL         = 'https://i.ibb.co/9HshkkkB/logo.png'; // matches existing email logo
 
 	// ═══════════════════════════════════════════════════════════════════════════
-	// 1. FETCH INTERCEPTOR
-	//    Wraps window.fetch to react to signup/login activation responses.
+	// 1. CALLBACKS FOR fetch-interceptor.js
+	//    These functions are called by the single unified fetch interceptor
+	//    instead of wrapping window.fetch here.
 	// ═══════════════════════════════════════════════════════════════════════════
-
-	if (!window._activationFetchPatched) {
-		window._activationFetchPatched = true;
-
-		const _origFetch = window.fetch.bind(window);
-
-		window.fetch = async function (input, init) {
-			const url    = typeof input === 'string' ? input : (input?.url || '');
-			const method = ((init && init.method) || 'GET').toUpperCase();
-
-			const res = await _origFetch(input, init);
-
-			// ── Intercept successful signup that results in a pending account ────
-			if (method === 'POST' && /\/api\/auth\/signup$/.test(url) && res.ok) {
-				try {
-					const cloned = res.clone();
-					const data   = await cloned.json();
-					if (data && data.pending === true) {
-						// Show our UI, then return a synthetic non-ok response so app.js
-						// doesn't attempt setSession(undefined) and crash silently.
-						setTimeout(() => showPendingApprovalOverlay(data.message), 60);
-						return new Response(
-							JSON.stringify({ message: '' }), // empty message suppresses the default toast
-							{ status: 400, headers: { 'Content-Type': 'application/json' } }
-						);
-					}
-				} catch (_) { /* non-JSON or already consumed — pass through */ }
-			}
-
-			// ── Intercept 403 login errors with activation codes ─────────────────
-			if (method === 'POST' && /\/api\/auth\/login$/.test(url) && res.status === 403) {
-				try {
-					const cloned = res.clone();
-					const data   = await cloned.json();
-					if (data && data.code === 'ACCOUNT_PENDING') {
-						setTimeout(() => notify(
-							data.message || "Your account is awaiting admin approval. You'll be notified by email once activated.",
-							{ type: 'info', duration: 7000 }
-						), 60);
-					} else if (data && data.code === 'ACCOUNT_REJECTED') {
-						setTimeout(() => notify(
-							data.message || 'Your account registration was not approved. Please contact the bakery admin.',
-							{ type: 'error', duration: 9000 }
-						), 60);
-					}
-				} catch (_) {}
-			}
-
-			return res;
-		};
-	}
+	window._showPendingApprovalOverlay = showPendingApprovalOverlay;
 
 	// ── Safe notify wrapper ───────────────────────────────────────────────────
 	function notify(msg, opts) {
