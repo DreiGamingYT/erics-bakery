@@ -1984,6 +1984,7 @@ async function runStartupMigrations() {
 	}
 }
 
+// ── Global Express error handler — ensures every crash returns JSON, never HTML ──
 app.use((err, req, res, next) => {
 	const detail = err && err.message ? err.message : String(err);
 	console.error('[express] unhandled error:', detail, err && err.stack ? '\n' + err.stack : '');
@@ -1991,6 +1992,7 @@ app.use((err, req, res, next) => {
 	res.status(err.status || 500).json({ error: `Server error: ${detail}` });
 });
 
+// Safety net: log unhandled promise rejections (don't crash on Vercel serverless)
 process.on('unhandledRejection', (reason) => {
 	console.error('[unhandledRejection]', reason && reason.message ? reason.message : reason);
 });
