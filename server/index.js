@@ -83,18 +83,35 @@ app.all(['/api/products', '/api/products/*', '/api/product', '/api/product/*', '
 
 let mailTransporter = null;
 if (SMTP_HOST && SMTP_USER && SMTP_PASS) {
+	const isPort465 = SMTP_PORT === 465;
 	mailTransporter = nodemailer.createTransport({
 		host: SMTP_HOST,
 		port: SMTP_PORT,
-		secure: SMTP_PORT === 465, 
-
+		secure: isPort465,   // true for 465 (SSL), false for 587 (STARTTLS)
 		auth: {
 			user: SMTP_USER,
 			pass: SMTP_PASS
+		},
+		tls: {
+			// Allow self-signed certs in dev; rejectUnauthorized stays true in prod
+			rejectUnauthorized: process.env.NODE_ENV === 'production',
+			// Force TLS min version — fixes "socket disconnected before TLS" on some hosts
+			minVersion: 'TLSv1.2'
+		},
+		// STARTTLS upgrade for port 587 — must be false when secure:true (port 465)
+		requireTLS: !isPort465
+	});
+	// Verify connection on startup so config errors surface immediately
+	mailTransporter.verify((err) => {
+		if (err) {
+			console.error('[SMTP] Connection verification FAILED:', err.message);
+			console.error('[SMTP] Check SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS in your .env');
+		} else {
+			console.info('[SMTP] Connection verified — ready to send emails via', SMTP_HOST + ':' + SMTP_PORT);
 		}
 	});
 } else {
-	console.warn('SMTP not configured — forgot-password emails will not be sent.');
+	console.warn('[SMTP] Not configured — set SMTP_HOST, SMTP_USER, SMTP_PASS in .env to enable emails.');
 }
 
 function signToken(user) {
