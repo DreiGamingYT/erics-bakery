@@ -291,8 +291,10 @@
 			const p = document.getElementById('overlay-password');
 			if (u) u.value = '';
 			if (p) p.value = '';
-			// 2. Fire API logout in background (best-effort)
-			fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
+			// 2. Fire API logout then refresh the page
+			fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
+				.catch(() => {})
+				.finally(() => window.location.reload());
 		});
 	}
 
