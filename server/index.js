@@ -72,7 +72,9 @@ const SMTP_PASS = (process.env.SMTP_PASS || '').trim();
 const _rawFrom = (process.env.EMAIL_FROM || '').trim();
 const _fromHasPlaceholder = _rawFrom.includes('archlinux@google.com') || !_rawFrom;
 const EMAIL_FROM = (!_fromHasPlaceholder ? _rawFrom : `"Eric's Bakery" <${SMTP_USER}>`);
-const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || SMTP_USER || '').trim();
+const ADMIN_EMAIL     = (process.env.ADMIN_EMAIL       || SMTP_USER || "").trim();
+const SUPERADMIN_USER = (process.env.SUPERADMIN_USERNAME || "").trim();
+const SUPERADMIN_PASS = (process.env.SUPERADMIN_PASSWORD || "").trim();
 
 
 
@@ -111,7 +113,7 @@ function signToken(user) {
 }
 async function getUserByUsername(username) {
 	const [rows] = await pool.query(
-		"SELECT id, username, password_hash, role, name, COALESCE(token_version, 0) AS token_version, COALESCE(status, 'active') AS status FROM users WHERE username = ?", [username]);
+		"SELECT id, username, password_hash, role, name, is_superadmin, COALESCE(token_version, 0) AS token_version, COALESCE(status, 'active') AS status FROM users WHERE username = ?", [username]);
 	return rows[0];
 }
 
@@ -182,19 +184,21 @@ app.post('/api/auth/signup', async (req, res) => {
 		if (existing) return res.status(409).json({
 			message: 'Username exists'
 		});
+		// Block anyone trying to claim the superadmin username via the signup form
+		if (SUPERADMIN_USER && username.toLowerCase() === SUPERADMIN_USER.toLowerCase()) {
+			return res.status(409).json({ message: 'Username exists' });
+		}
 		const hash = await bcrypt.hash(password, 10);
 		const [r] = await pool.query(
 			"INSERT INTO users (username, password_hash, role, name, email, status) VALUES (?, ?, ?, ?, ?, 'pending')", [
 				username, hash, role, name || username, email
 			]);
-
 		// Notify admin that a new account is waiting for approval (non-blocking)
 		sendActivationRequestEmail(ADMIN_EMAIL, name || username, email, role)
 			.catch(e => console.warn('[activation] admin notify failed:', e && e.message));
-
 		return res.json({
 			pending: true,
-			message: "Your account has been created and is awaiting admin approval. You'll receive an email once your account is activated."
+			message: "Your account has been created and is awaiting admin approval. You\'ll receive an email once your account is activated."
 		});
 	} catch (err) {
 		console.error(err);
@@ -220,7 +224,8 @@ app.post('/api/auth/login', async (req, res) => {
 			message: 'Invalid credentials'
 		});
 
-		// Block pending or rejected accounts
+		// Block pending or rejected accounts (superadmin bypasses — always active)
+		if (!user.is_superadmin) {
 		if (user.status === 'pending') {
 			return res.status(403).json({
 				message: "Your account is awaiting admin approval. You'll be notified by email once it's activated.",
@@ -232,6 +237,7 @@ app.post('/api/auth/login', async (req, res) => {
 				message: 'Your account registration was not approved. Please contact the bakery admin.',
 				code: 'ACCOUNT_REJECTED'
 			});
+		}
 		}
 
 		const token = signToken({
@@ -465,8 +471,11 @@ app.delete('/api/admin/users/:id', authMiddleware, async (req, res) => {
 		return res.status(400).json({ error: 'Cannot delete your own account' });
 	}
 	try {
-		const [rows] = await pool.query('SELECT id, username FROM users WHERE id = ? LIMIT 1', [targetId]);
+		const [rows] = await pool.query('SELECT id, username, is_superadmin FROM users WHERE id = ? LIMIT 1', [targetId]);
 		if (!rows || rows.length === 0) return res.status(404).json({ error: 'User not found' });
+		if (rows[0].is_superadmin) {
+			return res.status(403).json({ error: 'The superadmin account cannot be deleted.' });
+		}
 		await pool.query('DELETE FROM users WHERE id = ?', [targetId]);
 		return res.json({ ok: true, deleted: rows[0].username });
 	} catch (err) {
@@ -1599,12 +1608,16 @@ app.patch('/api/admin/users/:id/role', authMiddleware, async (req, res) => {
 
 	try {
 		const [rows] = await pool.query(
-			'SELECT id, username, name, email, role FROM users WHERE id = ? LIMIT 1',
+			'SELECT id, username, name, email, role, is_superadmin FROM users WHERE id = ? LIMIT 1',
 			[targetId]
 		);
 		if (!rows || !rows[0]) return res.status(404).json({ error: 'User not found' });
 		const target  = rows[0];
 		const oldRole = target.role;
+
+		if (target.is_superadmin) {
+			return res.status(403).json({ error: 'The superadmin role cannot be changed.' });
+		}
 
 		if (oldRole === newRole) return res.json({ ok: true, message: 'Role unchanged', user: target });
 
@@ -1990,6 +2003,58 @@ async function runStartupMigrations() {
 		} catch (e) {
 			console.error('[startup] magic_links table creation failed:', e && e.message ? e.message : e);
 		}
+		// ── superadmin: add is_superadmin column if missing ─────────────────
+		try {
+			await conn.query(`ALTER TABLE users ADD COLUMN is_superadmin TINYINT(1) NOT NULL DEFAULT 0`);
+			console.log('[startup] is_superadmin column added to users');
+		} catch (e) {
+			if (e.code !== 'ER_DUP_FIELDNAME') console.warn('[startup] is_superadmin:', e.message);
+		}
+
+		// ── superadmin: add status column if missing ─────────────────────────
+		try {
+			await conn.query(`ALTER TABLE users ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'active'`);
+			console.log('[startup] status column added to users');
+		} catch (e) {
+			if (e.code !== 'ER_DUP_FIELDNAME') console.warn('[startup] status:', e.message);
+		}
+
+		// ── superadmin: upsert account from env vars ──────────────────────────
+		if (SUPERADMIN_USER && SUPERADMIN_PASS) {
+			try {
+				const bcryptLib = require('bcryptjs');
+				const saEmail   = (process.env.SUPERADMIN_EMAIL || SMTP_USER || '').trim();
+				const [saRows]  = await conn.query('SELECT id, password_hash FROM users WHERE username = ? LIMIT 1', [SUPERADMIN_USER]);
+				if (saRows && saRows[0]) {
+					// Account exists — ensure it stays superadmin + active, update password if env changed
+					const pwMatch = await bcryptLib.compare(SUPERADMIN_PASS, saRows[0].password_hash);
+					const updates = ["is_superadmin = 1", "status = 'active'", "role = 'Owner'"];
+					const params  = [];
+					if (!pwMatch) {
+						const newHash = await bcryptLib.hash(SUPERADMIN_PASS, 10);
+						updates.unshift('password_hash = ?');
+						params.push(newHash);
+						console.log('[startup] superadmin password updated from env');
+					}
+					params.push(saRows[0].id);
+					await conn.query(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, params);
+					console.log('[startup] superadmin account verified:', SUPERADMIN_USER);
+				} else {
+					// Create fresh superadmin account
+					const saHash = await bcryptLib.hash(SUPERADMIN_PASS, 10);
+					await conn.query(
+						"INSERT INTO users (username, password_hash, role, name, email, is_superadmin, status) VALUES (?, ?, 'Owner', ?, ?, 1, 'active')",
+						[SUPERADMIN_USER, saHash, SUPERADMIN_USER, saEmail]
+					);
+					console.log('[startup] superadmin account created:', SUPERADMIN_USER);
+				}
+			} catch (e) {
+				console.error('[startup] superadmin seed failed:', e && e.message ? e.message : e);
+			}
+		} else {
+			console.warn('[startup] SUPERADMIN_USERNAME / SUPERADMIN_PASSWORD not set — no superadmin seeded.');
+		}
+
 	} catch (err) {
 		console.error('[startup] migration error:', err && err.message ? err.message : err);
 	} finally {
@@ -2008,101 +2073,85 @@ app.use((err, req, res, next) => {
 // ── Account Activation — email helpers ────────────────────────────────────
 
 async function sendActivationRequestEmail(adminEmail, newName, newEmail, newRole) {
-	if (!adminEmail) {
-		console.warn('[activation] ADMIN_EMAIL not set — skipping admin notification.');
-		return;
-	}
+	if (!adminEmail) { console.warn('[activation] ADMIN_EMAIL not set'); return; }
 	const loginUrl = process.env.FRONTEND_ORIGIN || 'https://erics-bakery.vercel.app';
 	const subject  = `Eric's Bakery — New account pending approval`;
-	const plain    = `A new user has signed up and is awaiting your approval.\n\nName:  ${newName}\nEmail: ${newEmail}\nRole:  ${newRole}\n\nLog in to the admin panel to approve or reject:\n${loginUrl}`;
+	const plain    = `New signup awaiting approval.\n\nName: ${newName}\nEmail: ${newEmail}\nRole: ${newRole}\n\nApprove/reject at: ${loginUrl}`;
 	const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 	const html = buildEmailWrapper(
 		process.env.RESET_EMAIL_LOGO_URL || 'https://i.ibb.co/9HshkkkB/logo.png',
 		`<h1>New Account Request</h1>
 		 <p class="lead">A new user has registered and is waiting for your approval.</p>
 		 <table style="width:100%;border-collapse:collapse;margin:16px 0;text-align:left">
-		   <tr><td style="padding:7px 0;color:#888;font-size:13px;width:70px">Name</td><td style="font-weight:700;font-size:14px">${esc(newName)}</td></tr>
-		   <tr><td style="padding:7px 0;color:#888;font-size:13px">Email</td><td style="font-size:14px">${esc(newEmail)}</td></tr>
-		   <tr><td style="padding:7px 0;color:#888;font-size:13px">Role</td><td><span style="background:#e0e7ff;color:#3730a3;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:700">${esc(newRole)}</span></td></tr>
+		   <tr><td style="padding:6px 0;color:#888;font-size:13px;width:60px">Name</td><td style="font-weight:700">${esc(newName)}</td></tr>
+		   <tr><td style="padding:6px 0;color:#888;font-size:13px">Email</td><td>${esc(newEmail)}</td></tr>
+		   <tr><td style="padding:6px 0;color:#888;font-size:13px">Role</td><td><span style="background:#e0e7ff;color:#3730a3;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:700">${esc(newRole)}</span></td></tr>
 		 </table>
 		 <a href="${loginUrl}" class="cta">Review in Admin Panel &rarr;</a>
-		 <p style="color:#94a3b8;font-size:12px;margin-top:18px">Go to the <strong>Users</strong> section to approve or reject this account.</p>
 		 <div class="footer">Sent to ${esc(adminEmail)}</div>`
 	);
 	if (mailTransporter) {
 		await mailTransporter.sendMail({ from: EMAIL_FROM, to: adminEmail, subject, text: plain, html });
-		console.info('[activation] admin notification sent to', adminEmail);
-	} else {
-		console.warn('[activation] SMTP not configured — new pending user:', newName, newEmail);
-	}
+		console.info('[activation] admin notified:', adminEmail);
+	} else { console.warn('[activation] SMTP not configured. Pending:', newName, newEmail); }
 }
 
 async function sendAccountApprovedEmail(toEmail, userName) {
 	if (!toEmail) return;
 	const loginUrl = process.env.FRONTEND_ORIGIN || 'https://erics-bakery.vercel.app';
 	const subject  = `Eric's Bakery — Your account has been approved! 🎉`;
-	const plain    = `Hi ${userName},\n\nYour Eric's Bakery account has been approved.\nSign in at: ${loginUrl}\n\nWelcome aboard!`;
+	const plain    = `Hi ${userName},\n\nYour account has been approved! Sign in at: ${loginUrl}`;
 	const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 	const html = buildEmailWrapper(
 		process.env.RESET_EMAIL_LOGO_URL || 'https://i.ibb.co/9HshkkkB/logo.png',
 		`<h1>Account Approved! 🎉</h1>
 		 <p class="lead">Hi <strong>${esc(userName)}</strong>, your account has been approved. You can now sign in.</p>
 		 <a href="${loginUrl}" class="cta">Sign in now &rarr;</a>
-		 <p style="color:#94a3b8;font-size:12px;margin-top:18px">Welcome to the team!</p>
 		 <div class="footer">Sent to ${esc(toEmail)}</div>`
 	);
 	if (mailTransporter) {
 		await mailTransporter.sendMail({ from: EMAIL_FROM, to: toEmail, subject, text: plain, html });
 		console.info('[activation] approval email sent to', toEmail);
-	} else {
-		console.info('[activation] SMTP not configured — would have emailed approval to', toEmail);
-	}
+	} else { console.info('[activation] SMTP not configured — would have approved', toEmail); }
 }
 
 async function sendAccountRejectedEmail(toEmail, userName, reason) {
 	if (!toEmail) return;
 	const subject = `Eric's Bakery — Account registration update`;
-	const plain   = `Hi ${userName},\n\nUnfortunately your account registration could not be approved.${reason ? '\nReason: '+reason : ''}\n\nContact the bakery admin if you think this is a mistake.`;
+	const plain   = `Hi ${userName},\n\nYour registration could not be approved.${reason ? '\nReason: '+reason : ''}\n\nContact the bakery admin if this is a mistake.`;
 	const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 	const html = buildEmailWrapper(
 		process.env.RESET_EMAIL_LOGO_URL || 'https://i.ibb.co/9HshkkkB/logo.png',
 		`<h1>Account Update</h1>
-		 <p class="lead">Hi <strong>${esc(userName)}</strong>, unfortunately your registration could not be approved at this time.</p>
-		 ${reason ? `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:12px 16px;margin:14px 0;text-align:left"><span style="color:#991b1b;font-size:13px"><strong>Reason:</strong> ${esc(reason)}</span></div>` : ''}
-		 <p style="color:#94a3b8;font-size:13px;margin-top:16px">If this is a mistake, please contact the bakery directly.</p>
+		 <p class="lead">Hi <strong>${esc(userName)}</strong>, unfortunately your registration could not be approved.</p>
+		 ${reason ? `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:12px 16px;margin:14px 0;text-align:left"><strong>Reason:</strong> ${esc(reason)}</div>` : ''}
+		 <p style="color:#94a3b8;font-size:13px">Contact the bakery admin if this is a mistake.</p>
 		 <div class="footer">Sent to ${esc(toEmail)}</div>`
 	);
 	if (mailTransporter) {
 		await mailTransporter.sendMail({ from: EMAIL_FROM, to: toEmail, subject, text: plain, html });
 		console.info('[activation] rejection email sent to', toEmail);
-	} else {
-		console.info('[activation] SMTP not configured — would have emailed rejection to', toEmail);
-	}
+	} else { console.info('[activation] SMTP not configured — would have rejected', toEmail); }
 }
 
 // ── Account Activation — admin routes ─────────────────────────────────────
 
 app.get('/api/admin/pending-users', authMiddleware, async (req, res) => {
 	try {
-		const role = String((req.user && req.user.role) || '').toLowerCase();
-		if (role !== 'admin' && role !== 'owner') return res.status(403).json({ error: 'Forbidden' });
+		if (!hasRole(req.user, ['Owner', 'Admin'])) return res.status(403).json({ error: 'Forbidden' });
 		const [rows] = await pool.query(
 			"SELECT id, username, name, email, role, created_at FROM users WHERE status = 'pending' ORDER BY created_at ASC"
 		);
 		return res.json({ users: rows });
-	} catch (e) {
-		console.error('[activation] GET pending-users error', e);
-		return res.status(500).json({ error: 'Server error' });
-	}
+	} catch (e) { console.error('[activation] GET pending-users', e); return res.status(500).json({ error: 'Server error' }); }
 });
 
 app.post('/api/admin/users/:id/approve', authMiddleware, async (req, res) => {
 	try {
-		const actorRole = String((req.user && req.user.role) || '').toLowerCase();
-		if (actorRole !== 'admin' && actorRole !== 'owner') return res.status(403).json({ error: 'Forbidden' });
+		if (!hasRole(req.user, ['Owner', 'Admin'])) return res.status(403).json({ error: 'Forbidden' });
 		const targetId = Number(req.params.id);
 		if (!targetId) return res.status(400).json({ error: 'Invalid user id' });
-		const [rows] = await pool.query('SELECT id, name, username, email, status FROM users WHERE id = ? LIMIT 1', [targetId]);
+		const [rows] = await pool.query('SELECT id, name, username, email, status, is_superadmin FROM users WHERE id = ? LIMIT 1', [targetId]);
 		if (!rows || !rows[0]) return res.status(404).json({ error: 'User not found' });
 		const user = rows[0];
 		if (user.status !== 'pending') return res.status(400).json({ error: 'User is not pending approval' });
@@ -2110,20 +2159,16 @@ app.post('/api/admin/users/:id/approve', authMiddleware, async (req, res) => {
 		sendAccountApprovedEmail(user.email, user.name || user.username)
 			.catch(e => console.warn('[activation] approval email failed:', e && e.message));
 		return res.json({ ok: true, message: `${user.name || user.username}'s account has been approved.` });
-	} catch (e) {
-		console.error('[activation] approve error', e);
-		return res.status(500).json({ error: 'Server error' });
-	}
+	} catch (e) { console.error('[activation] approve error', e); return res.status(500).json({ error: 'Server error' }); }
 });
 
 app.post('/api/admin/users/:id/reject', authMiddleware, async (req, res) => {
 	try {
-		const actorRole = String((req.user && req.user.role) || '').toLowerCase();
-		if (actorRole !== 'admin' && actorRole !== 'owner') return res.status(403).json({ error: 'Forbidden' });
+		if (!hasRole(req.user, ['Owner', 'Admin'])) return res.status(403).json({ error: 'Forbidden' });
 		const targetId = Number(req.params.id);
 		if (!targetId) return res.status(400).json({ error: 'Invalid user id' });
 		const reason = ((req.body && req.body.reason) || '').toString().trim().slice(0, 500);
-		const [rows] = await pool.query('SELECT id, name, username, email, status FROM users WHERE id = ? LIMIT 1', [targetId]);
+		const [rows] = await pool.query('SELECT id, name, username, email, status, is_superadmin FROM users WHERE id = ? LIMIT 1', [targetId]);
 		if (!rows || !rows[0]) return res.status(404).json({ error: 'User not found' });
 		const user = rows[0];
 		if (user.status !== 'pending') return res.status(400).json({ error: 'User is not pending approval' });
@@ -2131,10 +2176,7 @@ app.post('/api/admin/users/:id/reject', authMiddleware, async (req, res) => {
 		sendAccountRejectedEmail(user.email, user.name || user.username, reason)
 			.catch(e => console.warn('[activation] rejection email failed:', e && e.message));
 		return res.json({ ok: true, message: `${user.name || user.username}'s account has been rejected.` });
-	} catch (e) {
-		console.error('[activation] reject error', e);
-		return res.status(500).json({ error: 'Server error' });
-	}
+	} catch (e) { console.error('[activation] reject error', e); return res.status(500).json({ error: 'Server error' }); }
 });
 
 // Safety net: log unhandled promise rejections (don't crash on Vercel serverless)
