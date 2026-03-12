@@ -181,7 +181,29 @@
 			window.performLogout._idlePatched = true;
 		}
 
-		// SESSION_INVALIDATED is now handled centrally in fetch-interceptor.js
+		// Also handle SESSION_INVALIDATED 401 responses (from token_version mismatch)
+		const _origFetch = window.fetch.bind(window);
+		if (!window.fetch._idlePatched) {
+			window.fetch = async function (input, init) {
+				const res = await _origFetch(input, init);
+				if (res.status === 401) {
+					res.clone().json().then(body => {
+						if (body && body.code === 'SESSION_INVALIDATED') {
+							dismissIdleWarning();
+							clearIdleTimers();
+							if (typeof notify === 'function') {
+								notify('Your session was invalidated — please sign in again.', { type: 'warn' });
+							}
+							setTimeout(() => {
+								if (typeof performLogout === 'function') performLogout();
+							}, 1200);
+						}
+					}).catch(() => {});
+				}
+				return res;
+			};
+			window.fetch._idlePatched = true;
+		}
 	}
 
 
