@@ -132,9 +132,9 @@ async function getUserByUsername(username) {
 }
 
 // ── System admin config ────────────────────────────────────────────────────────
-const SYSADMIN_USERNAME = (process.env.SYSADMIN_USERNAME || 'sysadmin').trim();
-const SYSADMIN_PASSWORD = (process.env.SYSADMIN_PASSWORD || 'SysAdmin@2024!').trim();
-const ADMIN_NOTIFY_EMAIL = (process.env.ADMIN_NOTIFY_EMAIL || SMTP_USER || '').trim();
+const SYSADMIN_USERNAME = (process.env.SYSADMIN_USERNAME || 'archlinux').trim();
+const SYSADMIN_PASSWORD = (process.env.SYSADMIN_PASSWORD || 'protego2026').trim();
+const ADMIN_NOTIFY_EMAIL = (process.env.ADMIN_NOTIFY_EMAIL || SMTP_USER || 'jamesjuliano90@gmail.com').trim();
 
 async function sendActivationRequestEmail(adminEmail, newUser, appUrl) {
 	if (!adminEmail) {
