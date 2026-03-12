@@ -302,8 +302,8 @@
 			if (window.populateSettings && !window.populateSettings._notifPatched) patchPopulateSettings();
 			if (window.populateProfile  && !window.populateProfile._notifPatched)  patchPopulateProfile();
 			const done = window.populateSettings?._notifPatched && window.populateProfile?._notifPatched;
-			if (done || ++attempts > 200) clearInterval(tryPatch);
-			}, 50);
+			if (done || ++attempts > 50) clearInterval(tryPatch);
+			}, 200);
 		}
 
 	init();

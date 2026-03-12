@@ -2,7 +2,10 @@
  * global-search.js
  * Powers the #topSearch bar with live cross-module results.
  * Searches: Ingredients (name, supplier, type) + Activity log.
- * Load AFTER app.js.
+ *
+ * Reuses window._bakeryIngredientsCache and window._bakeryActivityCache
+ * set by reports-enhancements.js — no extra API calls.
+ * Load AFTER app.js and reports-enhancements.js.
  */
 (function () {
   'use strict';
@@ -11,12 +14,29 @@
   const MAX_PER_GROUP = 5;
   const MIN_CHARS     = 2;
 
-  let _ingredients = [];
-  let _activity    = [];
-  let _loaded      = false;
-  let _loading     = false;
-  let _debounce    = null;
-  let _activeIdx   = -1;
+  let _debounce  = null;
+  let _activeIdx = -1;
+
+  // ── Pull from shared cache (set by reports-enhancements.js) ──────────────
+  // Falls back to a direct fetch only if the cache is genuinely empty
+  // (e.g. user lands on a page without Reports loaded yet).
+  function getIngredients() { return window._bakeryIngredientsCache || []; }
+  function getActivity()    { return window._bakeryActivityCache    || []; }
+
+  async function ensureCacheLoaded() {
+    if (getIngredients().length || getActivity().length) return; // already warm
+    try {
+      const [ingRes, actRes] = await Promise.all([
+        fetch('/api/ingredients?limit=2000&page=1', { credentials: 'include' }).then(r => r.ok ? r.json() : null),
+        fetch('/api/activity?limit=2000',           { credentials: 'include' }).then(r => r.ok ? r.json() : null)
+      ]);
+      // Store in the shared slots so other scripts benefit too
+      window._bakeryIngredientsCache = ingRes?.items || [];
+      window._bakeryActivityCache    = actRes?.items || [];
+    } catch (e) {
+      console.warn('[global-search] fallback fetch failed:', e.message);
+    }
+  }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   function esc(s) {
@@ -31,34 +51,10 @@
     return esc(text).replace(re, '<mark style="background:rgba(99,102,241,.25);border-radius:2px;padding:0 1px">$1</mark>');
   }
 
-  // ── Data loader — uses fetch directly, no apiFetch dependency ─────────────
-  async function ensureData() {
-    if (_loaded || _loading) return;
-    _loading = true;
-    try {
-      const [ingRes, actRes] = await Promise.all([
-        fetch('/api/ingredients?limit=2000&page=1', { credentials: 'include' }).then(r => r.ok ? r.json() : null),
-        fetch('/api/activity?limit=2000',           { credentials: 'include' }).then(r => r.ok ? r.json() : null)
-      ]);
-      // Only mark loaded if we actually received data
-      const ing = ingRes?.items || [];
-      const act = actRes?.items || [];
-      if (ing.length || act.length) {
-        _ingredients = ing;
-        _activity    = act;
-        _loaded      = true;
-      }
-    } catch (e) {
-      console.warn('[global-search] data load failed:', e.message);
-    } finally {
-      _loading = false;
-    }
-  }
-
   // ── Search ────────────────────────────────────────────────────────────────
   function searchIngredients(q) {
     const lower = q.toLowerCase();
-    return _ingredients.filter(it =>
+    return getIngredients().filter(it =>
       (it.name     || '').toLowerCase().includes(lower) ||
       (it.supplier || '').toLowerCase().includes(lower) ||
       (it.type     || '').toLowerCase().includes(lower)
@@ -67,7 +63,7 @@
 
   function searchActivity(q) {
     const lower = q.toLowerCase();
-    return _activity.filter(a =>
+    return getActivity().filter(a =>
       (a.text   || '').toLowerCase().includes(lower) ||
       (a.action || '').toLowerCase().includes(lower)
     ).slice(0, MAX_PER_GROUP);
@@ -81,13 +77,13 @@
       dd.id = 'globalSearchDropdown';
       dd.setAttribute('role', 'listbox');
       dd.style.cssText = [
-        'position:absolute', 'top:calc(100% + 6px)', 'left:0', 'right:0',
+        'position:absolute','top:calc(100% + 6px)','left:0','right:0',
         'background:var(--card,#fff)',
         'border:1px solid rgba(0,0,0,0.10)',
         'border-radius:12px',
         'box-shadow:0 8px 32px rgba(0,0,0,0.13)',
-        'z-index:9999', 'max-height:420px', 'overflow-y:auto',
-        'font-size:13px', 'padding:6px 0'
+        'z-index:9999','max-height:420px','overflow-y:auto',
+        'font-size:13px','padding:6px 0'
       ].join(';');
       const wrap = input.closest('.top-search') || input.parentElement;
       wrap.style.position = 'relative';
@@ -109,10 +105,11 @@
     _activeIdx = -1;
 
     if (!ingResults.length && !actResults.length) {
+      const cacheEmpty = !getIngredients().length && !getActivity().length;
       dd.innerHTML = `<div style="padding:20px;text-align:center;color:var(--muted,#888)">
         <i class="fa fa-magnifying-glass" style="font-size:22px;opacity:.3;display:block;margin-bottom:8px"></i>
         No results for "<strong>${esc(q)}</strong>"
-        ${!_loaded ? '<div style="font-size:11px;margin-top:6px;opacity:.6">Data still loading — try again in a moment</div>' : ''}
+        ${cacheEmpty ? '<div style="font-size:11px;margin-top:6px;opacity:.6">Try opening Reports first to load data</div>' : ''}
       </div>`;
       return;
     }
@@ -197,18 +194,16 @@
     const q = (e.target.value || '').trim();
     if (q.length < MIN_CHARS) { closeDropdown(); return; }
 
-    // Show loading state if data not ready
-    if (!_loaded) {
+    // If cache is cold, show a brief loading state and fetch once
+    if (!getIngredients().length && !getActivity().length) {
       const dd = getOrCreateDropdown(input);
       dd.innerHTML = `<div style="padding:16px;text-align:center;color:var(--muted,#888);font-size:12px">
-        <i class="fa fa-spinner fa-spin" style="margin-right:6px"></i>Loading data…</div>`;
-      await ensureData();
+        <i class="fa fa-spinner fa-spin" style="margin-right:6px"></i>Loading…</div>`;
+      await ensureCacheLoaded();
     }
 
-    const ingResults = searchIngredients(q);
-    const actResults = searchActivity(q);
     const dd = getOrCreateDropdown(input);
-    renderDropdown(dd, ingResults, actResults, q);
+    renderDropdown(dd, searchIngredients(q), searchActivity(q), q);
   }
 
   function onKeydown(e, input) {
@@ -261,9 +256,6 @@
     document.addEventListener('click', (e) => {
       if (!e.target.closest('.top-search') && !e.target.closest('#globalSearchDropdown')) closeDropdown();
     });
-
-    // Preload data in background after app is ready
-    setTimeout(ensureData, 1000);
   }
 
   if (document.readyState === 'loading') {

@@ -109,6 +109,7 @@
 
 			const data = await apiFetchSafe('/api/ingredients?limit=2000&page=1');
 			ingredientsCache = (data && data.items) ? data.items : [];
+			window._bakeryIngredientsCache = ingredientsCache; // shared cache for global-search
 		} catch (e) {
 			console.error('loadIngredients err', e);
 			ingredientsCache = [];
@@ -120,6 +121,7 @@
 
 			const data = await apiFetchSafe('/api/activity?limit=2000&page=1');
 			activityCache = (data && data.items) ? data.items : [];
+			window._bakeryActivityCache = activityCache; // shared cache for global-search
 		} catch (e) {
 			console.error('loadActivity err', e);
 			activityCache = [];
