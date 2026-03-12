@@ -696,6 +696,35 @@ let DB = {
 let chartStock = null;
 let chartBestSeller = null;
 
+// ── Global data cache (avoids re-fetching the same data within 60s) ──────
+const _cache = {
+	_activity: null, _activityAt: 0,
+	_ingredients: null, _ingredientsAt: 0,
+	TTL: 60000,
+	async getActivity() {
+		if (this._activity && (Date.now() - this._activityAt) < this.TTL) return this._activity;
+		try {
+			const r = await apiFetch('/api/activity?limit=2000');
+			this._activity = (r && r.items) ? r.items : [];
+			this._activityAt = Date.now();
+		} catch (e) { this._activity = this._activity || []; }
+		return this._activity;
+	},
+	async getIngredients() {
+		if (this._ingredients && (Date.now() - this._ingredientsAt) < this.TTL) return this._ingredients;
+		try {
+			const r = await apiFetch('/api/ingredients?limit=1000&page=1');
+			this._ingredients = (r && r.items) ? r.items : [];
+			this._ingredientsAt = Date.now();
+		} catch (e) { this._ingredients = this._ingredients || DB.ingredients || []; }
+		return this._ingredients;
+	},
+	invalidate() {
+		this._activity = null; this._activityAt = 0;
+		this._ingredients = null; this._ingredientsAt = 0;
+	}
+};
+
 const ACCOUNTS_KEY = 'bakery_accounts';
 const SESSION_KEY = 'bakery_session';
 const THEME_KEY = 'bakery_theme';
@@ -1759,9 +1788,7 @@ function showView(name) {
 	document.querySelectorAll('#topNav .nav-btn').forEach(b => b.classList.toggle('active', b.dataset.view === name));
 
 	if (name === 'dashboard') {
-		renderStockChart();
-		renderBestSellerChart();
-		renderDashboard();
+		renderDashboard(); // calls renderStockChart + renderBestSellerChart + renderActivity internally
 		setTimeout(addAllChartDownloadBtns, 300);
 	}
 	if (name === 'reports') {
@@ -1907,12 +1934,10 @@ async function renderBestSellerChart(days) {
 	const ctx = q('bestSellerChart')?.getContext('2d');
 	if (!ctx) return;
 	try {
-		const [ingsResp, actResp] = await Promise.all([
-			apiFetch('/api/ingredients?limit=1000&page=1'),
-			apiFetch('/api/activity?limit=2000')
+		const [ingredients, act] = await Promise.all([
+			_cache.getIngredients(),
+			_cache.getActivity()
 		]);
-		const ingredients = (ingsResp && ingsResp.items) ? ingsResp.items : [];
-		const act = (actResp && actResp.items) ? actResp.items : [];
 
 		const daysBack = days || 30;
 		const cutoff   = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000);
@@ -1973,7 +1998,11 @@ async function renderBestSellerChart(days) {
 	}
 }
 
+let _dashDebounceTimer = null;
 async function renderDashboard() {
+	// Debounce: ignore calls that arrive within 80ms of each other (rapid nav clicks)
+	if (_dashDebounceTimer) return;
+	_dashDebounceTimer = setTimeout(() => { _dashDebounceTimer = null; }, 80);
 	// ── Greeting ─────────────────────────────────────────────────────────────
 	_renderDashGreeting();
 
@@ -2653,8 +2682,7 @@ async function renderStockChart(rangeStart, rangeEnd, days) {
 	}
 
 	try {
-		const resp  = await apiFetch('/api/activity?limit=2000');
-		const items = (resp && resp.items) ? resp.items : [];
+		const items = await _cache.getActivity();
 
 		items.forEach(a => {
 			if (!a.time) return;
@@ -5084,6 +5112,7 @@ async function applyStockChange(id, type, qty, note) {
 			method: 'POST',
 					body: { type: type === 'in' ? 'out' : 'in', qty: Number(qty), note: '(undo)' }
 				});
+		_cache.invalidate();
 				await renderIngredientCards();
 				await renderInventoryActivity();
 				renderDashboard();
@@ -5707,9 +5736,9 @@ async function loadRemoteInventory() {
       icon: i.icon || 'fa-box-open'
     }));
 
-    // Only re-render the cards — renderDashboard() is already running concurrently from startApp()
-    // Calling renderDashboard() here would fire another 6+ API requests redundantly
+    // Don't call renderDashboard() here — it's already running from startApp()
     if (document.getElementById('ingredientList')) renderIngredientCards();
+    _cache.invalidate(); // fresh data loaded
   } catch (err) {
     console.error('loadRemoteInventory error', err);
   }
@@ -5719,6 +5748,7 @@ async function loadRemoteInventory() {
 function startApp() {
 	showApp(true);
 	showOverlay(false);
+	_cache.invalidate(); // fresh login - clear any stale cache
 	loadRemoteInventory().catch(() => {});
 	const user = getSession() || {
 		name: 'Guest',
@@ -5730,13 +5760,12 @@ function startApp() {
 	if (q('userMenuRole')) q('userMenuRole').textContent = user.role || '';
 
 	renderDashboard();
-	// Note: renderIngredientCards() and renderActivity() are called inside renderDashboard() already
+	// renderIngredientCards + renderActivity are called inside renderDashboard()
 	initSearchFeature();
 	buildTopNav();
 	showView('dashboard');
 	setupSidebarToggle();
 
-	// Guard: only wire nav items once to avoid accumulating duplicate handlers
 	if (!window._navItemsWired) {
 		window._navItemsWired = true;
 	document.querySelectorAll('.nav-item').forEach(btn => {
@@ -5758,7 +5787,7 @@ function startApp() {
 			if (overlay) overlay.remove();
 		};
 	});
-	}
+	} // end _navItemsWired
 
 	on('addIngredientBtn', 'click', openAddIngredient);
 	on('quickAddIng', 'click', openAddIngredient);
