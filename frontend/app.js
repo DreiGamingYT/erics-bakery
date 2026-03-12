@@ -696,35 +696,6 @@ let DB = {
 let chartStock = null;
 let chartBestSeller = null;
 
-// ── Global data cache (avoids re-fetching the same data within 60s) ──────
-const _cache = {
-	_activity: null, _activityAt: 0,
-	_ingredients: null, _ingredientsAt: 0,
-	TTL: 60000,
-	async getActivity() {
-		if (this._activity && (Date.now() - this._activityAt) < this.TTL) return this._activity;
-		try {
-			const r = await apiFetch('/api/activity?limit=2000');
-			this._activity = (r && r.items) ? r.items : [];
-			this._activityAt = Date.now();
-		} catch (e) { this._activity = this._activity || []; }
-		return this._activity;
-	},
-	async getIngredients() {
-		if (this._ingredients && (Date.now() - this._ingredientsAt) < this.TTL) return this._ingredients;
-		try {
-			const r = await apiFetch('/api/ingredients?limit=1000&page=1');
-			this._ingredients = (r && r.items) ? r.items : [];
-			this._ingredientsAt = Date.now();
-		} catch (e) { this._ingredients = this._ingredients || DB.ingredients || []; }
-		return this._ingredients;
-	},
-	invalidate() {
-		this._activity = null; this._activityAt = 0;
-		this._ingredients = null; this._ingredientsAt = 0;
-	}
-};
-
 const ACCOUNTS_KEY = 'bakery_accounts';
 const SESSION_KEY = 'bakery_session';
 const THEME_KEY = 'bakery_theme';
@@ -1717,7 +1688,7 @@ function updateDateTime() {
 		minute: '2-digit'
 	});
 }
-setInterval(() => { if (typeof isLoggedIn === 'function' && isLoggedIn()) updateDateTime(); }, 1000);
+setInterval(updateDateTime, 1000);
 updateDateTime();
 
 function setupSidebarToggle() {
@@ -1788,7 +1759,9 @@ function showView(name) {
 	document.querySelectorAll('#topNav .nav-btn').forEach(b => b.classList.toggle('active', b.dataset.view === name));
 
 	if (name === 'dashboard') {
-		renderDashboard(); // calls renderStockChart + renderBestSellerChart + renderActivity internally
+		renderStockChart();
+		renderBestSellerChart();
+		renderDashboard();
 		setTimeout(addAllChartDownloadBtns, 300);
 	}
 	if (name === 'reports') {
@@ -1934,10 +1907,12 @@ async function renderBestSellerChart(days) {
 	const ctx = q('bestSellerChart')?.getContext('2d');
 	if (!ctx) return;
 	try {
-		const [ingredients, act] = await Promise.all([
-			_cache.getIngredients(),
-			_cache.getActivity()
+		const [ingsResp, actResp] = await Promise.all([
+			apiFetch('/api/ingredients?limit=1000&page=1'),
+			apiFetch('/api/activity?limit=2000')
 		]);
+		const ingredients = (ingsResp && ingsResp.items) ? ingsResp.items : [];
+		const act = (actResp && actResp.items) ? actResp.items : [];
 
 		const daysBack = days || 30;
 		const cutoff   = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000);
@@ -1998,11 +1973,7 @@ async function renderBestSellerChart(days) {
 	}
 }
 
-let _dashDebounceTimer = null;
 async function renderDashboard() {
-	// Debounce: ignore calls that arrive within 80ms of each other (rapid nav clicks)
-	if (_dashDebounceTimer) return;
-	_dashDebounceTimer = setTimeout(() => { _dashDebounceTimer = null; }, 80);
 	// ── Greeting ─────────────────────────────────────────────────────────────
 	_renderDashGreeting();
 
@@ -2682,7 +2653,8 @@ async function renderStockChart(rangeStart, rangeEnd, days) {
 	}
 
 	try {
-		const items = await _cache.getActivity();
+		const resp  = await apiFetch('/api/activity?limit=2000');
+		const items = (resp && resp.items) ? resp.items : [];
 
 		items.forEach(a => {
 			if (!a.time) return;
@@ -5112,7 +5084,6 @@ async function applyStockChange(id, type, qty, note) {
 			method: 'POST',
 					body: { type: type === 'in' ? 'out' : 'in', qty: Number(qty), note: '(undo)' }
 				});
-		_cache.invalidate();
 				await renderIngredientCards();
 				await renderInventoryActivity();
 				renderDashboard();
@@ -5736,9 +5707,8 @@ async function loadRemoteInventory() {
       icon: i.icon || 'fa-box-open'
     }));
 
-    // Don't call renderDashboard() here — it's already running from startApp()
-    if (document.getElementById('ingredientList')) renderIngredientCards();
-    _cache.invalidate(); // fresh data loaded
+    renderIngredientCards();
+    renderDashboard();
   } catch (err) {
     console.error('loadRemoteInventory error', err);
   }
@@ -5748,7 +5718,6 @@ async function loadRemoteInventory() {
 function startApp() {
 	showApp(true);
 	showOverlay(false);
-	_cache.invalidate(); // fresh login - clear any stale cache
 	loadRemoteInventory().catch(() => {});
 	const user = getSession() || {
 		name: 'Guest',
@@ -5760,14 +5729,13 @@ function startApp() {
 	if (q('userMenuRole')) q('userMenuRole').textContent = user.role || '';
 
 	renderDashboard();
-	// renderIngredientCards + renderActivity are called inside renderDashboard()
+	renderIngredientCards();
+	renderActivity();
 	initSearchFeature();
 	buildTopNav();
 	showView('dashboard');
 	setupSidebarToggle();
 
-	if (!window._navItemsWired) {
-		window._navItemsWired = true;
 	document.querySelectorAll('.nav-item').forEach(btn => {
 		btn.onclick = () => {
 			if (!isLoggedIn()) {
@@ -5787,7 +5755,6 @@ function startApp() {
 			if (overlay) overlay.remove();
 		};
 	});
-	} // end _navItemsWired
 
 	on('addIngredientBtn', 'click', openAddIngredient);
 	on('quickAddIng', 'click', openAddIngredient);
@@ -5875,8 +5842,6 @@ function startApp() {
 		const next = um.classList.toggle('hidden');
 		um.setAttribute('aria-hidden', next);
 	};
-	if (!window._userMenuClickWired) {
-		window._userMenuClickWired = true;
 	document.addEventListener('click', (e) => {
 		const um = q('userMenu'),
 			badge = q('userBadge');
@@ -5886,7 +5851,6 @@ function startApp() {
 			um.setAttribute('aria-hidden', 'true');
 		}
 	});
-	}
 
 	if (q('userMenuLogout')) q('userMenuLogout').onclick = performLogout;
 	if (q('userMenuProfile')) q('userMenuProfile').onclick = () => {
@@ -5907,12 +5871,9 @@ function startApp() {
 		notify('Bakery settings saved');
 	});
 	if (q('modalClose')) q('modalClose').addEventListener('click', closeModal);
-	if (!window._escapeModalWired) {
-		window._escapeModalWired = true;
 	document.addEventListener('keydown', (e) => {
 		if (e.key === 'Escape') closeModal();
 	});
-	}
 
 	// themeToggle is now hidden; color palette swatches handle theme switching.
 	if (q('addIngredientBtn')) q('addIngredientBtn').addEventListener('click', openAddIngredient);
@@ -5946,67 +5907,19 @@ function startApp() {
 	renderBestSellerChart();
 	initSearchFeature();
 }
-function performLogout() {
-	// Show a confirmation modal before logging out
-	if (!document.getElementById('logoutConfirmOverlay')) {
-		const ov = document.createElement('div');
-		ov.id = 'logoutConfirmOverlay';
-		ov.setAttribute('role', 'dialog');
-		ov.setAttribute('aria-modal', 'true');
-		ov.style.cssText = [
-			'position:fixed;inset:0;z-index:99700',
-			'background:rgba(0,0,0,0.55)',
-			'display:flex;align-items:center;justify-content:center',
-			'backdrop-filter:blur(4px)',
-			'animation:idleFadeIn .18s ease'
-		].join(';');
-		ov.innerHTML = `
-			<div style="
-				background:var(--card,#fff);
-				border-radius:18px;
-				padding:32px 28px 24px;
-				max-width:340px;
-				width:90%;
-				box-shadow:0 28px 70px rgba(0,0,0,.22);
-				text-align:center;
-				border:1px solid rgba(0,0,0,.06)">
-				<div style="font-size:2.4rem;margin-bottom:12px">👋</div>
-				<h3 style="margin:0 0 8px;font-size:1.1rem;color:var(--text,#111)">Sign out?</h3>
-				<p style="color:var(--muted,#666);font-size:.875rem;margin:0 0 22px;line-height:1.55">
-					You'll be returned to the login screen.
-				</p>
-				<div style="display:flex;gap:10px;justify-content:center">
-					<button id="logoutConfirmCancel" class="btn ghost" type="button"
-						style="flex:1;padding:11px">Cancel</button>
-					<button id="logoutConfirmOk" class="btn primary" type="button"
-						style="flex:1;padding:11px;background:#ef4444;border-color:#ef4444">
-						Sign out
-					</button>
-				</div>
-			</div>`;
-		document.body.appendChild(ov);
-
-		const dismiss = () => { try { ov.remove(); } catch(_) {} };
-
-		document.getElementById('logoutConfirmCancel').onclick = dismiss;
-		ov.addEventListener('click', (e) => { if (e.target === ov) dismiss(); });
-
-		document.getElementById('logoutConfirmOk').onclick = () => {
-			dismiss();
-			_doLogout();
-		};
-	}
-}
-
-function _doLogout() {
+async function performLogout() {
+	try {
+		await fetch('/api/auth/logout', {
+			method: 'POST',
+			credentials: 'include'
+		});
+	} catch (e) {}
 	clearSession();
 	destroyAllCharts();
 	showApp(false);
 	showOverlay(true, true);
 	if (q('overlay-username')) q('overlay-username').value = '';
 	if (q('overlay-password')) q('overlay-password').value = '';
-	// Fire server-side logout in the background to clear the cookie
-	fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
 }
 
 const RECENT_LOGINS_KEY = 'bakery_recent_logins_v1';
@@ -9204,55 +9117,18 @@ document.addEventListener('DOMContentLoaded', () => {
 				}
 			}
 
-			// Count expiring within 7 days
-			const expiringCount = ingredients.filter(i => {
-				if (!i.expiry) return false;
-				const d = new Date(i.expiry);
-				if (isNaN(d)) return false;
-				const diffDays = Math.ceil((d - new Date()) / (1000 * 60 * 60 * 24));
-				return diffDays >= 0 && diffDays <= 7;
-			}).length;
-
 			const niceStart = new Date(start).toLocaleDateString();
-			const niceEnd   = new Date(end).toLocaleDateString();
-			const netSign   = netChange >= 0 ? '+' : '';
-
-			// Build summary as a styled table instead of a plain text string
-			const cells = [
-				{ label: 'Date range',   value: `${niceStart} — ${niceEnd}`,                   icon: '📅', color: '' },
-				{ label: 'Ingredients',  value: totalIngredients,                               icon: '📦', color: '' },
-				{ label: 'Low stock',    value: lowStockCount,                                  icon: '⚠️',  color: lowStockCount  > 0 ? '#dc2626' : '#16a34a' },
-				{ label: 'Expiring ≤7d', value: expiringCount,                                 icon: '🕐', color: expiringCount  > 0 ? '#d97706' : '#16a34a' },
-				{ label: 'Stock in',     value: stockInCount,                                   icon: '↑',  color: '#16a34a' },
-				{ label: 'Stock out',    value: stockOutCount,                                  icon: '↓',  color: '#dc2626' },
-				{ label: 'Net change',   value: `${netSign}${Number(netChange).toFixed(2)}`,    icon: '±',  color: netChange >= 0 ? '#16a34a' : '#dc2626' },
-			];
-
-			reportSummaryEl.innerHTML = `
-				<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-top:4px">
-					${cells.map(c => `
-						<div style="
-							background:var(--bg,#f8f8f8);
-							border:1px solid rgba(0,0,0,.07);
-							border-radius:10px;
-							padding:10px 12px;
-							display:flex;
-							flex-direction:column;
-							gap:3px">
-							<span style="font-size:.72rem;color:var(--muted,#888);font-weight:600;text-transform:uppercase;letter-spacing:.04em">
-								${c.icon} ${c.label}
-							</span>
-							<span style="font-size:1.1rem;font-weight:800;color:${c.color || 'var(--text,#111)'};line-height:1.2">
-								${c.value}
-							</span>
-						</div>`).join('')}
-				</div>`;
+			const niceEnd = new Date(end).toLocaleDateString();
+			const netSign = netChange >= 0 ? '+' : '';
+			reportSummaryEl.textContent =
+				`Range: ${niceStart} — ${niceEnd} · Ingredients: ${totalIngredients} · Low stock: ${lowStockCount} · Stock in: ${stockInCount} · Stock out: ${stockOutCount} · Net change: ${netSign}${Number(netChange).toFixed(3)}`;
 		} catch (err) {
 			console.error('updateReportSummary err', err);
-			const msg = (err && err.status === 401)
-				? 'Not authenticated — please sign in to view the report summary.'
-				: 'Could not load summary (server error).';
-			reportSummaryEl.innerHTML = `<span style="color:var(--muted,#888);font-size:.875rem">${msg}</span>`;
+			if (err && err.status === 401) {
+				reportSummaryEl.textContent = 'Not authenticated — please sign in to view the report summary.';
+			} else {
+				reportSummaryEl.textContent = 'Could not load summary (server error).';
+			}
 		}
 	}
 

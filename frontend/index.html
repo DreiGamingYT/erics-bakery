@@ -470,19 +470,17 @@
         <div id="modalContent"></div>
       </div>
     </div>
+    <script src="auth-features.js"></script>
     <script src="reports-enhancements.js"></script>
     <script src="user-management-admin.js"></script>
-    <script src="fetch-interceptor.js"></script>
+    <script src="notifications.js"></script>
     <script src="app.js"></script>
     <script src="auth-enhancements.js"></script>
-    <script src="notifications.js"></script>
-    <script src="account-activation.js"></script>
     <script src="magic-link.js"></script>
-    <script src="bread-bg.js"></script>
     <script>
+      // Wire offline banner to service worker events
       window.addEventListener('offline', () => { document.getElementById('offlineBanner').style.display = 'block'; });
       window.addEventListener('online',  () => { document.getElementById('offlineBanner').style.display = 'none'; });
     </script>
-    
-  </body>
+    <script src="bread-bg.js"></script>
 </html>
