@@ -1688,7 +1688,7 @@ function updateDateTime() {
 		minute: '2-digit'
 	});
 }
-setInterval(updateDateTime, 1000);
+setInterval(() => { if (typeof isLoggedIn === 'function' && isLoggedIn()) updateDateTime(); }, 1000);
 updateDateTime();
 
 function setupSidebarToggle() {
@@ -5707,8 +5707,9 @@ async function loadRemoteInventory() {
       icon: i.icon || 'fa-box-open'
     }));
 
-    renderIngredientCards();
-    renderDashboard();
+    // Only re-render the cards — renderDashboard() is already running concurrently from startApp()
+    // Calling renderDashboard() here would fire another 6+ API requests redundantly
+    if (document.getElementById('ingredientList')) renderIngredientCards();
   } catch (err) {
     console.error('loadRemoteInventory error', err);
   }
@@ -5729,13 +5730,15 @@ function startApp() {
 	if (q('userMenuRole')) q('userMenuRole').textContent = user.role || '';
 
 	renderDashboard();
-	renderIngredientCards();
-	renderActivity();
+	// Note: renderIngredientCards() and renderActivity() are called inside renderDashboard() already
 	initSearchFeature();
 	buildTopNav();
 	showView('dashboard');
 	setupSidebarToggle();
 
+	// Guard: only wire nav items once to avoid accumulating duplicate handlers
+	if (!window._navItemsWired) {
+		window._navItemsWired = true;
 	document.querySelectorAll('.nav-item').forEach(btn => {
 		btn.onclick = () => {
 			if (!isLoggedIn()) {
@@ -5755,6 +5758,7 @@ function startApp() {
 			if (overlay) overlay.remove();
 		};
 	});
+	}
 
 	on('addIngredientBtn', 'click', openAddIngredient);
 	on('quickAddIng', 'click', openAddIngredient);
@@ -5842,6 +5846,8 @@ function startApp() {
 		const next = um.classList.toggle('hidden');
 		um.setAttribute('aria-hidden', next);
 	};
+	if (!window._userMenuClickWired) {
+		window._userMenuClickWired = true;
 	document.addEventListener('click', (e) => {
 		const um = q('userMenu'),
 			badge = q('userBadge');
@@ -5851,6 +5857,7 @@ function startApp() {
 			um.setAttribute('aria-hidden', 'true');
 		}
 	});
+	}
 
 	if (q('userMenuLogout')) q('userMenuLogout').onclick = performLogout;
 	if (q('userMenuProfile')) q('userMenuProfile').onclick = () => {
@@ -5871,9 +5878,12 @@ function startApp() {
 		notify('Bakery settings saved');
 	});
 	if (q('modalClose')) q('modalClose').addEventListener('click', closeModal);
+	if (!window._escapeModalWired) {
+		window._escapeModalWired = true;
 	document.addEventListener('keydown', (e) => {
 		if (e.key === 'Escape') closeModal();
 	});
+	}
 
 	// themeToggle is now hidden; color palette swatches handle theme switching.
 	if (q('addIngredientBtn')) q('addIngredientBtn').addEventListener('click', openAddIngredient);
