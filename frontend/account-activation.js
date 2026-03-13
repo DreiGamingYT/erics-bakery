@@ -281,18 +281,12 @@
 		});
 
 		document.getElementById('logoutConfirmBtn').addEventListener('click', async () => {
-			// 1. Immediately clear the UI — no waiting for API
 			remove();
-			if (typeof clearSession === 'function')     clearSession();
-			if (typeof destroyAllCharts === 'function') destroyAllCharts();
-			if (typeof showApp === 'function')          showApp(false);
-			if (typeof showOverlay === 'function')      showOverlay(true, true);
-			const u = document.getElementById('overlay-username');
-			const p = document.getElementById('overlay-password');
-			if (u) u.value = '';
-			if (p) p.value = '';
-			// 2. Fire API logout in background (best-effort)
-			fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
+			// Clear local session immediately
+			if (typeof clearSession === 'function') clearSession();
+			// Fire API logout then hard-reload — kills all timers, intervals, and listeners
+			try { await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }); } catch (e) {}
+			window.location.reload();
 		});
 	}
 

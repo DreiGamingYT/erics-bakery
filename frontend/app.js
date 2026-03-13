@@ -1224,7 +1224,7 @@ function showOverlayLoader(show, text = '') {
 	if (show) q('overlayLoaderText').textContent = text || '';
 }
 
-function openForgotPasswordModal() {
+async function openForgotPasswordModal() {
 	openModalHTML(`
     <h3>Forgot password</h3>
     <form id="forgotForm" class="form">
@@ -1273,7 +1273,7 @@ function openForgotPasswordModal() {
 	});
 }
 
-function openVerifyResetModal(email = '') {
+async function openVerifyResetModal(email = '') {
 	openModalHTML(`
     <h3>Verify code</h3>
     <form id="verifyForm" class="form">
@@ -1324,7 +1324,7 @@ function openVerifyResetModal(email = '') {
 	});
 }
 
-function openResetPasswordModal(email = '', code = '') {
+async function openResetPasswordModal(email = '', code = '') {
 	openModalHTML(`
     <h3>Reset password</h3>
     <form id="resetForm" class="form">
@@ -2393,7 +2393,7 @@ async function renderIngredientCards(page = 1, limit = INVENTORY_PAGE_LIMIT) {
 			r.addEventListener('change', _debouncedRender);
 		});
 
-		container.querySelectorAll('button.save-row').forEach(btn => {
+		container.querySelectorAll('button.save-row').forEach(async btn => {
 			btn.addEventListener('click', async (ev) => {
 				const tr = ev.currentTarget.closest('tr');
 				if (!tr) return;
@@ -2435,7 +2435,7 @@ async function renderIngredientCards(page = 1, limit = INVENTORY_PAGE_LIMIT) {
 			btn.addEventListener('click', async () => {
 				const id = Number(btn.dataset.id);
 				try {
-					const ing = items.find(x => Number(x.id) === id) || {};
+					const ing = items.find(async x => Number(x.id) === id) || {};
 					const historyResp = await apiFetch(`/api/activity?limit=50`);
 
 					const history = (historyResp && historyResp.items) ? historyResp.items.filter(a => Number(a.ingredient_id) === id) : [];
@@ -2478,7 +2478,7 @@ async function renderIngredientCards(page = 1, limit = INVENTORY_PAGE_LIMIT) {
 		});
 
 		// ── Delete row ──────────────────────────────────────
-		container.querySelectorAll('.delete-row').forEach(btn => {
+		container.querySelectorAll('.delete-row').forEach(async btn => {
 			btn.addEventListener('click', async (e) => {
 				const id = Number(btn.dataset.id);
 				const name = btn.dataset.name || `#${id}`;
@@ -2727,75 +2727,6 @@ async function renderStockChart(rangeStart, rangeEnd, days) {
 		if (chartStock) try { chartStock.destroy(); chartStock = null; } catch (_) {}
 	}
 }
-
-/* async function renderBestSellerChart() {
-
-	const ctx = q('bestSellerChart')?.getContext('2d');
-	if (!ctx) return;
-	try {
-		const [ingsResp, actResp] = await Promise.all([
-			apiFetch('/api/ingredients?limit=1000&page=1'),
-			apiFetch('/api/activity?limit=2000')
-		]);
-		const ingredients = (ingsResp && ingsResp.items) ? ingsResp.items : [];
-		const act = (actResp && actResp.items) ? actResp.items : [];
-
-		const usageMap = {};
-
-		act.forEach(a => {
-			const txt = (a.text || '').toLowerCase();
-			const qty = _parseQtyFromText(a.text || '') || 0;
-			if (qty === 0) return;
-			if (!a.ingredient_id) return;
-
-			if (txt.includes('used') || txt.includes('stock out')) {
-				usageMap[a.ingredient_id] = (usageMap[a.ingredient_id] || 0) + qty;
-			}
-		});
-
-		const usageArr = Object.keys(usageMap).map(k => ({
-			id: Number(k),
-			qty: usageMap[k]
-		}));
-		usageArr.sort((a, b) => b.qty - a.qty);
-		const top = usageArr.slice(0, 8);
-		const labels = top.map(x => {
-			const ing = ingredients.find(i => Number(i.id) === Number(x.id));
-			return ing ? (ing.name || `#${x.id}`) : `#${x.id}`;
-		});
-		const data = top.map(x => +(x.qty.toFixed(3)));
-
-		if (chartBestSeller) try {
-			chartBestSeller.destroy();
-		} catch (e) {}
-		chartBestSeller = new Chart(ctx, {
-			type: 'pie',
-			data: {
-				labels,
-				datasets: [{
-					data,
-					backgroundColor: generateColors(data.length)
-				}]
-			},
-			options: {
-				responsive: true,
-				maintainAspectRatio: false,
-				plugins: {
-					legend: {
-						position: 'bottom'
-					}
-				}
-			}
-		});
-
-	} catch (e) {
-		console.error('renderBestSellerChart err', e);
-		if (chartBestSeller) try {
-			chartBestSeller.destroy();
-			chartBestSeller = null;
-		} catch (e) {}
-	}
-} */
 
 async function apiFetch(path, opts = {}) {
 	const cfg = Object.assign({}, opts);
