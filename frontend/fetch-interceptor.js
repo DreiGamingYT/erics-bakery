@@ -49,24 +49,9 @@
 			}).catch(() => {});
 		}
 
-		// ── 3a. Signup → pending account ─────────────────────────────────────
-		if (method === 'POST' && /\/api\/auth\/signup$/.test(url) && res.ok) {
-			const cloned = res.clone();
-			try {
-				const data = await cloned.json();
-				if (data && data.pending === true) {
-					setTimeout(() => {
-						if (typeof window._showPendingApprovalOverlay === 'function')
-							window._showPendingApprovalOverlay(data.message);
-					}, 60);
-					// Return a synthetic 400 so app.js doesn't try to setSession(undefined)
-					return new Response(
-						JSON.stringify({ message: '' }),
-						{ status: 400, headers: { 'Content-Type': 'application/json' } }
-					);
-				}
-			} catch (_) {}
-		}
+		// ── 3a. Signup → handled by account-activation.js directly ──────────
+		// (removed interception — account-activation.js owns the signup flow)
+
 
 		// ── 3b. Login → blocked account ──────────────────────────────────────
 		if (method === 'POST' && /\/api\/auth\/login$/.test(url) && res.status === 403) {
