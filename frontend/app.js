@@ -695,6 +695,8 @@ let DB = {
 
 let chartStock = null;
 let chartBestSeller = null;
+let chartSalesTimeline = null;
+let chartIngredientUsage = null;
 
 const ACCOUNTS_KEY = 'bakery_accounts';
 const SESSION_KEY = 'bakery_session';
@@ -8151,100 +8153,7 @@ if (document.readyState === 'loading') {
 
 })();
 
-function renderKpiList(container, items) {
-	container.innerHTML = '';
-	const list = document.createElement('ul');
-	list.style.listStyle = 'none';
-	list.style.margin = '0';
-	list.style.padding = '6px 4px';
-	list.style.maxHeight = '38vh';
-	list.style.overflow = 'auto';
-	if (!items || items.length === 0) {
-		const li = document.createElement('li');
-		li.className = 'muted';
-		li.style.padding = '8px';
-		li.textContent = 'No items';
-		list.appendChild(li);
-	} else {
-		items.slice(0, 200).forEach(it => {
-			const li = document.createElement('li');
-			li.style.padding = '8px';
-			li.style.borderRadius = '8px';
-			li.style.fontWeight = '700';
-			li.style.display = 'flex';
-			li.style.justifyContent = 'space-between';
-			li.style.gap = '12px';
-			li.style.alignItems = 'center';
-			li.style.borderBottom = '1px solid rgba(0,0,0,0.04)';
-			const left = document.createElement('div');
-			left.style.overflow = 'hidden';
-			left.style.textOverflow = 'ellipsis';
-			left.style.whiteSpace = 'nowrap';
-			left.textContent = it.name || '(unnamed)';
-			const right = document.createElement('div');
-			right.style.opacity = '0.95';
-			right.textContent = (typeof it.qty !== 'undefined' ? `${it.qty}${it.unit ? ' ' + it.unit : ''}` : '');
-			li.appendChild(left);
-			li.appendChild(right);
-			list.appendChild(li);
-		});
-	}
-	container.appendChild(list);
-}
-async function initEquipmentKpi() {
-	try {
-		const el = document.getElementById('kpi-equipment');
-		if (!el) return;
-		const card = el.closest('.kpi-card') ||
-			el.parentElement;
-		ensureKpiPopContainers(card);
-		let items = [];
-		try {
-			const res = await fetch('/api/ingredients?limit=1000&page=1', {
-				credentials: 'include'
-			});
-			let json = null;
-			if (res.ok) {
-				json = await res.json();
-				if (Array.isArray(json.items)) {
-					items = json.items.filter(i => (i.type && String(i.type).toLowerCase() === 'equipment'));
-				}
-			}
-		} catch (e) {
-			console.error('Failed to fetch equipment items:', e);
-		}
-		renderKpiList(el, items);
-		try {
-			if (items.length === 0) {
-				const res = await fetch('/api/ingredients?limit=1000&page=1', {
-					credentials: 'include'
-				});
-				let json = null;
-				if (res.ok) {
-					json = await res.json();
-					if (Array.isArray(json.items)) {
-						items = json.items.filter(i => {
-							const name = (i.name || '').toString().toLowerCase();
-							return name.includes('tool') || name.includes('equipment');
-						});
-					}
-				}
-			}
-		} catch (e) {
-			console.error('Failed to fetch equipment items (fallback):', e);
-		}
-		el.textContent = items.length;
-		renderKpiList(card.querySelector('.kpi-popover'), items);
-		renderKpiList(card.querySelector('.kpi-popover-mobile'), items);
-	} catch (e) {
-		console.error('initEquipmentKpi error:', e);
-	}
-}
-document.addEventListener('DOMContentLoaded', () => {
-	initEquipmentKpi();
-	window.addEventListener('load', initEquipmentKpi);
-	window.addEventListener('resize', initEquipmentKpi);
-});
+// [duplicate renderKpiList + initEquipmentKpi removed — canonical version lives inside the KPI IIFE above]
 (function() {
 	async function fetchJson(url) {
 		const res = await fetch(url, {
@@ -8510,7 +8419,7 @@ document.addEventListener('DOMContentLoaded', () => {
 		container.appendChild(ul);
 	}
 
-})
+})();
 
 (function() {
 	async function apiFetchSafe(url, opts = {}) {
