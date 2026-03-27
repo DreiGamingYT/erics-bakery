@@ -1690,9 +1690,7 @@ function updateDateTime() {
 		minute: '2-digit'
 	});
 }
-if (!window._dateTimeInterval) {
-	window._dateTimeInterval = setInterval(updateDateTime, 1000);
-}
+setInterval(updateDateTime, 1000);
 updateDateTime();
 
 function setupSidebarToggle() {
@@ -3830,9 +3828,7 @@ function checkScheduleReminders() {
 	});
 	if (changed) saveAllSchedules(all);
 }
-if (!window._scheduleReminderInterval) {
-	window._scheduleReminderInterval = setInterval(checkScheduleReminders, 30000);
-}
+setInterval(checkScheduleReminders, 30000);
 document.addEventListener('DOMContentLoaded', () => setTimeout(checkScheduleReminders, 2000));
 
 /* ── Open schedule modal for a date ── */
@@ -4078,9 +4074,7 @@ function _initNotifBell() {
 	}
 
 	// Re-render every 60 s to keep relative timestamps fresh
-	if (!window._notifPanelInterval) {
-		window._notifPanelInterval = setInterval(_renderNotifPanel, 60000);
-	}
+	setInterval(_renderNotifPanel, 60000);
 	_renderNotifPanel();
 }
 
@@ -5657,8 +5651,6 @@ async function loadRemoteInventory() {
 function startApp() {
 	showApp(true);
 	showOverlay(false);
-	const _firstRun = !window._startAppRan;
-	window._startAppRan = true;
 	loadRemoteInventory().catch(() => {});
 	const user = getSession() || {
 		name: 'Guest',
@@ -5783,7 +5775,7 @@ function startApp() {
 		const next = um.classList.toggle('hidden');
 		um.setAttribute('aria-hidden', next);
 	};
-	if (_firstRun) document.addEventListener('click', (e) => {
+	document.addEventListener('click', (e) => {
 		const um = q('userMenu'),
 			badge = q('userBadge');
 		if (!um || !badge) return;
@@ -5812,7 +5804,7 @@ function startApp() {
 		notify('Bakery settings saved');
 	});
 	if (q('modalClose')) q('modalClose').addEventListener('click', closeModal);
-	if (_firstRun) document.addEventListener('keydown', (e) => {
+	document.addEventListener('keydown', (e) => {
 		if (e.key === 'Escape') closeModal();
 	});
 
