@@ -883,7 +883,7 @@ const PERMISSIONS = {
 		calendar: true,   // Bakers need to see the schedule
 		profile: true,    // Bakers should manage their own profile/password
 		inventory: true,
-		reports: false,
+		reports: true,
 		settings: true,
 		users: false
 	},
