@@ -1,24 +1,5 @@
-/**
- * account-activation.js
- * Handles two features:
- *
- *  1. ADMIN APPROVAL PANEL — injects a "Pending Approvals" card into the User
- *     Management / Settings view so admins can approve or reject new signups.
- *
- *  2. LOGOUT CONFIRMATION MODAL — replaces the instant logout with a polished
- *     confirmation popup; the API call fires in the background so there's zero
- *     lag on the UI side.
- *
- *  3. SIGNUP PENDING SCREEN — after signup, instead of auto-logging in, shows
- *     a friendly "pending approval" banner and returns to the login panel.
- *
- * Load AFTER app.js in index.html:
- *   <script src="/account-activation.js"></script>
- */
 (function () {
 	'use strict';
-
-	// ── Helpers ────────────────────────────────────────────────────────────────
 
 	function esc(s) {
 		return String(s || '')
@@ -50,14 +31,12 @@
 		else alert(msg);
 	}
 
-	// ── Inject CSS once ────────────────────────────────────────────────────────
-
 	function injectStyles() {
 		if (document.getElementById('actStyles')) return;
 		const s = document.createElement('style');
 		s.id = 'actStyles';
 		s.textContent = `
-			/* ── Pending approval badge ── */
+
 			#pendingApprovalsCard { margin-bottom: 20px; }
 			#pendingApprovalsCard .act-badge {
 				display: inline-flex; align-items: center; gap: 5px;
@@ -82,7 +61,6 @@
 			.act-user-info span { font-size: 12px; color: var(--muted,#888); }
 			.act-actions { display: flex; gap: 6px; flex-shrink: 0; }
 
-			/* ── Logout confirmation modal ── */
 			#logoutConfirmOverlay {
 				position: fixed; inset: 0; z-index: 99800;
 				background: rgba(0,0,0,.55);
@@ -109,7 +87,6 @@
 				display: flex; gap: 10px; justify-content: center;
 			}
 
-			/* ── Pending signup notice ── */
 			#pendingSignupNotice {
 				background: linear-gradient(135deg, #fffbeb, #fef3c7);
 				border: 1px solid #fcd34d; border-radius: 14px;
@@ -122,10 +99,6 @@
 		document.head.appendChild(s);
 	}
 
-	// ══════════════════════════════════════════════════════════════════════════
-	// 1.  ADMIN PENDING APPROVALS PANEL
-	// ══════════════════════════════════════════════════════════════════════════
-
 	async function loadAndRenderPendingUsers(container) {
 		container.innerHTML = '<div class="muted small" style="padding:8px 0">Loading…</div>';
 		try {
@@ -133,12 +106,12 @@
 			const users = data.users || [];
 			if (users.length === 0) {
 				container.innerHTML = '<div class="muted small" style="padding:8px 0">✓ No accounts pending approval.</div>';
-				// Update badge
+
 				const badge = document.getElementById('pendingCountBadge');
 				if (badge) badge.style.display = 'none';
 				return;
 			}
-			// Update badge
+
 			const badge = document.getElementById('pendingCountBadge');
 			if (badge) { badge.textContent = `${users.length} pending`; badge.style.display = ''; }
 
@@ -167,7 +140,6 @@
 				container.appendChild(row);
 			});
 
-			// Event delegation
 			container.addEventListener('click', async (e) => {
 				const btn = e.target.closest('[data-act]');
 				if (!btn) return;
@@ -186,7 +158,7 @@
 						rowEl.style.opacity = '0';
 						setTimeout(() => {
 							rowEl.remove();
-							// Check if list is now empty
+
 							if (container.querySelectorAll('.act-user-row').length === 0) {
 								container.innerHTML = '<div class="muted small" style="padding:8px 0">✓ No accounts pending approval.</div>';
 								const badge2 = document.getElementById('pendingCountBadge');
@@ -211,7 +183,7 @@
 	function injectPendingApprovalsCard(targetEl) {
 		if (!targetEl || !isAdminOrOwner()) return;
 		if (document.getElementById('pendingApprovalsCard')) {
-			// Already injected — just refresh
+
 			const container = document.getElementById('actPendingList');
 			if (container) loadAndRenderPendingUsers(container);
 			return;
@@ -241,10 +213,6 @@
 
 		loadAndRenderPendingUsers(document.getElementById('actPendingList'));
 	}
-
-	// ══════════════════════════════════════════════════════════════════════════
-	// 2.  LOGOUT CONFIRMATION MODAL  (replaces browser-lag behavior)
-	// ══════════════════════════════════════════════════════════════════════════
 
 	function showLogoutConfirm() {
 		if (document.getElementById('logoutConfirmOverlay')) return;
@@ -282,20 +250,20 @@
 
 		document.getElementById('logoutConfirmBtn').addEventListener('click', async () => {
 			remove();
-			// Clear local session immediately
+
 			if (typeof clearSession === 'function') clearSession();
-			// Fire API logout then hard-reload — kills all timers, intervals, and listeners
+
 			try { await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }); } catch (e) {}
 			window.location.reload();
 		});
 	}
 
 	function patchLogoutButtons() {
-		// Replace all logout button listeners by cloning them (removes existing listeners)
+
 		['logoutBtn', 'userMenuLogout'].forEach(id => {
 			const el = document.getElementById(id);
 			if (!el || el._actPatched) return;
-			// Clone to strip original listeners, then re-add ours
+
 			const clone = el.cloneNode(true);
 			el.parentNode?.replaceChild(clone, el);
 			clone._actPatched = true;
@@ -307,25 +275,16 @@
 		});
 	}
 
-	// ══════════════════════════════════════════════════════════════════════════
-	// 3.  SIGNUP — intercept and show "pending" notice
-	// ══════════════════════════════════════════════════════════════════════════
-
 	function patchSignupHandler() {
 		const btn = document.getElementById('overlaySignUpBtn');
 		if (!btn || btn._actPatched) return;
 		btn._actPatched = true;
 
-		// Wrap the original click listener: if the server returns 202 + pending:true
-		// we show the pending notice instead of trying to log in.
 		const origClick = btn.onclick;
 		btn.addEventListener('click', async function interceptor(e) {
-			// We observe the network call by monkey-patching fetch temporarily
-			// — actually, we hook *after* the original handler fires via a response check.
-			// Simplest: override the overlaySignUpBtn click entirely.
+
 		}, { capture: true });
 
-		// The cleanest approach: clone and re-add our own full handler
 		const clone = btn.cloneNode(true);
 		btn.parentNode?.replaceChild(clone, btn);
 		clone._actPatched = true;
@@ -371,7 +330,7 @@
 				}
 
 				if (data.pending) {
-					// Show success/pending screen
+
 					showPendingNotice(username, email);
 				}
 			} catch (err) {
@@ -384,15 +343,13 @@
 	}
 
 	function showPendingNotice(username, email) {
-		// Switch back to login panel, show a friendly notice
+
 		const overlay = document.getElementById('landingOverlay');
 		if (overlay) overlay.classList.remove('signup-mode');
 
-		// Insert notice into login form area
 		const loginPanel = document.getElementById('overlayLogin') || document.getElementById('loginForm');
 		if (!loginPanel) return;
 
-		// Remove any old notice
 		document.getElementById('pendingSignupNotice')?.remove();
 
 		const notice = document.createElement('div');
@@ -406,25 +363,19 @@
 			</p>`;
 		loginPanel.insertBefore(notice, loginPanel.firstChild);
 
-		// Auto-dismiss after 12 seconds
 		setTimeout(() => {
 			notice.style.transition = 'opacity .4s ease';
 			notice.style.opacity = '0';
 			setTimeout(() => notice.remove(), 450);
 		}, 12000);
 
-		// Pre-fill username
 		const uInput = document.getElementById('overlay-username');
 		if (uInput) uInput.value = username;
 	}
 
-	// ══════════════════════════════════════════════════════════════════════════
-	// 4.  HOOK INTO populateSettings / startApp
-	// ══════════════════════════════════════════════════════════════════════════
-
 	function tryInjectApprovalPanel() {
 		if (!isAdminOrOwner()) return;
-		// Look for the user management section in settings/admin view
+
 		const candidates = [
 			document.getElementById('userManagementSection'),
 			document.getElementById('view-settings'),
@@ -446,43 +397,49 @@
 		window.populateSettings._actPatched = true;
 	}
 
-	// ══════════════════════════════════════════════════════════════════════════
-	// 5.  INIT
-	// ══════════════════════════════════════════════════════════════════════════
-
 	function init() {
 		injectStyles();
 
-		// Patch logout buttons once DOM is ready
-		const patchLogout = () => patchLogoutButtons();
+		const domObserver = new MutationObserver(() => {
+			const logoutBtn = document.getElementById('logoutBtn');
+			const signupBtn = document.getElementById('overlaySignUpBtn');
+			if (logoutBtn && !logoutBtn._actPatched) patchLogoutButtons();
+			if (signupBtn && !signupBtn._actPatched) patchSignupHandler();
+
+			if (logoutBtn?._actPatched && signupBtn?._actPatched) domObserver.disconnect();
+		});
+
+		const startDomObserver = () => {
+
+			patchLogoutButtons();
+			patchSignupHandler();
+
+			domObserver.observe(document.body, { childList: true, subtree: true });
+		};
+
 		if (document.readyState === 'loading') {
-			document.addEventListener('DOMContentLoaded', patchLogout);
+			document.addEventListener('DOMContentLoaded', startDomObserver);
 		} else {
-			patchLogout();
-			// Also try after a short delay in case startApp re-renders the sidebar
-			setTimeout(patchLogout, 800);
-			setTimeout(patchLogout, 2000);
+			startDomObserver();
 		}
 
-		// Patch signup button
-		const patchSignup = () => patchSignupHandler();
-		if (document.readyState === 'loading') {
-			document.addEventListener('DOMContentLoaded', patchSignup);
+		if (window.populateSettings) {
+			patchPopulateSettings();
 		} else {
-			patchSignup();
-			setTimeout(patchSignup, 500);
-		}
+			let _populateSettingsValue;
+			Object.defineProperty(window, 'populateSettings', {
+				configurable: true,
+				get() { return _populateSettingsValue; },
+				set(fn) {
+					_populateSettingsValue = fn;
 
-		// Poll until app.js functions exist, then patch
-		let attempts = 0;
-		const poll = setInterval(() => {
-			if (window.populateSettings && !window.populateSettings._actPatched) patchPopulateSettings();
-			const logoutPatched = document.getElementById('logoutBtn')?._actPatched;
-			const signupPatched = document.getElementById('overlaySignUpBtn')?._actPatched;
-			if (!signupPatched) patchSignupHandler();
-			if (!logoutPatched) patchLogoutButtons();
-			if ((window.populateSettings?._actPatched) || ++attempts > 200) clearInterval(poll);
-		}, 100);
+					Object.defineProperty(window, 'populateSettings', {
+						configurable: true, writable: true, value: fn
+					});
+					patchPopulateSettings();
+				}
+			});
+		}
 	}
 
 	init();

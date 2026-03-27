@@ -1,30 +1,17 @@
-/**
- * auth-enhancements.js
- * Adds three security features to the bakery app:
- *   1. Idle auto-logout  — warns at 25 min, logs out at 30 min
- *   2. Password strength meter — on profile change-password + signup modal
- *   3. Own sessions view — "Login Sessions" card injected into the profile page
- *
- * Works alongside notifications.js without conflicts.
- * Load this AFTER app.js and notifications.js in index.html.
- */
 (function () {
 	'use strict';
 
-	// ═══════════════════════════════════════════════════════════════════════════
-	// 1. IDLE AUTO-LOGOUT
-	// ═══════════════════════════════════════════════════════════════════════════
+	const IDLE_WARN_MS  = 1 * 60 * 1000; 
 
-	const IDLE_WARN_MS  = 1 * 60 * 1000; // 25 minutes → show warning modal
-	const IDLE_LIMIT_MS = 5 * 60 * 1000; // 30 minutes → force logout
-	const WARN_SECONDS  = Math.round((IDLE_LIMIT_MS - IDLE_WARN_MS) / 1000); // countdown start (300s)
+	const IDLE_LIMIT_MS = 5 * 60 * 1000; 
+
+	const WARN_SECONDS  = Math.round((IDLE_LIMIT_MS - IDLE_WARN_MS) / 1000); 
 
 	let idleWarnTimer     = null;
 	let idleLogoutTimer   = null;
 	let warnModalEl       = null;
 	let countdownInterval = null;
 
-	/* Check login state via app.js helper if available */
 	function userIsLoggedIn() {
 		try {
 			if (typeof isLoggedIn === 'function') return isLoggedIn();
@@ -45,7 +32,8 @@
 
 	function resetIdleTimers() {
 		clearIdleTimers();
-		if (warnModalEl) return; // don't reset while warning is visible — user must click "I'm still here"
+		if (warnModalEl) return; 
+
 		if (!userIsLoggedIn()) return;
 
 		idleWarnTimer   = setTimeout(showIdleWarning, IDLE_WARN_MS);
@@ -85,7 +73,6 @@
 			'animation:idleFadeIn .2s ease'
 		].join(';');
 
-		// Inject keyframe once
 		if (!document.getElementById('idleKf')) {
 			const kf = document.createElement('style');
 			kf.id = 'idleKf';
@@ -128,13 +115,11 @@
 		document.body.appendChild(warnModalEl);
 		document.getElementById('idleStayBtn').focus();
 
-		// "I'm still here" — dismiss and reset all timers
 		document.getElementById('idleStayBtn').onclick = () => {
 			dismissIdleWarning();
 			resetIdleTimers();
 		};
 
-		// Update countdown every second
 		const countEl = document.getElementById('idleCountdown');
 		countdownInterval = setInterval(() => {
 			secondsLeft = Math.max(0, secondsLeft - 1);
@@ -150,16 +135,15 @@
 			if (throttle) return;
 			throttle = setTimeout(() => {
 				throttle = null;
-				if (!warnModalEl) resetIdleTimers(); // only reset if warning isn't showing
+				if (!warnModalEl) resetIdleTimers(); 
+
 			}, 400);
 		}
 
 		EVENTS.forEach(evt => document.addEventListener(evt, onActivity, { passive: true }));
 
-		// Start timers if user is already logged in on page load
 		if (userIsLoggedIn()) resetIdleTimers();
 
-		// Restart when user logs in
 		const _origStart = window.startApp;
 		if (typeof _origStart === 'function' && !_origStart._idlePatched) {
 			window.startApp = function () {
@@ -170,7 +154,6 @@
 			window.startApp._idlePatched = true;
 		}
 
-		// Stop timers cleanly on logout
 		const _origLogout = window.performLogout;
 		if (typeof _origLogout === 'function' && !_origLogout._idlePatched) {
 			window.performLogout = function () {
@@ -181,35 +164,7 @@
 			window.performLogout._idlePatched = true;
 		}
 
-		// Also handle SESSION_INVALIDATED 401 responses (from token_version mismatch)
-		const _origFetch = window.fetch.bind(window);
-		if (!window.fetch._idlePatched) {
-			window.fetch = async function (input, init) {
-				const res = await _origFetch(input, init);
-				if (res.status === 401) {
-					res.clone().json().then(body => {
-						if (body && body.code === 'SESSION_INVALIDATED') {
-							dismissIdleWarning();
-							clearIdleTimers();
-							if (typeof notify === 'function') {
-								notify('Your session was invalidated — please sign in again.', { type: 'warn' });
-							}
-							setTimeout(() => {
-								if (typeof performLogout === 'function') performLogout();
-							}, 1200);
-						}
-					}).catch(() => {});
-				}
-				return res;
-			};
-			window.fetch._idlePatched = true;
-		}
 	}
-
-
-	// ═══════════════════════════════════════════════════════════════════════════
-	// 2. PASSWORD STRENGTH METER
-	// ═══════════════════════════════════════════════════════════════════════════
 
 	const STRENGTH_TIERS = [
 		{ maxScore: 1, label: 'Very weak',  color: '#ef4444', pct: 14  },
@@ -231,7 +186,6 @@
 		return STRENGTH_TIERS.find(t => score <= t.maxScore) || STRENGTH_TIERS[STRENGTH_TIERS.length - 1];
 	}
 
-	/* Wire up the strength meter that already exists in the profile HTML */
 	function wireProfileStrengthMeter() {
 		const input = document.getElementById('newPassword');
 		const bar   = document.getElementById('passStrengthBar');
@@ -253,7 +207,6 @@
 		});
 	}
 
-	/* Inject an inline strength meter next to any password input that lacks one */
 	function injectStrengthMeter(input) {
 		if (!input || input._strengthWired) return;
 		input._strengthWired = true;
@@ -283,24 +236,17 @@
 		});
 	}
 
-	/* Watch for dynamically created password inputs (signup modal, reset modal) */
 	function watchForModalPasswords() {
 		const observer = new MutationObserver(() => {
-			// Signup overlay (always present in DOM)
+
 			const suPass = document.getElementById('overlay-su-password');
 			if (suPass && !suPass._strengthWired) injectStrengthMeter(suPass);
 
-			// Reset-password modal (injected by openResetPasswordModal)
 			const resetPass = document.getElementById('resetNewPassword');
 			if (resetPass && !resetPass._strengthWired) injectStrengthMeter(resetPass);
 		});
 		observer.observe(document.body, { childList: true, subtree: true });
 	}
-
-
-	// ═══════════════════════════════════════════════════════════════════════════
-	// 3. OWN SESSIONS VIEW (injected into Profile page)
-	// ═══════════════════════════════════════════════════════════════════════════
 
 	async function fetchMySessions() {
 		try {
@@ -310,7 +256,8 @@
 			return data.sessions || [];
 		} catch (e) {
 			console.warn('[auth-enhancements] fetchMySessions failed:', e.message);
-			return null; // null = error, [] = empty
+			return null; 
+
 		}
 	}
 
@@ -321,7 +268,6 @@
 		let icon    = '💻';
 		let os      = 'Unknown OS';
 
-		// Browser (order matters — check Edge before Chrome, Opera before Chrome)
 		if (/Edg\//.test(ua))             { browser = 'Edge';              icon = '🌐'; }
 		else if (/OPR\//.test(ua))        { browser = 'Opera';             icon = '🎭'; }
 		else if (/Chrome\//.test(ua))     { browser = 'Chrome';            icon = '🌐'; }
@@ -329,7 +275,6 @@
 		else if (/Safari\//.test(ua))     { browser = 'Safari';            icon = '🧭'; }
 		else if (/MSIE|Trident/.test(ua)) { browser = 'Internet Explorer'; icon = '🌐'; }
 
-		// OS
 		if (/Windows NT/.test(ua))             os = 'Windows';
 		else if (/Mac OS X/.test(ua))          os = 'macOS';
 		else if (/Android/.test(ua))           os = 'Android';
@@ -392,7 +337,7 @@
 	}
 
 	function injectSessionsCard() {
-		// Only inject once; anchor after the #action card inside the profile-right column
+
 		if (document.getElementById('mySessionsSection')) return;
 		const actionCard = document.getElementById('action');
 		if (!actionCard) return;
@@ -436,44 +381,34 @@
 		await refreshSessions();
 	}
 
-	// Re-load sessions every time the profile view is opened
 	function hookProfileNav() {
 		document.addEventListener('click', (e) => {
 			const navBtn = e.target.closest('.nav-item[data-view="profile"]');
 			if (navBtn) {
-				// Small delay so populateProfile() has time to run first
+
 				setTimeout(initSessionsCard, 250);
 			}
 		}, true);
 	}
 
-
-	// ═══════════════════════════════════════════════════════════════════════════
-	// INIT
-	// ═══════════════════════════════════════════════════════════════════════════
-
 	function init() {
-		// ── 1. Idle timer ──────────────────────────────────────────────────────
+
 		if (document.readyState === 'loading') {
 			document.addEventListener('DOMContentLoaded', initIdleTimer);
 		} else {
 			initIdleTimer();
 		}
 
-		// ── 2. Password strength ──────────────────────────────────────────────
-		// Profile page elements are static — wire them up as soon as DOM is ready
 		if (document.readyState === 'loading') {
 			document.addEventListener('DOMContentLoaded', wireProfileStrengthMeter);
 		} else {
 			wireProfileStrengthMeter();
 		}
-		// Signup and reset password inputs are created dynamically — watch for them
+
 		watchForModalPasswords();
 
-		// ── 3. Sessions card ──────────────────────────────────────────────────
 		hookProfileNav();
 
-		// If profile is already visible on load (rare but possible), inject immediately
 		if (document.readyState !== 'loading') {
 			const profileView = document.getElementById('view-profile');
 			if (profileView && !profileView.classList.contains('hidden')) {

@@ -1,8 +1,6 @@
 (function () {
 	'use strict';
 
-	// ── API ───────────────────────────────────────────────────────────────────
-
 	async function apiFetch(url, opts = {}) {
 		const res = await fetch(url, Object.assign({
 			credentials: 'include',
@@ -35,8 +33,6 @@
 		return apiFetch('/api/notifications/send-email', { method: 'POST', body: JSON.stringify({ type }) });
 	}
 
-	// ── Browser notification helpers ──────────────────────────────────────────
-
 	function permissionStatus() {
 		if (!('Notification' in window)) return 'unsupported';
 		return Notification.permission;
@@ -52,8 +48,6 @@
 		if (permissionStatus() !== 'granted') return;
 		try { new Notification(title, { body, icon: '/favicon.ico' }); } catch (e) {}
 	}
-
-	// ── Core alert checker ────────────────────────────────────────────────────
 
 	let lastAlertKey = '';
 	let lastEmailKey = '';
@@ -115,15 +109,10 @@
 		pollTimer = setInterval(() => checkAndFireAlerts(prefs), 5 * 60 * 1000);
 	}
 
-	// ── Stock-change alert recheck ───────────────────────────────────────────
-	// Exposed on window so fetch-interceptor.js can call it without wrapping fetch.
-	window._notifLastAlertKey = lastAlertKey;
 	window._checkAlertsNow = () => {
 				lastAlertKey = '';
 				checkAndFireAlerts(currentPrefs, { forceRecheck: true });
 	};
-
-	// ── UI helpers ────────────────────────────────────────────────────────────
 
 	function q(id) { return document.getElementById(id); }
 
@@ -181,8 +170,6 @@
 		updatePermUI();
 	}
 
-	// ── Settings UI wiring ────────────────────────────────────────────────────
-
 	function initNotifSettings() {
 		const saveBtn     = q('saveNotifPrefs');
 		const pushToggle  = q('prefPushNotif');
@@ -238,8 +225,6 @@
 		};
 	}
 
-	// ── Load prefs from server and apply to UI ────────────────────────────────
-
 	async function applyServerPrefs() {
 		try {
 			const prefs = await loadPrefs();
@@ -253,8 +238,6 @@
 		}
 	}
 
-	// ── Daily digest ──────────────────────────────────────────────────────────
-
 	async function maybeSendDailyDigest(prefs) {
 		if (!prefs.emailEnabled || !prefs.emailDigest) return;
 		const today = new Date().toISOString().slice(0, 10);
@@ -264,10 +247,6 @@
 		if (localStorage.getItem(key)) return;
 		try { await sendEmail('digest'); localStorage.setItem(key, '1'); } catch {}
 	}
-
-	// ── Patch populateSettings — called every time Settings tab is opened ─────
-	// This is the ONLY place we need to hook: when the user opens Settings,
-	// fetch fresh prefs from server (which now correctly reads the DB) and apply.
 
 	function patchPopulateSettings() {
 		if (window.populateSettings?._notifPatched) return;
@@ -280,8 +259,6 @@
 		window.populateSettings._notifPatched = true;
 	}
 
-	// ── Also patch populateProfile ────────────────────────────────────────────
-
 	function patchPopulateProfile() {
 		if (window.populateProfile?._notifPatched) return;
 		const orig = window.populateProfile;
@@ -293,10 +270,8 @@
 		window.populateProfile._notifPatched = true;
 	}
 
-	// ── Init ──────────────────────────────────────────────────────────────────
-
 	function init() {
-		// app.js loads AFTER notifications.js, so poll until functions exist
+
 			let attempts = 0;
 			const tryPatch = setInterval(() => {
 			if (window.populateSettings && !window.populateSettings._notifPatched) patchPopulateSettings();

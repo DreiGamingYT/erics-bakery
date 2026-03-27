@@ -1,7 +1,5 @@
-/* sw.js — Eric's Bakery offline service worker */
 const CACHE_NAME = 'erics-bakery-v1';
 
-// Core assets to pre-cache on install
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',
@@ -14,10 +12,39 @@ const PRECACHE_ASSETS = [
   'https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap',
 ];
 
-// API paths — network-first with cache fallback
 const API_PREFIX = '/api/';
 
-// ── Install: pre-cache shell assets ────────────────────────────────────────
+const API_NO_CACHE = [
+  '/api/auth/',
+  '/api/users/',
+  '/api/admin/',
+  '/api/notifications/prefs',
+];
+
+const API_CACHE_MAX_AGE_MS = 60 * 1000;
+
+function isNoCacheRoute(pathname) {
+  return API_NO_CACHE.some(prefix => pathname.startsWith(prefix));
+}
+
+async function putWithTimestamp(cache, request, response) {
+  const headers = new Headers(response.headers);
+  headers.set('x-sw-cached-at', Date.now().toString());
+  const timestamped = new Response(response.body, {
+    status:     response.status,
+    statusText: response.statusText,
+    headers,
+  });
+  await cache.put(request, timestamped);
+}
+
+function getFreshCached(cached) {
+  if (!cached) return null;
+  const cachedAt = parseInt(cached.headers.get('x-sw-cached-at') || '0', 10);
+  if (!cachedAt || Date.now() - cachedAt > API_CACHE_MAX_AGE_MS) return null;
+  return cached;
+}
+
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache => {
@@ -28,7 +55,6 @@ self.addEventListener('install', event => {
   );
 });
 
-// ── Activate: clean up old caches ──────────────────────────────────────────
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(keys =>
@@ -37,30 +63,39 @@ self.addEventListener('activate', event => {
   );
 });
 
-// ── Fetch strategy ─────────────────────────────────────────────────────────
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
 
-  // Non-GET requests: always go to network (don't cache mutations)
   if (event.request.method !== 'GET') return;
 
-  // API requests: network-first, fall back to cache
   if (url.pathname.startsWith(API_PREFIX)) {
+
+    if (isNoCacheRoute(url.pathname)) return;
+
     event.respondWith(
       fetch(event.request.clone())
-        .then(response => {
+        .then(async response => {
           if (response && response.ok) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+            const cache = await caches.open(CACHE_NAME);
+            await putWithTimestamp(cache, event.request, response.clone());
           }
           return response;
         })
-        .catch(() => caches.match(event.request))
+        .catch(async () => {
+          const cache  = await caches.open(CACHE_NAME);
+          const cached = await cache.match(event.request);
+          const fresh  = getFreshCached(cached);
+          if (fresh) return fresh;
+
+          return new Response(
+            JSON.stringify({ error: 'Offline — cached data unavailable or expired.' }),
+            { status: 503, headers: { 'Content-Type': 'application/json' } }
+          );
+        })
     );
     return;
   }
 
-  // Navigation & static assets: stale-while-revalidate
   event.respondWith(
     caches.open(CACHE_NAME).then(cache =>
       cache.match(event.request).then(cached => {

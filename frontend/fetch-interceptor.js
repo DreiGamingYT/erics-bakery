@@ -1,16 +1,3 @@
-/**
- * fetch-interceptor.js
- * ONE single window.fetch wrapper that handles all cross-cutting concerns:
- *   1. Session invalidation (401 SESSION_INVALIDATED) — from auth-enhancements.js
- *   2. Stock-change alert recheck              — from notifications.js
- *   3. Signup pending / login blocked checks   — from account-activation.js
- *
- * Load this FIRST, before app.js and all other scripts.
- * Remove the individual window.fetch = ... blocks from:
- *   - notifications.js      (already done in the updated version)
- *   - auth-enhancements.js  (already done in the updated version)
- *   - account-activation.js (already done in the updated version)
- */
 (function () {
 	'use strict';
 
@@ -26,7 +13,6 @@
 
 		const res = await _orig(input, init);
 
-		// ── 1. Session invalidated (401) ──────────────────────────────────────
 		if (res.status === 401) {
 			res.clone().json().then(body => {
 				if (body && body.code === 'SESSION_INVALIDATED') {
@@ -41,19 +27,12 @@
 			}).catch(() => {});
 		}
 
-		// ── 2. Stock change → recheck alerts ─────────────────────────────────
 		if (STOCK_RE.test(url) && res.ok) {
 			res.clone().json().then(() => {
-				if (window._notifLastAlertKey !== undefined) window._notifLastAlertKey = '';
 				if (typeof window._checkAlertsNow === 'function') window._checkAlertsNow();
 			}).catch(() => {});
 		}
 
-		// ── 3a. Signup → handled by account-activation.js directly ──────────
-		// (removed interception — account-activation.js owns the signup flow)
-
-
-		// ── 3b. Login → blocked account ──────────────────────────────────────
 		if (method === 'POST' && /\/api\/auth\/login$/.test(url) && res.status === 403) {
 			res.clone().json().then(data => {
 				if (!data) return;
