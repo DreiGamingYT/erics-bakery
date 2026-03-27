@@ -230,6 +230,44 @@ function hasRole(user, roles) {
 	return roles.map(x => String(x).toLowerCase()).includes(r);
 }
 
+// ── Background cleanup ────────────────────────────────────────────────────
+const CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000; // every 6 hours
+const MAGIC_LINK_KEEP_DAYS = 7;
+const SESSION_KEEP_DAYS = 30;
+const ACTIVITY_KEEP_DAYS = 90;
+
+async function cleanupOldRows() {
+	try {
+		const [magicLinks] = await pool.query(
+			`DELETE FROM magic_links
+			 WHERE (used = 1 AND created_at < NOW() - INTERVAL ? DAY)
+			    OR expires_at < NOW() - INTERVAL ? DAY`,
+			[MAGIC_LINK_KEEP_DAYS, MAGIC_LINK_KEEP_DAYS]
+		);
+
+		const [sessions] = await pool.query(
+			`DELETE FROM user_sessions
+			 WHERE (logged_out_at IS NOT NULL AND logged_out_at < NOW() - INTERVAL ? DAY)
+			    OR (logged_out_at IS NULL AND logged_in_at < NOW() - INTERVAL ? DAY)`,
+			[SESSION_KEEP_DAYS, SESSION_KEEP_DAYS]
+		);
+
+		const [activity] = await pool.query(
+			`DELETE FROM activity
+			 WHERE time < NOW() - INTERVAL ? DAY`,
+			[ACTIVITY_KEEP_DAYS]
+		);
+
+		console.info(
+			`[cleanup] magic_links=${magicLinks?.affectedRows || 0}, ` +
+			`sessions=${sessions?.affectedRows || 0}, ` +
+			`activity=${activity?.affectedRows || 0}`
+		);
+	} catch (err) {
+		console.warn('[cleanup] failed:', err && err.message ? err.message : err);
+	}
+}
+
 app.post('/api/auth/signup', async (req, res) => {
 	try {
 		const { username, password, role = 'Baker', name = null, email = '' } = req.body;
@@ -1002,19 +1040,17 @@ app.post('/api/ingredients/:id/stock', authMiddleware, async (req, res) => {
 });
 app.get('/api/activity', authMiddleware, async (req, res) => {
 	try {
-		const page  = Math.max(1, Number(req.query.page  || 1));
-		const limit = Math.max(1, Math.min(2000, Number(req.query.limit || 50)));
+		const page  = Math.max(1, Number(req.query.page || 1));
+		const limit = Math.max(1, Math.min(500, Number(req.query.limit || 50))); // safer cap
 		const offset = (page - 1) * limit;
 
-		// Optional date-range filter (YYYY-MM-DD strings sent by the frontend)
-		const startParam = req.query.start || null; // e.g. '2026-03-09'
-		const endParam   = req.query.end   || null;
+		const startParam = req.query.start || null;
+		const endParam   = req.query.end || null;
 
 		const conditions = [];
-		const params     = [];
+		const params = [];
 
 		if (startParam) {
-			// Cover the whole start day in UTC
 			conditions.push('a.time >= ?');
 			params.push(startParam + ' 00:00:00');
 		}
@@ -1028,11 +1064,11 @@ app.get('/api/activity', authMiddleware, async (req, res) => {
 		const [rows] = await pool.query(
 			`SELECT a.id, a.ingredient_id, a.user_id, a.action, a.text, a.time,
 			        u.username AS username, i.name AS ingredient_name
-       FROM activity a
-       LEFT JOIN users u ON u.id = a.user_id
-       LEFT JOIN ingredients i ON i.id = a.ingredient_id
+			 FROM activity a
+			 LEFT JOIN users u ON u.id = a.user_id
+			 LEFT JOIN ingredients i ON i.id = a.ingredient_id
 			 ${where}
-       ORDER BY a.time DESC
+			 ORDER BY a.time DESC
 			 LIMIT ? OFFSET ?`,
 			[...params, limit, offset]
 		);
@@ -2156,6 +2192,16 @@ process.on('unhandledRejection', (reason) => {
 	console.error('[unhandledRejection]', reason && reason.message ? reason.message : reason);
 });
 
-runStartupMigrations().then(() => {
+runStartupMigrations().then(async () => {
+	await cleanupOldRows();
+
+	const timer = setInterval(() => {
+		cleanupOldRows().catch(err => {
+			console.warn('[cleanup] interval failed:', err && err.message ? err.message : err);
+		});
+	}, CLEANUP_INTERVAL_MS);
+
+	if (typeof timer.unref === 'function') timer.unref();
+
 	app.listen(PORT, () => console.log('API + static server listening on', PORT));
 });

@@ -32,6 +32,8 @@
 	let ingredientsCache = [];
 	let selectedIngredient = null;
 	let activityCache = [];
+	let activityLoaded = false;
+
 	// ── Chart type toggle ────────────────────────────────────────────────────
 	function injectChartToggle() {
 		if (document.getElementById('chartTypeToggle')) return;
@@ -71,9 +73,6 @@
 		attachUIEvents();
 		injectChartToggle();
 		await loadIngredients();
-
-		await loadActivity();
-
 		renderList();
 	}
 
@@ -118,14 +117,19 @@
 
 	async function loadActivity() {
 		try {
-
-			const data = await apiFetchSafe('/api/activity?limit=2000&page=1');
+			const data = await apiFetchSafe('/api/activity?limit=500&page=1');
 			activityCache = (data && data.items) ? data.items : [];
-			window._bakeryActivityCache = activityCache; // shared cache for global-search
+			window._bakeryActivityCache = activityCache;
 		} catch (e) {
 			console.error('loadActivity err', e);
 			activityCache = [];
 		}
+	}
+
+	async function ensureActivityLoaded() {
+		if (activityLoaded) return;
+		await loadActivity();
+		activityLoaded = true;
 	}
 
 	function renderList(filter = '') {
@@ -371,14 +375,12 @@
 
 	async function renderStockForSelected() {
 		if (!selectedIngredient) return;
-		const {
-			start,
-			end
-		} = parseDateInputs();
+		const { start, end } = parseDateInputs();
 
-		if (!activityCache || activityCache.length === 0) {
-			await loadActivity();
+		if (!activityLoaded) {
+			await ensureActivityLoaded();
 		}
+
 		const rows = filterActivityForIngredient(selectedIngredient.id, start, end);
 		const currentQty = selectedIngredient.qty != null ? Number(selectedIngredient.qty) : null;
 
